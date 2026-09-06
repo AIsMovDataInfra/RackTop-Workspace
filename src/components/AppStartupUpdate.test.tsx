@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import App from '../App'
 import { api } from '../services/api'
 import { loadCachedUpdate, saveCachedUpdate, UPDATE_CHECK_INTERVAL_MS } from '../utils/updateCheck'
+import packageInfo from '../../package.json'
 
 vi.mock('./SshTerminal', () => ({ SshTerminal: () => null }))
 
@@ -90,7 +91,7 @@ describe('App startup update check', () => {
     expect(releaseNotes).toBeDefined()
     await act(async () => releaseNotes?.click())
     expect(open).toHaveBeenCalledWith(
-      'https://github.com/Tongzh-SEU/RackTop/releases/tag/v1.25.4',
+      `https://github.com/Tongzh-SEU/RackTop/releases/tag/v${packageInfo.version}`,
       '_blank',
       'noopener,noreferrer',
     )

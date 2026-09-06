@@ -1,3 +1,5 @@
+> 此分支含非官方 Ubuntu 22.04 x86_64 实验版 `1.26.0-linux.1`，安装与构建说明见 [Linux 客户端](docs/LINUX.md)。下方下载表为上游官方版本。
+
 <div align="right">
   🌐 Language:
   <kbd><strong>✔简体中文</strong></kbd>

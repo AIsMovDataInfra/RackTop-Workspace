@@ -1,10 +1,14 @@
 import { check, type DownloadEvent, type Update } from '@tauri-apps/plugin-updater'
 import { relaunch } from '@tauri-apps/plugin-process'
+import { detectAppPlatform } from '../utils/platform'
 
 export type DesktopAppUpdate = Update
 export type DesktopDownloadEvent = DownloadEvent
 
-export function checkDesktopAppUpdate() {
+export async function checkDesktopAppUpdate() {
+  if (detectAppPlatform(true, navigator.userAgent) === 'linux') {
+    throw new Error('此 Linux 构建使用手动更新；请安装同一来源提供的新版 Linux 安装包。')
+  }
   return check({ timeout: 30_000 })
 }
 

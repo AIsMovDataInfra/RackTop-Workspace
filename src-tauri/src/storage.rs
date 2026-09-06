@@ -1703,6 +1703,13 @@ mod tests {
         assert_eq!(db.list_servers().unwrap().len(), 1);
     }
 
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_password_storage_uses_secret_service_instead_of_mock_backend() {
+        let entry = keyring::Entry::new("com.racktop.test", "backend-check").unwrap();
+        assert!(entry.get_credential().is::<keyring::secret_service::SsCredential>());
+    }
+
     #[test]
     fn new_password_server_requires_a_password() {
         let dir = tempfile::tempdir().unwrap();
