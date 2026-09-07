@@ -670,6 +670,10 @@ impl Database {
                 connection.execute_batch("PRAGMA wal_checkpoint(TRUNCATE); VACUUM;").map_err(|error| error.to_string())?;
             }
         }
+        if !server_columns.contains("proxy_use_password") {
+            connection.execute("ALTER TABLE servers ADD COLUMN proxy_use_password INTEGER NOT NULL DEFAULT 0", []).map_err(|error| error.to_string())?;
+        }
+        connection.execute_batch("CREATE TABLE IF NOT EXISTS proxy_credentials (server_id TEXT PRIMARY KEY, proxy_jump TEXT NOT NULL, storage_state TEXT NOT NULL DEFAULT 'none')").map_err(|error| error.to_string())?;
         recover_interrupted_project_syncs(&connection)?;
         Ok(Self { connection: Mutex::new(connection), session_passwords: Mutex::new(HashMap::new()), credential_errors: Mutex::new(HashMap::new()), path: path.to_path_buf() })
     }
@@ -692,14 +696,14 @@ impl Database {
     pub fn list_servers(&self) -> Result<Vec<Server>, String> {
         let connection = self.connection.lock().map_err(|error| error.to_string())?;
         let mut statement = connection
-            .prepare("SELECT id,name,location,host,port,username,ssh_alias,identity_file,proxy_jump,tags_json,sampling_interval_seconds,history_retention_days,remote_history_enabled,remote_history_last_sync_at,auth_method,status,last_error,last_seen_at,sort_order FROM servers ORDER BY sort_order,name COLLATE NOCASE")
+            .prepare("SELECT id,name,location,host,port,username,ssh_alias,identity_file,proxy_jump,tags_json,sampling_interval_seconds,history_retention_days,remote_history_enabled,remote_history_last_sync_at,auth_method,status,last_error,last_seen_at,sort_order,proxy_use_password,COALESCE((SELECT storage_state!='none' FROM proxy_credentials WHERE server_id=servers.id),0) FROM servers ORDER BY sort_order,name COLLATE NOCASE")
             .map_err(|error| error.to_string())?;
         let rows = statement
             .query_map([], |row| {
                 let tags: String = row.get(9)?;
                 Ok(Server {
                     id: row.get(0)?, name: row.get(1)?, location: row.get(2)?, host: row.get(3)?, port: row.get(4)?, username: row.get(5)?,
-                    ssh_alias: row.get(6)?, identity_file: row.get(7)?, proxy_jump: row.get(8)?,
+                    ssh_alias: row.get(6)?, identity_file: row.get(7)?, proxy_jump: row.get(8)?, proxy_use_password: row.get(19)?, save_proxy_password: row.get(20)?,
                     tags: serde_json::from_str(&tags).unwrap_or_default(), sampling_interval_seconds: row.get(10)?,
                     history_retention_days: row.get(11)?, remote_history_enabled: row.get(12)?, remote_history_last_sync_at: row.get(13)?,
                     auth_method: row.get(14)?, status: row.get(15)?, last_error: row.get(16)?, last_seen_at: row.get(17)?, sort_order: row.get(18)?,
@@ -766,6 +770,17 @@ impl Database {
             return Err("SSH 端口必须在 1–65535 之间".into());
         }
         let id = draft.id.clone().unwrap_or_else(|| Uuid::new_v4().to_string());
+        let proxy_jump = draft.proxy_jump.clone().filter(|value| !value.trim().is_empty()).map(|value| value.trim().to_owned());
+        if draft.proxy_use_password {
+            if !cfg!(target_os = "linux") { return Err("独立跳板机密码目前仅支持 Linux 客户端".into()); }
+            let proxy = proxy_jump.as_deref().ok_or("请填写跳板机地址")?;
+            crate::ssh_connection::parse_jump(proxy)?;
+            let existing_proxy: Option<String> = self.connection.lock().map_err(|error| error.to_string())?
+                .query_row("SELECT proxy_jump FROM proxy_credentials WHERE server_id=?1", [&id], |row| row.get(0)).optional().map_err(|error| error.to_string())?;
+            if existing_proxy.as_deref() != Some(proxy) && draft.proxy_password.as_deref().is_none_or(str::is_empty) {
+                return Err("新增或更换跳板机时，请输入该跳板机的密码".into());
+            }
+        }
         let name = if draft.name.trim().is_empty() { draft.host.trim().to_string() } else { draft.name.trim().to_string() };
         let tags = serde_json::to_string(&draft.tags).map_err(|error| error.to_string())?;
         let connection = self.connection.lock().map_err(|error| error.to_string())?;
@@ -778,10 +793,10 @@ impl Database {
             return Err(format!("服务器已存在：{existing_name}（{}@{}:{}）", draft.username.trim(), draft.host.trim(), draft.port));
         }
         connection.execute(
-            "INSERT INTO servers (id,name,location,host,port,username,ssh_alias,identity_file,proxy_jump,tags_json,sampling_interval_seconds,history_retention_days,remote_history_enabled,auth_method,status,sort_order)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,'unknown',COALESCE((SELECT MAX(sort_order)+1 FROM servers),0))
-             ON CONFLICT(id) DO UPDATE SET name=excluded.name,location=excluded.location,host=excluded.host,port=excluded.port,username=excluded.username,ssh_alias=excluded.ssh_alias,identity_file=excluded.identity_file,proxy_jump=excluded.proxy_jump,tags_json=excluded.tags_json,sampling_interval_seconds=excluded.sampling_interval_seconds,history_retention_days=excluded.history_retention_days,remote_history_enabled=excluded.remote_history_enabled,auth_method=excluded.auth_method",
-            params![id, name, blank_to_none(draft.location), draft.host.trim(), draft.port, draft.username.trim(), blank_to_none(draft.ssh_alias), blank_to_none(draft.identity_file), blank_to_none(draft.proxy_jump), tags, draft.sampling_interval_seconds.max(2), draft.history_retention_days.max(1), draft.remote_history_enabled, draft.auth_method],
+            "INSERT INTO servers (id,name,location,host,port,username,ssh_alias,identity_file,proxy_jump,tags_json,sampling_interval_seconds,history_retention_days,remote_history_enabled,auth_method,status,sort_order,proxy_use_password)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,'unknown',COALESCE((SELECT MAX(sort_order)+1 FROM servers),0),?15)
+             ON CONFLICT(id) DO UPDATE SET name=excluded.name,location=excluded.location,host=excluded.host,port=excluded.port,username=excluded.username,ssh_alias=excluded.ssh_alias,identity_file=excluded.identity_file,proxy_jump=excluded.proxy_jump,tags_json=excluded.tags_json,sampling_interval_seconds=excluded.sampling_interval_seconds,history_retention_days=excluded.history_retention_days,remote_history_enabled=excluded.remote_history_enabled,auth_method=excluded.auth_method,proxy_use_password=excluded.proxy_use_password",
+            params![id, name, blank_to_none(draft.location), draft.host.trim(), draft.port, draft.username.trim(), blank_to_none(draft.ssh_alias), blank_to_none(draft.identity_file), blank_to_none(draft.proxy_jump), tags, draft.sampling_interval_seconds.max(2), draft.history_retention_days.max(1), draft.remote_history_enabled, draft.auth_method, draft.proxy_use_password],
         ).map_err(|error| error.to_string())?;
         drop(connection);
 
@@ -802,6 +817,7 @@ impl Database {
             self.credential_errors.lock().map_err(|error| error.to_string())?.remove(&id);
             self.set_credential_storage_state(&id, "none")?;
         }
+        self.save_proxy_credentials(&id, proxy_jump.as_deref(), draft.proxy_use_password, draft.proxy_password.as_deref(), draft.save_proxy_password)?;
         self.get_server(&id)
     }
 
@@ -848,6 +864,7 @@ impl Database {
             }
         }
         if delete_credential {
+            self.clear_proxy_credentials(id)?;
             self.session_passwords.lock().map_err(|error| error.to_string())?.remove(id);
             self.credential_errors.lock().map_err(|error| error.to_string())?.remove(id);
         }
@@ -882,6 +899,9 @@ impl Database {
     }
 
     pub fn finish_remote_cleanup(&self, server_id: &str, delete_credential: bool) -> Result<(), String> {
+        // The hop can have a password even when the target uses a private key.
+        // Keep the cleanup task retryable if Secret Service refuses deletion.
+        self.clear_proxy_credentials(server_id)?;
         let connection = self.connection.lock().map_err(|error| error.to_string())?;
         connection.execute("DELETE FROM remote_cleanup_queue WHERE server_id=?1", [server_id]).map_err(|error| error.to_string())?;
         drop(connection);
@@ -893,6 +913,87 @@ impl Database {
         self.session_passwords.lock().map_err(|error| error.to_string())?.remove(server_id);
         self.credential_errors.lock().map_err(|error| error.to_string())?.remove(server_id);
         Ok(())
+    }
+
+    fn proxy_credential_record(&self, id: &str) -> Result<Option<(String, String)>, String> {
+        self.connection.lock().map_err(|error| error.to_string())?
+            .query_row("SELECT proxy_jump,storage_state FROM proxy_credentials WHERE server_id=?1", [id], |row| Ok((row.get(0)?, row.get(1)?))).optional().map_err(|error| error.to_string())
+    }
+
+    fn proxy_credential_state(&self, id: &str, state: &str) -> Result<(), String> {
+        self.connection.lock().map_err(|error| error.to_string())?.execute("UPDATE proxy_credentials SET storage_state=?2 WHERE server_id=?1", params![id, state]).map_err(|error| error.to_string())?;
+        Ok(())
+    }
+
+    fn clear_proxy_credentials(&self, id: &str) -> Result<(), String> {
+        let Some((_, state)) = self.proxy_credential_record(id)? else { return Ok(()); };
+        let key = format!("proxy:{id}");
+        self.session_passwords.lock().map_err(|error| error.to_string())?.remove(&key);
+        self.credential_errors.lock().map_err(|error| error.to_string())?.remove(&key);
+        if state != "none" {
+            let entry = keyring::Entry::new("com.racktop.desktop.proxy", id).map_err(|error| error.to_string())?;
+            match entry.delete_credential() {
+                Ok(()) | Err(keyring::Error::NoEntry) => (),
+                Err(error) => return Err(format!("无法移除系统安全存储中的跳板机密码：{error}")),
+            }
+        }
+        self.connection.lock().map_err(|error| error.to_string())?.execute("DELETE FROM proxy_credentials WHERE server_id=?1", [id]).map_err(|error| error.to_string())?;
+        Ok(())
+    }
+
+    fn save_proxy_credentials(&self, id: &str, proxy: Option<&str>, enabled: bool, password: Option<&str>, save: bool) -> Result<(), String> {
+        if !enabled { return self.clear_proxy_credentials(id); }
+        let proxy = proxy.ok_or("请填写跳板机地址")?;
+        let previous = self.proxy_credential_record(id)?;
+        if previous.as_ref().is_some_and(|(address, _)| address != proxy) { self.clear_proxy_credentials(id)?; }
+        let password = match password.filter(|value| !value.is_empty()) {
+            Some(password) => Some(password.to_owned()),
+            None => self.get_proxy_password(id, proxy, true)?,
+        }.ok_or("没有可用的跳板机密码；请重新输入")?;
+        // The table contains only the endpoint binding and persistence state.
+        self.connection.lock().map_err(|error| error.to_string())?.execute(
+            "INSERT INTO proxy_credentials(server_id,proxy_jump,storage_state) VALUES(?1,?2,'none') ON CONFLICT(server_id) DO UPDATE SET proxy_jump=excluded.proxy_jump",
+            params![id, proxy],
+        ).map_err(|error| error.to_string())?;
+        let key = format!("proxy:{id}");
+        self.session_passwords.lock().map_err(|error| error.to_string())?.insert(key.clone(), password.clone());
+        self.credential_errors.lock().map_err(|error| error.to_string())?.remove(&key);
+        if save {
+            let entry = keyring::Entry::new("com.racktop.desktop.proxy", id).map_err(|error| error.to_string())?;
+            entry.set_password(&password).map_err(|error| format!("无法保存跳板机密码到系统安全存储：{error}"))?;
+        } else if previous.as_ref().is_some_and(|(_, state)| state != "none") {
+            let entry = keyring::Entry::new("com.racktop.desktop.proxy", id).map_err(|error| error.to_string())?;
+            match entry.delete_credential() { Ok(()) | Err(keyring::Error::NoEntry) => (), Err(error) => return Err(format!("无法移除已保存的跳板机密码：{error}")) }
+        }
+        self.proxy_credential_state(id, if save { "enabled" } else { "none" })
+    }
+
+    fn get_proxy_password(&self, id: &str, proxy: &str, allow_prompt: bool) -> Result<Option<String>, String> {
+        let Some((address, state)) = self.proxy_credential_record(id)? else { return Ok(None); };
+        if address != proxy { return Ok(None); }
+        let key = format!("proxy:{id}");
+        if let Some(password) = self.session_passwords.lock().map_err(|error| error.to_string())?.get(&key).cloned() { return Ok(Some(password)); }
+        if state == "none" { return Ok(None); }
+        if allow_prompt { self.credential_errors.lock().map_err(|error| error.to_string())?.remove(&key); }
+        else if state == "denied" { return Err("跳板机密码的系统安全存储访问已被拒绝；请手动重新连接".into()); }
+        let entry = keyring::Entry::new("com.racktop.desktop.proxy", id).map_err(|error| error.to_string())?;
+        match entry.get_password() {
+            Ok(password) => {
+                self.session_passwords.lock().map_err(|error| error.to_string())?.insert(key, password.clone());
+                self.proxy_credential_state(id, "enabled")?;
+                Ok(Some(password))
+            }
+            Err(keyring::Error::NoEntry) => { self.proxy_credential_state(id, "none")?; Ok(None) }
+            Err(error) => { self.proxy_credential_state(id, "denied")?; Err(format!("无法读取跳板机密码：{error}")) }
+        }
+    }
+
+    pub fn get_ssh_passwords(&self, server: &Server, allow_prompt: bool) -> Result<Option<crate::ssh_connection::SshPasswords>, String> {
+        let target = if server.auth_method == "password" { self.get_password(&server.id, allow_prompt)? } else { None };
+        let proxy = if server.proxy_use_password {
+            self.get_proxy_password(&server.id, server.proxy_jump.as_deref().ok_or("请填写跳板机地址")?, allow_prompt)?
+        } else { None };
+        Ok(Some(crate::ssh_connection::SshPasswords { target, proxy }))
     }
 
     pub fn get_password(&self, id: &str, allow_prompt: bool) -> Result<Option<String>, String> {
@@ -1543,6 +1644,7 @@ mod tests {
             ssh_alias: None,
             identity_file: None,
             proxy_jump: None,
+            proxy_use_password: false,
             tags: vec!["lab".into()],
             sampling_interval_seconds: 2,
             history_retention_days: retention_days,
@@ -1550,6 +1652,8 @@ mod tests {
             auth_method: "sshAgent".into(),
             password: None,
             save_password: false,
+            proxy_password: None,
+            save_proxy_password: false,
         }
     }
 
@@ -1619,6 +1723,77 @@ mod tests {
             .sum::<u64>();
         assert!(expected > 0);
         assert_eq!(db.storage_size_bytes(), expected);
+    }
+
+    #[test]
+    fn two_passwords_are_separate_session_credentials_and_never_server_metadata() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("two-passwords.sqlite");
+        let db = Database::open(&path).unwrap();
+        let saved = db.save_server(ServerDraft {
+            auth_method: "password".into(), password: Some("target-only-credential".into()),
+            proxy_jump: Some("jumpuser@jump.example:21022".into()), proxy_use_password: true,
+            proxy_password: Some("different-jump-credential".into()), save_proxy_password: false,
+            ..draft("Target", 90)
+        }).unwrap();
+        let credentials = db.get_ssh_passwords(&saved, false).unwrap().unwrap();
+        assert_eq!(credentials.target.as_deref(), Some("target-only-credential"));
+        assert_eq!(credentials.proxy.as_deref(), Some("different-jump-credential"));
+        let json = serde_json::to_string(&saved).unwrap();
+        assert!(!json.contains("credential"));
+        assert!(saved.proxy_use_password);
+        assert!(!saved.save_proxy_password);
+        let changed = db.save_server(ServerDraft {
+            id: Some(saved.id.clone()), proxy_jump: Some("other@other.example:22".into()), proxy_use_password: true,
+            ..draft("Target", 90)
+        });
+        assert!(changed.unwrap_err().contains("更换跳板机"));
+        assert_eq!(db.get_server(&saved.id).unwrap().proxy_jump, saved.proxy_jump);
+        drop(db);
+        let bytes = std::fs::read(&path).unwrap();
+        let text = String::from_utf8_lossy(&bytes);
+        assert!(!text.contains("target-only-credential"));
+        assert!(!text.contains("different-jump-credential"));
+        let reopened = Database::open(&path).unwrap();
+        let credentials = reopened.get_ssh_passwords(&saved, false).unwrap().unwrap();
+        assert!(credentials.target.is_none());
+        assert!(credentials.proxy.is_none());
+    }
+
+    #[test]
+    fn deferred_cleanup_removes_jump_password_for_a_key_authenticated_target() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::open(&dir.path().join("key-target-cleanup.sqlite")).unwrap();
+        let saved = db.save_server(ServerDraft {
+            auth_method: "privateKey".into(), identity_file: Some("~/.ssh/test-key".into()),
+            proxy_jump: Some("jump@host:22".into()), proxy_use_password: true,
+            proxy_password: Some("jump-only".into()), ..draft("Target", 90)
+        }).unwrap();
+        db.enqueue_remote_cleanup(&saved, 100, "offline", None).unwrap();
+        db.delete_server_record(&saved.id, false).unwrap();
+        assert_eq!(db.get_ssh_passwords(&saved, false).unwrap().unwrap().proxy.as_deref(), Some("jump-only"));
+        db.finish_remote_cleanup(&saved.id, false).unwrap();
+        assert!(db.list_remote_cleanup_tasks().unwrap().is_empty());
+        assert!(db.proxy_credential_record(&saved.id).unwrap().is_none());
+        assert!(db.get_ssh_passwords(&saved, false).unwrap().unwrap().proxy.is_none());
+    }
+
+    #[test]
+    fn disabling_password_jump_removes_only_its_credential() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::open(&dir.path().join("clear-proxy.sqlite")).unwrap();
+        let saved = db.save_server(ServerDraft {
+            auth_method: "password".into(), password: Some("target-only".into()),
+            proxy_jump: Some("jump@host:22".into()), proxy_use_password: true,
+            proxy_password: Some("jump-only".into()), ..draft("Target", 90)
+        }).unwrap();
+        let updated = db.save_server(ServerDraft {
+            id: Some(saved.id.clone()), auth_method: "password".into(), proxy_jump: Some("jump@host:22".into()),
+            ..draft("Target", 90)
+        }).unwrap();
+        assert!(!updated.proxy_use_password);
+        assert!(db.proxy_credential_record(&saved.id).unwrap().is_none());
+        assert_eq!(db.get_password(&saved.id, false).unwrap().as_deref(), Some("target-only"));
     }
 
     fn gpu_process(gpu_uuid: &str, username: &str, command: &str, memory_used_mb: f64) -> ProcessMetric {

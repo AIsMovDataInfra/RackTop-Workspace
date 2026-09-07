@@ -295,8 +295,9 @@ export const api = {
   },
   async saveServer(draft: ServerDraft): Promise<Server> {
     if (isTauri) return invoke('save_server', { draft })
+    const { password: _password, proxyPassword: _proxyPassword, ...metadata } = draft
     const server: Server = {
-      ...draft,
+      ...metadata,
       id: draft.id ?? crypto.randomUUID(),
       sortOrder: browserServers.find((item) => item.id === draft.id)?.sortOrder ?? browserServers.length,
       status: 'unknown',

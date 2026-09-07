@@ -39,6 +39,9 @@ export function ServerForm({ initial, defaultRemoteHistoryEnabled = true, showGu
     sshAlias: initial?.sshAlias ?? '',
     identityFile: initial?.identityFile ?? '',
     proxyJump: initial?.proxyJump ?? '',
+    proxyUsePassword: initial?.proxyUsePassword ?? false,
+    proxyPassword: '',
+    saveProxyPassword: initial?.saveProxyPassword ?? false,
     tags: initial?.tags ?? [],
     samplingIntervalSeconds: 2,
     historyRetentionDays: 90,
@@ -196,6 +199,10 @@ export function ServerForm({ initial, defaultRemoteHistoryEnabled = true, showGu
       setError('请输入 SSH 密码后再保存服务器。')
       return
     }
+    if (draft.proxyUsePassword && (!draft.proxyJump?.trim() || (!draft.proxyPassword && (!initial?.proxyUsePassword || initial.proxyJump?.trim() !== draft.proxyJump.trim())))) {
+      setError('请填写跳板机地址，并输入该跳板机的密码。')
+      return
+    }
     setSaving(true)
     setError(null)
     try {
@@ -308,9 +315,23 @@ export function ServerForm({ initial, defaultRemoteHistoryEnabled = true, showGu
               </details>
             )}
             <div className="form-grid form-grid--2">
-              <label>跳板机 ProxyJump<input value={draft.proxyJump ?? ''} onChange={(event) => set('proxyJump', event.target.value)} placeholder="可选" /></label>
+              <label>跳板机 ProxyJump<input value={draft.proxyJump ?? ''} onChange={(event) => setDraft((current) => ({ ...current, proxyJump: event.target.value, proxyPassword: '', proxyUsePassword: event.target.value.trim() ? current.proxyUsePassword : false }))} placeholder="user@jump.example.com:22（可选）" /></label>
               <label>标签<div className="server-tag-input" onClick={(event) => event.currentTarget.querySelector('input')?.focus()}>{draft.tags.map((tag, index) => <span className="server-tag-input__token" key={`${tag}-${index}`}>{tag}</span>)}<input aria-label="添加服务器标签" value={tagText} onChange={(event) => updateTagText(event.target.value)} onBlur={commitTagText} onKeyDown={(event) => { if ((event.key === 'Backspace' || event.key === 'Delete') && editLastTag()) event.preventDefault() }} placeholder={draft.tags.length === 0 ? 'lab, h100' : ''} /></div></label>
             </div>
+            {draft.proxyJump?.trim() && !/Windows|Macintosh/i.test(navigator.userAgent) && (
+              <fieldset className="proxy-auth-fields">
+                <legend>跳板机认证</legend>
+                <label className="checkbox-row"><input type="checkbox" checked={draft.proxyUsePassword ?? false} onChange={(event) => setDraft((current) => ({ ...current, proxyUsePassword: event.target.checked, proxyPassword: '', saveProxyPassword: event.target.checked ? current.saveProxyPassword : false }))} />跳板机使用独立密码</label>
+                {draft.proxyUsePassword && <>
+                  <p className="proxy-auth-hint">此处填写跳板机的密码；上方“认证方式”用于目标服务器。支持一台跳板机，地址填写为 用户名@主机:端口。</p>
+                  <div className="form-grid form-grid--2">
+                    <label>跳板机密码<input type="password" value={draft.proxyPassword ?? ''} onChange={(event) => set('proxyPassword', event.target.value)} autoComplete="new-password" placeholder={initial?.proxyUsePassword && initial.proxyJump?.trim() === draft.proxyJump.trim() ? '留空沿用当前密码（若可用）' : '输入跳板机密码'} /></label>
+                    <label className="checkbox-card"><input type="checkbox" checked={draft.saveProxyPassword ?? false} onChange={(event) => set('saveProxyPassword', event.target.checked)} /><span>保存跳板机密码到系统安全存储</span></label>
+                  </div>
+                  <small className="proxy-auth-hint">未勾选保存时，密码仅在本次 RackTop 会话中使用，重启后需重新输入。</small>
+                </>}
+              </fieldset>
+            )}
             <label className="switch-row remote-history-row"><Database size={18} /><span><strong>服务器远端缓存 30 天</strong><small>固定保留 30 天；RackTop 关闭期间继续采集，重新打开后同步到本机 90 天历史。不保存进程和命令。</small></span><input type="checkbox" checked={draft.remoteHistoryEnabled} onChange={(event) => set('remoteHistoryEnabled', event.target.checked)} /></label>
             {error && <p className="form-error" role="alert">{error}</p>}
           </div>

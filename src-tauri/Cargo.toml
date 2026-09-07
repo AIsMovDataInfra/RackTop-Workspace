@@ -1,6 +1,6 @@
 [package]
 name = "racktop"
-version = "1.26.0-linux.2"
+version = "1.26.0-linux.3"
 description = "Live GPU & CPU monitoring for every server"
 authors = ["RackTop"]
 edition = "2024"
@@ -42,11 +42,9 @@ keyring = { version = "3", features = ["apple-native", "windows-native"] }
 base64 = "0.22"
 sha2 = "0.10"
 portable-pty = "0.9.0"
+tempfile = "3"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }
-
-[dev-dependencies]
-tempfile = "3"

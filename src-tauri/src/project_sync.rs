@@ -250,7 +250,7 @@ fn directory_manifest_script(path: &str) -> String {
     format!(r#"root={}; {}; [ -d "$root" ] || exit 0; find "$root" -mindepth 1 -printf '%P\0%y\0%s\0%T@\0%l\0%m\0'"#, shell_quote(path), expand_root)
 }
 
-async fn remote_input(server: &crate::models::Server, password: Option<&str>, script: String, input: Vec<u8>, timeout_seconds: u64) -> Result<(), String> {
+async fn remote_input(server: &crate::models::Server, password: Option<&crate::ssh_connection::SshPasswords>, script: String, input: Vec<u8>, timeout_seconds: u64) -> Result<(), String> {
     let (mut command, target) = collector::configured_ssh_command(server, password)?;
     command.arg(target).arg(script).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
     command.kill_on_drop(true);
@@ -295,7 +295,7 @@ async fn wait_child_with_cancel(child: &mut Child, cancel: &AtomicBool) -> Resul
     }
 }
 
-async fn remote_output(server: &crate::models::Server, password: Option<&str>, script: String, timeout_seconds: u64) -> Result<String, String> {
+async fn remote_output(server: &crate::models::Server, password: Option<&crate::ssh_connection::SshPasswords>, script: String, timeout_seconds: u64) -> Result<String, String> {
     let (mut command, target) = collector::configured_ssh_command(server, password)?;
     command.arg(target).arg(script).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     let output = timeout(Duration::from_secs(timeout_seconds), command.output()).await.map_err(|_| format!("连接 {} 超时", server.name))?.map_err(|error| format!("无法启动系统 ssh：{error}"))?;
@@ -306,7 +306,7 @@ async fn remote_output(server: &crate::models::Server, password: Option<&str>, s
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
-pub async fn check_path(server: &crate::models::Server, password: Option<&str>, requested_path: &str, basename: &str) -> ProjectPathCheck {
+pub async fn check_path(server: &crate::models::Server, password: Option<&crate::ssh_connection::SshPasswords>, requested_path: &str, basename: &str) -> ProjectPathCheck {
     let expand_requested = remote_home_expansion("requested");
     let script = format!(r#"requested={requested}; name={name};
 {expand_requested}
@@ -388,12 +388,12 @@ find "$parent" -maxdepth 1 -mindepth 1 -type d -print 2>/dev/null | sort | while
 done | head -n 12"#, query = shell_quote(query))
 }
 
-pub async fn suggest_paths(server: &crate::models::Server, password: Option<&str>, query: &str) -> Result<Vec<String>, String> {
+pub async fn suggest_paths(server: &crate::models::Server, password: Option<&crate::ssh_connection::SshPasswords>, query: &str) -> Result<Vec<String>, String> {
     let script = suggestion_script(query);
     Ok(remote_output(server, password, script, 12).await?.lines().filter_map(|line| line.strip_prefix("__RACKTOP_SUGGEST__\t").map(str::to_string)).collect())
 }
 
-async fn validate_same_server_paths(server: &crate::models::Server, password: Option<&str>, source_path: &str, target_path: &str) -> Result<(), String> {
+async fn validate_same_server_paths(server: &crate::models::Server, password: Option<&crate::ssh_connection::SshPasswords>, source_path: &str, target_path: &str) -> Result<(), String> {
     let expand_source = remote_home_expansion("source");
     let expand_target = remote_home_expansion("target");
     let script = format!(r#"source={source}; target={target}; {expand_source}; {expand_target};
@@ -409,27 +409,27 @@ case "$source/" in "$target/"*) printf 'RackTop: 主目录不能位于目标目�
 
 pub async fn probe(database: &Database, draft: &ProjectDraft) -> Result<Vec<ProjectPathCheck>, String> {
     let source = database.get_server(&draft.source_server_id)?;
-    let source_password = if source.auth_method == "password" { database.get_password(&source.id, false)? } else { None };
+    let source_password = database.get_ssh_passwords(&source, false)?;
     let basename = path_basename(&draft.source_path, &draft.name);
-    let mut checks = vec![check_path(&source, source_password.as_deref(), &draft.source_path, &basename).await];
+    let mut checks = vec![check_path(&source, source_password.as_ref(), &draft.source_path, &basename).await];
     for target in &draft.targets {
         let server = database.get_server(&target.server_id)?;
-        let password = if server.auth_method == "password" { database.get_password(&server.id, false)? } else { None };
-        checks.push(check_path(&server, password.as_deref(), &target.path, &basename).await);
+        let password = database.get_ssh_passwords(&server, false)?;
+        checks.push(check_path(&server, password.as_ref(), &target.path, &basename).await);
     }
     Ok(checks)
 }
 
 pub async fn inspect(database: &Database, project: &Project) -> Result<Project, String> {
     let source = database.get_server(&project.source_server_id)?;
-    let source_password = if source.auth_method == "password" { database.get_password(&source.id, false)? } else { None };
+    let source_password = database.get_ssh_passwords(&source, false)?;
     let basename = path_basename(&project.source_path, &project.name);
-    let source_check = check_path(&source, source_password.as_deref(), &project.source_path, &basename).await;
+    let source_check = check_path(&source, source_password.as_ref(), &project.source_path, &basename).await;
     let mut targets = Vec::new();
     for target in &project.targets {
         let server = database.get_server(&target.server_id)?;
-        let password = if server.auth_method == "password" { database.get_password(&server.id, false)? } else { None };
-        let check = check_path(&server, password.as_deref(), &target.path, &basename).await;
+        let password = database.get_ssh_passwords(&server, false)?;
+        let check = check_path(&server, password.as_ref(), &target.path, &basename).await;
         let source_unchanged_since_sync = target.synced_source_size_bytes == Some(source_check.size_bytes)
             && target.synced_source_file_count == Some(source_check.file_count)
             && target.synced_source_modified_at == source_check.modified_at;
@@ -472,9 +472,9 @@ fn targets_after_source_check(project: &Project, source_check: &ProjectPathCheck
 
 pub async fn inspect_source(database: &Database, project: &Project) -> Result<Project, String> {
     let source = database.get_server(&project.source_server_id)?;
-    let source_password = if source.auth_method == "password" { database.get_password(&source.id, false)? } else { None };
+    let source_password = database.get_ssh_passwords(&source, false)?;
     let basename = path_basename(&project.source_path, &project.name);
-    let source_check = check_path(&source, source_password.as_deref(), &project.source_path, &basename).await;
+    let source_check = check_path(&source, source_password.as_ref(), &project.source_path, &basename).await;
     let targets = targets_after_source_check(project, &source_check);
     let error = source_check.error.as_deref();
     let status = if error.is_some() || !source_check.exists { "error" } else if targets.iter().any(|target| matches!(target.status.as_str(), "offline" | "error")) { "error" } else if targets.iter().all(|target| target.status == "synced") { "synced" } else { "unknown" };
@@ -493,15 +493,15 @@ pub async fn sync(database: &Database, project: &Project, target_server_id: &str
 
     let operation = async {
         let source = database.get_server(&project.source_server_id)?;
-        let source_password = if source.auth_method == "password" { database.get_password(&source.id, true)? } else { None };
-        let target_password = if target_server.auth_method == "password" { database.get_password(&target_server.id, true)? } else { None };
+        let source_password = database.get_ssh_passwords(&source, true)?;
+        let target_password = database.get_ssh_passwords(&target_server, true)?;
         let basename = path_basename(&project.source_path, &project.name);
-        let source_check = check_path(&source, source_password.as_deref(), &project.source_path, &basename).await;
+        let source_check = check_path(&source, source_password.as_ref(), &project.source_path, &basename).await;
         if !source_check.exists { return Err(source_check.error.unwrap_or_else(|| "主目录不存在".into())); }
-        let target_check_before = check_path(&target_server, target_password.as_deref(), &target.path, &basename).await;
+        let target_check_before = check_path(&target_server, target_password.as_ref(), &target.path, &basename).await;
         if let Some(error) = target_check_before.error.clone() { return Err(error); }
         if source.host.eq_ignore_ascii_case(&target_server.host) && source.port == target_server.port && source.username == target_server.username {
-            validate_same_server_paths(&source, source_password.as_deref(), &source_check.suggested_path, &target.path).await?;
+            validate_same_server_paths(&source, source_password.as_ref(), &source_check.suggested_path, &target.path).await?;
         }
 
         let source_path = shell_quote(&source_check.suggested_path);
@@ -511,8 +511,8 @@ pub async fn sync(database: &Database, project: &Project, target_server_id: &str
         let expected_target_signature = path_check_signature(&target_check_before);
         let delta_plan = if source_check.is_directory && target_check_before.is_directory && !force {
             let (source_manifest_output, target_manifest_output) = tokio::try_join!(
-                remote_output(&source, source_password.as_deref(), directory_manifest_script(&source_check.suggested_path), 120),
-                remote_output(&target_server, target_password.as_deref(), directory_manifest_script(&target.path), 120),
+                remote_output(&source, source_password.as_ref(), directory_manifest_script(&source_check.suggested_path), 120),
+                remote_output(&target_server, target_password.as_ref(), directory_manifest_script(&target.path), 120),
             )?;
             let source_manifest = parse_directory_manifest(&source_manifest_output)?;
             let target_manifest = parse_directory_manifest(&target_manifest_output)?;
@@ -525,20 +525,20 @@ pub async fn sync(database: &Database, project: &Project, target_server_id: &str
         }
         let source_signature = format!("{}:{}:{}:{}:{}", source_check.size_bytes, source_check.file_count, source_check.modified_at.unwrap_or_default(), source_check.is_directory as u8, delta_plan.as_ref().map(|(_, signature)| signature.as_str()).unwrap_or("full"));
         let checkpoint_signature = sync_checkpoint_signature(&source_signature, &expected_target_signature);
-        let checkpoint = remote_output(&target_server, target_password.as_deref(), resume_checkpoint_script(&target.path, &artifact_id), 20).await?;
+        let checkpoint = remote_output(&target_server, target_password.as_ref(), resume_checkpoint_script(&target.path, &artifact_id), 20).await?;
         let resumable = target.status == "paused" && resume_checkpoint_offset(&checkpoint, &checkpoint_signature).is_some();
         let delta_is_additive_only = delta_plan.as_ref().is_some_and(|(delta, _)| delta_can_sync_without_confirmation(delta));
         if target_check_before.exists && target_changed_since_sync(target, &target_check_before) && !force && !resumable && !delta_is_additive_only {
             return Err("__RACKTOP_CONFLICT__:目标目录已有内容或已在上次同步后修改".into());
         }
         if let Some((delta, _)) = &delta_plan {
-            remote_input(&target_server, target_password.as_deref(), delta_list_write_script(&target.path, &artifact_id, "remove"), nul_path_list(&delta.remove_paths), 60).await?;
-            remote_input(&target_server, target_password.as_deref(), delta_list_write_script(&target.path, &artifact_id, "replace"), nul_path_list(&delta.replace_paths), 60).await?;
+            remote_input(&target_server, target_password.as_ref(), delta_list_write_script(&target.path, &artifact_id, "remove"), nul_path_list(&delta.remove_paths), 60).await?;
+            remote_input(&target_server, target_password.as_ref(), delta_list_write_script(&target.path, &artifact_id, "replace"), nul_path_list(&delta.replace_paths), 60).await?;
         }
         let payload_size = delta_plan.as_ref().map(|(delta, _)| delta.payload_bytes).unwrap_or(source_check.size_bytes);
         update_sync_total(&target_key, payload_size.max(1));
         let prepare_script = format!(r#"target={target_path}; {expand_target}; parent="${{target%/*}}"; [ "$parent" = "$target" ] && parent="$HOME"; [ "$target" != / ] && [ "$target" != "$HOME" ] || {{ printf 'RackTop: 不允许使用根目录或 Home 根目录\n' >&2; exit 64; }}; mkdir -p "$parent"; part="$parent/.racktop-sync-{artifact_id}.part"; meta="$parent/.racktop-sync-{artifact_id}.meta"; backup="$parent/.racktop-sync-{artifact_id}.backup"; [ -e "$target" ] || [ ! -e "$backup" ] || mv -- "$backup" "$target"; signature={signature}; stored="$(cat "$meta" 2>/dev/null)"; if [ "$stored" != "$signature" ]; then rm -f -- "$part"; printf '%s' "$signature" > "$meta"; fi; offset="$(stat -c '%s' "$part" 2>/dev/null)"; offset="${{offset:-0}}"; if [ {source_is_directory} -eq 0 ] && [ "$offset" -gt {source_size} ]; then rm -f -- "$part"; offset=0; fi; available_kb="$(df -Pk "$parent" | awk 'NR==2 {{print $4}}')"; required_kb=$((({payload_size} * 2 + 1023) / 1024 + 65536 - offset / 1024)); [ "$required_kb" -lt 65536 ] && required_kb=65536; if [ "${{available_kb:-0}}" -lt "$required_kb" ]; then printf 'RackTop: 目标磁盘空间不足，需要约 %s KB，可用 %s KB\n' "$required_kb" "${{available_kb:-0}}" >&2; exit 73; fi; printf '__RACKTOP_OFFSET__\t%s\n' "$offset""#, artifact_id = artifact_id, signature = shell_quote(&checkpoint_signature), source_size = source_check.size_bytes, payload_size = payload_size, source_is_directory = source_check.is_directory as u8);
-        let prepared = remote_output(&target_server, target_password.as_deref(), prepare_script, 20).await?;
+        let prepared = remote_output(&target_server, target_password.as_ref(), prepare_script, 20).await?;
         let resume_offset = prepared.lines().find_map(|line| line.strip_prefix("__RACKTOP_OFFSET__\t")).and_then(|value| value.parse::<u64>().ok()).unwrap_or(0);
         set_sync_resume_offset(&target_key, resume_offset);
         update_sync_progress(&target_key, resume_offset, "transferring");
@@ -548,8 +548,8 @@ pub async fn sync(database: &Database, project: &Project, target_server_id: &str
         } else if source_check.is_directory { format!("cd {source_path} && tar --sort=name -cf - .") } else { format!("cat -- {source_path}") };
         let source_script = if resume_offset > 0 { format!("{source_stream} | tail -c +{}", resume_offset.saturating_add(1)) } else { source_stream };
         let target_script = if delta_plan.is_some() { target_delta_publish_script(&target.path, &artifact_id, &expected_target_signature) } else { target_publish_script(&target.path, &artifact_id, &expected_target_signature, source_check.is_directory, source_check.size_bytes) };
-        let (mut source_command, source_host) = collector::configured_ssh_command(&source, source_password.as_deref())?;
-        let (mut target_command, target_host) = collector::configured_ssh_command(&target_server, target_password.as_deref())?;
+        let (mut source_command, source_host) = collector::configured_ssh_command(&source, source_password.as_ref())?;
+        let (mut target_command, target_host) = collector::configured_ssh_command(&target_server, target_password.as_ref())?;
         source_command.arg(source_host).arg(source_script).stdin(if source_input.is_some() { Stdio::piped() } else { Stdio::null() }).stdout(Stdio::piped()).stderr(Stdio::piped());
         target_command.arg(target_host).arg(target_script).stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::piped());
         source_command.kill_on_drop(true);
@@ -620,8 +620,8 @@ pub async fn sync(database: &Database, project: &Project, target_server_id: &str
 
     match operation {
         Ok((transferred, source_size_bytes, source_file_count, source_modified_at)) => {
-            let verify_password = if target_server.auth_method == "password" { database.get_password(&target_server.id, false)? } else { None };
-            let target_check = check_path(&target_server, verify_password.as_deref(), &target.path, &path_basename(&target.path, &project.name)).await;
+            let verify_password = database.get_ssh_passwords(&target_server, false)?;
+            let target_check = check_path(&target_server, verify_password.as_ref(), &target.path, &path_basename(&target.path, &project.name)).await;
             if target_check.error.is_some() || !target_check.exists {
                 let error = target_check.error.unwrap_or_else(|| "同步完成后无法验证目标目录".into());
                 let _ = database.mark_project_sync_failed(&project.id, target_server_id, &error);
@@ -822,8 +822,8 @@ mod tests {
         let (username, host) = value.split_once('@').expect("test server must use user@host");
         ServerDraft {
             id: None, name: name.into(), location: None, host: host.into(), port: 22, username: username.into(),
-            ssh_alias: None, identity_file: None, proxy_jump: None, tags: vec![], sampling_interval_seconds: 2,
-            history_retention_days: 1, remote_history_enabled: false, auth_method: "sshAgent".into(), password: None, save_password: false,
+            ssh_alias: None, identity_file: None, proxy_jump: None, proxy_use_password: false, tags: vec![], sampling_interval_seconds: 2,
+            history_retention_days: 1, remote_history_enabled: false, auth_method: "sshAgent".into(), password: None, save_password: false, proxy_password: None, save_proxy_password: false,
         }
     }
 

@@ -22,6 +22,8 @@ export interface Server {
   sshAlias?: string | null
   identityFile?: string | null
   proxyJump?: string | null
+  proxyUsePassword?: boolean
+  saveProxyPassword?: boolean
   tags: string[]
   samplingIntervalSeconds: number
   historyRetentionDays: number
@@ -185,6 +187,7 @@ export interface UsageDistribution {
 }
 
 export interface HostKeyInfo {
+  isProxy?: boolean
   serverId: string
   host: string
   algorithm: string
@@ -267,6 +270,9 @@ export interface ServerDraft {
   sshAlias?: string
   identityFile?: string
   proxyJump?: string
+  proxyUsePassword?: boolean
+  proxyPassword?: string
+  saveProxyPassword?: boolean
   tags: string[]
   samplingIntervalSeconds: number
   historyRetentionDays: number
