@@ -13,6 +13,7 @@ export default defineConfig({
   },
   envPrefix: ['VITE_', 'TAURI_'],
   test: {
+    include: ['src/**/*.test.{ts,tsx}'],
     exclude: [...configDefaults.exclude, '**/._*'],
   },
   build: {

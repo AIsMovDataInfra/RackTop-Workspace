@@ -105,4 +105,42 @@ describe('App startup update check', () => {
       'noopener,noreferrer',
     )
   })
+
+  it('identifies the current maintainer separately from the original author and opens fork help links', async () => {
+    vi.spyOn(api, 'getLatestRelease').mockResolvedValue({
+      version: packageInfo.version,
+      url: `https://github.com/AIsMovDataInfra/RackTop/releases/tag/v${packageInfo.version}`,
+    })
+    const open = vi.spyOn(window, 'open').mockReturnValue(null)
+    const container = document.createElement('div')
+    document.body.append(container)
+    root = createRoot(container)
+    await act(async () => { root?.render(<App />) })
+    await act(async () => { container.querySelector<HTMLButtonElement>('button[aria-label="关于 RackTop"]')?.click() })
+
+    const about = container.querySelector('.about-sheet')!
+    const maintainer = about.querySelector('section[aria-label="当前维护者"]')!
+    const originalAuthor = about.querySelector('section[aria-label="原作者"]')!
+    expect(maintainer.textContent).toContain('AIsMov')
+    expect(originalAuthor.textContent).toContain('Tongzh-SEU')
+    expect(originalAuthor.textContent).toContain('原作者')
+    expect(originalAuthor.textContent).not.toContain('维护者')
+    expect(maintainer.compareDocumentPosition(originalAuthor) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0)
+    expect(maintainer.querySelector('img')).toBeNull()
+    expect(originalAuthor.querySelector('img')?.alt).toBe('原作者 Tongzh-SEU 头像')
+    expect(about.textContent).toContain('GPL-3.0')
+
+    for (const [label, url] of [
+      ['GitHub @AIsMovDataInfra', 'https://github.com/AIsMovDataInfra'],
+      ['GitHub 仓库', 'https://github.com/AIsMovDataInfra/RackTop'],
+      ['使用说明', 'https://github.com/AIsMovDataInfra/RackTop/blob/main/README.md'],
+      ['问题反馈', 'https://github.com/AIsMovDataInfra/RackTop/issues'],
+      ['上游项目', 'https://github.com/Tongzh-SEU/RackTop'],
+    ]) {
+      const link = [...about.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.includes(label))
+      expect(link, label).toBeDefined()
+      await act(async () => { link?.click() })
+      expect(open).toHaveBeenLastCalledWith(url, '_blank', 'noopener,noreferrer')
+    }
+  })
 })
