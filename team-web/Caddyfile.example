@@ -1,0 +1,4 @@
+# Replace with your DNS name; configure DNS to this server first.
+reservations.example.com {
+    reverse_proxy 127.0.0.1:4318
+}

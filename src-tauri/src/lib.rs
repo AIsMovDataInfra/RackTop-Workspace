@@ -14,6 +14,8 @@ mod key_manager;
 pub mod storage;
 mod terminal;
 pub mod sharing;
+pub mod team;
+use team::{TeamState, team_status, team_login, team_logout, team_data, team_select, team_sync};
 use sharing::{SharingManager, commands::*};
 
 use models::{AppSettings, HistoryHeatmapPoint, HistoryPoint, HostKeyInfo, IdleReservation, InteractionLogSummary, InteractionServerSummary, ManagedRunLaunchResult, ManagedRunRemoteStatus, Project, ProjectDraft, ProjectPathCheck, ProjectSyncProgress, ProjectSyncResult, RemoteCleanupResult, RemoteCleanupSweepResult, RemoteHistorySyncResult, Server, ServerDraft, ServerNotificationSettings, Snapshot, UsageDistribution};
@@ -902,6 +904,9 @@ pub fn run() {
                 std::sync::Arc::new(move |event, data| { let _ = events_app.emit(event, data); }));
             app.manage(SharingManager(sharing.clone()));
             sharing.start();
+            let team = std::sync::Arc::new(team::TeamManager::new(&app_data).map_err(std::io::Error::other)?);
+            app.manage(TeamState(team.clone()));
+            team.start(app.handle().clone());
             #[cfg(target_os = "linux")]
             app.manage(linux_update::LinuxUpdateState::default());
             app.manage(InteractionLogStore::default());
@@ -974,7 +979,7 @@ pub fn run() {
                 }
             }
         })
-        .invoke_handler(tauri::generate_handler![sharing_status, sharing_configure, sharing_create, sharing_invite, sharing_pause, sharing_revoke_member, sharing_delete, sharing_accept, sharing_connect, sharing_disconnect, sharing_forget, sharing_snapshot, sharing_terminal_open, sharing_terminal_input, sharing_terminal_resize, sharing_terminal_close, sharing_list_files, sharing_upload, sharing_download, sharing_cancel_transfer, check_linux_update, install_linux_update, relaunch_linux_app, list_ssh_keys, generate_ssh_key, import_ssh_key, rename_ssh_key, forget_ssh_key, list_servers, save_server, list_server_notification_settings, save_server_notification_settings, delete_server, retry_remote_cleanups, reorder_servers, start_terminal, write_terminal, resize_terminal, close_terminal, open_setup_terminal, verify_ssh_setup, collect_server, list_latest_snapshots, get_interaction_log_summary, get_history, get_history_heatmap, get_usage_distribution, configure_remote_history, sync_remote_history, list_idle_reservations, save_idle_reservation, delete_idle_reservation, list_projects, save_project, delete_project, probe_project_paths, suggest_project_paths, inspect_project, inspect_project_source, sync_project, list_project_sync_progress, cancel_project_sync, import_ssh_config, save_ssh_export, get_settings, save_settings, scan_host_key, trust_host_key, install_nvidia_driver, terminate_process, launch_managed_run, read_managed_run_log, get_managed_run_status, update_tray_summary, window_minimize, window_toggle_maximize, window_close])
+        .invoke_handler(tauri::generate_handler![team_status, team_login, team_logout, team_data, team_select, team_sync, sharing_status, sharing_configure, sharing_create, sharing_invite, sharing_pause, sharing_revoke_member, sharing_delete, sharing_accept, sharing_connect, sharing_disconnect, sharing_forget, sharing_snapshot, sharing_terminal_open, sharing_terminal_input, sharing_terminal_resize, sharing_terminal_close, sharing_list_files, sharing_upload, sharing_download, sharing_cancel_transfer, check_linux_update, install_linux_update, relaunch_linux_app, list_ssh_keys, generate_ssh_key, import_ssh_key, rename_ssh_key, forget_ssh_key, list_servers, save_server, list_server_notification_settings, save_server_notification_settings, delete_server, retry_remote_cleanups, reorder_servers, start_terminal, write_terminal, resize_terminal, close_terminal, open_setup_terminal, verify_ssh_setup, collect_server, list_latest_snapshots, get_interaction_log_summary, get_history, get_history_heatmap, get_usage_distribution, configure_remote_history, sync_remote_history, list_idle_reservations, save_idle_reservation, delete_idle_reservation, list_projects, save_project, delete_project, probe_project_paths, suggest_project_paths, inspect_project, inspect_project_source, sync_project, list_project_sync_progress, cancel_project_sync, import_ssh_config, save_ssh_export, get_settings, save_settings, scan_host_key, trust_host_key, install_nvidia_driver, terminate_process, launch_managed_run, read_managed_run_log, get_managed_run_status, update_tray_summary, window_minimize, window_toggle_maximize, window_close])
         .run(tauri::generate_context!())
         .expect("RackTop 启动失败");
 }

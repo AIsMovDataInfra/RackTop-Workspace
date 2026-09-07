@@ -4,6 +4,8 @@
 
 Latest published Linux pre-release: **1.26.0-linux.4**; the download table points to this version for **Ubuntu 22.04 x86_64 / amd64 desktops**. See the [changelog](docs/VERSION_INFOS.md) for changes in the current source. The upstream feature guide and screenshots appear below; see [Linux validation and limitations](docs/LINUX.md#验证范围) for the scope tested on Linux.
 
+The new [team reservation web app](team-web/README.md) supports whole-machine and selected-GPU bookings, conflict checks, renewals, cancellation and an administrator resource catalog. It runs as a separate central service with Feishu login and optional group notifications. Local demos are explicitly labeled; shared deployment requires Feishu credentials and HTTPS. It does not monitor live GPU utilization or store SSH credentials. Run `npm ci` and `npm run team:dev` with Node.js 24+ to try it locally.
+
 <div align="right">
   🌐 Language:
   <a href="./README.md"><kbd>简体中文</kbd></a>

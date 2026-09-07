@@ -1,0 +1,32 @@
+[Unit]
+Description=RackTop team reservations
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=racktop-team
+Group=racktop-team
+WorkingDirectory=/opt/racktop-team/current
+Environment=NODE_ENV=production
+EnvironmentFile=/etc/racktop-team/service.env
+ExecStart=/opt/racktop-team/node/bin/node --max-old-space-size=256 team-web/server/server.mjs
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=20
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+ReadWritePaths=/var/lib/racktop-team
+MemoryMax=512M
+TasksMax=96
+
+[Install]
+WantedBy=multi-user.target
