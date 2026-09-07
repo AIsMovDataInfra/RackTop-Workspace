@@ -1,0 +1,30 @@
+name: Team reservation web
+on:
+  pull_request:
+    paths:
+      - 'team-web/**'
+      - 'scripts/team-*.mjs'
+      - 'package*.json'
+      - '.github/workflows/team-web.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run team:test
+      - run: npm run team:build
+      - name: Package web deployment artifact
+        run: tar -czf RackTop-team-web.tar.gz team-web/dist team-web/server team-web/src team-web/tests team-web/index.html team-web/vite.config.ts team-web/tsconfig.json team-web/README.md team-web/API.md team-web/.env.example team-web/Dockerfile team-web/compose.yaml team-web/Caddyfile.example scripts/team-backup.mjs scripts/team-dev.mjs tsconfig.json package.json package-lock.json LICENSE NOTICE.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RackTop-team-web
+          path: RackTop-team-web.tar.gz
+          if-no-files-found: error

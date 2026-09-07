@@ -6,3 +6,10 @@ output/playwright/
 .DS_Store
 *.log
 src-tauri/gen/schemas/linux-schema.json
+
+# Team reservation deployment data and credentials
+team-web/data/
+team-web/.env
+team-web/.env.*
+!team-web/.env.example
+team-web/backups/

@@ -1,7 +1,7 @@
 {
   "name": "racktop",
   "private": true,
-  "version": "1.26.0-linux.6",
+  "version": "1.26.0-linux.7",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -12,7 +12,11 @@
     "tauri": "tauri",
     "bundle:macos": "bash scripts/package-macos.sh",
     "check": "npm run test && npm run build && cargo test --manifest-path src-tauri/Cargo.toml",
-    "bundle:linux": "bash scripts/package-linux.sh"
+    "bundle:linux": "bash scripts/package-linux.sh",
+    "team:dev": "node scripts/team-dev.mjs",
+    "team:build": "tsc -p team-web/tsconfig.json && vite build --config team-web/vite.config.ts",
+    "team:start": "node team-web/server/server.mjs",
+    "team:test": "node --test team-web/tests/*.test.mjs && vitest run --config team-web/vite.config.ts"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.8.0",

@@ -61,6 +61,12 @@ racktop
 
 也可以从应用菜单启动。更多依赖、密码存储、源码构建和已知限制见 [Linux 使用说明](docs/LINUX.md)。如需校验，下载同一 Release 的 `SHA256SUMS` 后运行 `sha256sum --check --ignore-missing SHA256SUMS`。
 
+## 团队预约 Web
+
+新增独立的 [团队资源预约网页](team-web/README.md)：共享整机和指定 GPU 排期、冲突检查、续约、取消和管理员资源目录，支持飞书登录与可选群通知。需要部署一个中央服务，成员通过浏览器访问。开发环境使用明确标识的本机演示数据；正式部署需要飞书应用配置与 HTTPS。它与桌面端监控独立，不采集实际 GPU 利用率或保存共享 SSH 密码。
+
+本机体验（Node.js 24+）：`npm ci` 后执行 `npm run team:dev`，打开 `http://127.0.0.1:1421/`。
+
 ## 项目来源与反馈
 
 RackTop 最初由 [Tongzh-SEU](https://github.com/Tongzh-SEU) 开发，面向研究者和小团队集中管理 GPU 服务器。感谢原作者及上游贡献者提供完整的桌面应用基础。**AIsMov** 负责本 fork 的持续维护、功能改进、问题处理和 Linux 发行。

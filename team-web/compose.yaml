@@ -1,0 +1,25 @@
+services:
+  reservations:
+    build:
+      context: ..
+      dockerfile: team-web/Dockerfile
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      TEAM_AUTH_MODE: feishu
+      TEAM_HOST: 0.0.0.0
+      TEAM_PORT: 4318
+      TEAM_DB_PATH: /data/team.sqlite
+    ports:
+      - "127.0.0.1:4318:4318"
+    volumes:
+      - reservations-data:/data
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 15s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+volumes:
+  reservations-data:

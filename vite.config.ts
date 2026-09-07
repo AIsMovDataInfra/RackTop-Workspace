@@ -13,7 +13,7 @@ export default defineConfig({
   },
   envPrefix: ['VITE_', 'TAURI_'],
   test: {
-    exclude: [...configDefaults.exclude, '**/._*'],
+    exclude: [...configDefaults.exclude, '**/._*', 'team-web/**'],
   },
   build: {
     target: ['es2021', 'safari13'],

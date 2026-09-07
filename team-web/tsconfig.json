@@ -1,0 +1,6 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": { "target": "ES2022" },
+  "include": ["src"],
+  "exclude": ["dist", "server", "tests"]
+}
