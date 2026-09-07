@@ -1,8 +1,9 @@
 [package]
 name = "racktop"
-version = "1.26.0-linux.5"
+version = "1.26.0-linux.6"
 description = "Live GPU & CPU monitoring for every server"
-authors = ["RackTop"]
+# Original author: Tongzh-SEU and upstream contributors; see ../NOTICE.md.
+# Linux bundle.publisher supplies the Debian maintainer separately.
 edition = "2024"
 default-run = "racktop"
 autobins = false

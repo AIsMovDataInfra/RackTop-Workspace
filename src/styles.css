@@ -1149,6 +1149,10 @@ fieldset { min-width: 0; margin: 0; padding: 0; border: 0; } legend { margin-bot
 .brand__version { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .about-update { flex-wrap: wrap; }
 .about-update__actions { flex-wrap: wrap; }
+.about-sheet .about-author > div { min-width: 0; }
+.about-sheet .about-author__links { flex-wrap: wrap; gap: 8px 12px; }
+.about-sheet .about-maintainer__mark { display: grid; flex: none; place-items: center; width: 44px; height: 44px; border: 1px solid var(--border); border-radius: 8px; color: var(--blue); background: var(--surface-solid); }
+.about-sheet .about-contact { line-height: 1.6; }
 
 /* SSH key manager: use RackTop's existing appearance and text-size tokens. */
 .ssh-key-manager-scrim { padding: 24px; }
