@@ -20,15 +20,25 @@ export interface UpdateCheckCache {
   release?: ReleaseInfo
 }
 
-function versionParts(version: string) {
-  return version.replace(/^v/i, '').split(/[.-]/).slice(0, 3).map((part) => Number.parseInt(part, 10) || 0)
-}
-
 export function isNewerVersion(candidate: string, current: string) {
-  const left = versionParts(candidate)
-  const right = versionParts(current)
+  const parse = (value: string) => /^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/.exec(value)
+  const left = parse(candidate)
+  const right = parse(current)
+  if (!left || !right) return false
   for (let index = 0; index < 3; index += 1) {
-    if (left[index] !== right[index]) return left[index] > right[index]
+    if (Number(left[index + 1]) !== Number(right[index + 1])) return Number(left[index + 1]) > Number(right[index + 1])
+  }
+  if (!left[4] || !right[4]) return !left[4] && Boolean(right[4])
+  const a = left[4].split('.')
+  const b = right[4].split('.')
+  for (let index = 0; index < Math.max(a.length, b.length); index += 1) {
+    if (a[index] === undefined || b[index] === undefined) return a[index] !== undefined
+    if (a[index] === b[index]) continue
+    const numericA = /^\d+$/.test(a[index])
+    const numericB = /^\d+$/.test(b[index])
+    if (numericA && numericB) return Number(a[index]) > Number(b[index])
+    if (numericA !== numericB) return !numericA
+    return a[index] > b[index]
   }
   return false
 }

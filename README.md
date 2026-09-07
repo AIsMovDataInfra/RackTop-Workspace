@@ -2,7 +2,7 @@
 
 基于 [Tongzh-SEU/RackTop](https://github.com/Tongzh-SEU/RackTop) 官方 **v1.25.4**，由 **AIsMovDataInfra** 提供 Ubuntu Linux 客户端适配。原作者为 **Tongzh-SEU**；本仓库保留上游 Git 历史、作者信息和 [GPL-3.0 许可证](LICENSE)。这是独立的社区 fork，Linux 安装包并非上游官方发布。
 
-Linux 当前源码版本：**1.26.0-linux.3**；下方下载表保留最近已发布的测试版，目标为 **Ubuntu 22.04 x86_64 / amd64 图形桌面**。上游功能说明与截图保留在下方；Linux 的实际验证范围见 [安装与构建说明](docs/LINUX.md#验证范围)。
+Linux 当前源码版本：**1.26.0-linux.4**；下方下载表保留最近已发布的测试版，目标为 **Ubuntu 22.04 x86_64 / amd64 图形桌面**。上游功能说明与截图保留在下方；Linux 的实际验证范围见 [安装与构建说明](docs/LINUX.md#验证范围)。
 
 <div align="right">
   🌐 Language:

@@ -1,7 +1,9 @@
 import type { ServerStatus } from '../types/models'
 
-export const OFFLINE_FAILURE_THRESHOLD = 3
-export const ACTIVE_SYNC_OFFLINE_FAILURE_THRESHOLD = 6
+// A retry now waits thirty minutes: show the failed connection immediately,
+// while keeping its last snapshot available for inspection.
+export const OFFLINE_FAILURE_THRESHOLD = 1
+export const ACTIVE_SYNC_OFFLINE_FAILURE_THRESHOLD = 1
 
 export function offlineFailureThreshold(activeProjectSync: boolean) {
   return activeProjectSync ? ACTIVE_SYNC_OFFLINE_FAILURE_THRESHOLD : OFFLINE_FAILURE_THRESHOLD

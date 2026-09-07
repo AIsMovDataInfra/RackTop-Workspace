@@ -3051,13 +3051,15 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "racktop"
-version = "1.26.0-linux.3"
+version = "1.26.0-linux.4"
 dependencies = [
  "base64 0.22.1",
  "dirs",
  "keyring",
+ "minisign-verify",
  "portable-pty",
  "rusqlite",
+ "semver",
  "serde",
  "serde_json",
  "sha2",

@@ -1136,3 +1136,16 @@ fieldset { min-width: 0; margin: 0; padding: 0; border: 0; } legend { margin-bot
 .proxy-auth-hint { margin: 0; color: var(--text-secondary); font-size: calc(12px + var(--font-adjust, 0px)); line-height: 1.5; }
 .proxy-auth-fields .checkbox-card { min-height: 38px; height: auto; }
 .proxy-auth-fields input[type="checkbox"] { flex-shrink: 0; }
+
+.ssh-transfer-sheet { max-width: 680px; }
+.ssh-transfer-body { padding: 20px 24px; display: grid; gap: 16px; min-height: 0; overflow: auto; }
+.ssh-transfer-body p { margin: 0; color: var(--text-secondary); line-height: 1.6; }
+.ssh-transfer-body label { display: grid; gap: 8px; }
+.ssh-transfer-body textarea { box-sizing: border-box; width: 100%; min-height: 240px; max-height: 45vh; padding: 12px; resize: vertical; border: 1px solid var(--border-strong); border-radius: 8px; color: var(--text); background: var(--surface-solid); font-family: var(--font-mono, monospace); font-size: 12px; line-height: 1.6; white-space: pre; }
+.ssh-transfer-body input[type="file"] { max-width: 100%; }
+.ssh-transfer-body .form-error { color: var(--red); }
+.ssh-transfer-notice { overflow-wrap: anywhere; }
+
+.brand__version { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.about-update { flex-wrap: wrap; }
+.about-update__actions { flex-wrap: wrap; }

@@ -55,17 +55,20 @@ import {
   TerminalSquare,
   Trash2,
   UserRound,
+  Upload,
   WifiOff,
   X,
   Zap,
 } from 'lucide-react'
 import { api } from './services/api'
+import { CONNECTION_RETRY_DELAY_MS, shouldDeferConnection } from './utils/connectionRetry'
 import { checkDesktopAppUpdate, relaunchUpdatedApp, type DesktopAppUpdate, type DesktopDownloadEvent } from './services/appUpdater'
 import { openExternalUrl } from './services/external'
 import { popupServerContextMenu } from './services/serverContextMenu'
 import type { AppSettings, DetailTab, GpuMemoryStallWarning, HistoryHeatmapPoint, HistoryPoint, HostKeyInfo, IdleReservation, IdleReservationFilters, InteractionLogSummary, LinkedProjectResourcePlan, Project, ProjectDraft, ProjectSyncProgress, RemoteHistorySyncResult, Server, ServerDraft, ServerNotificationCategory, ServerNotificationSettings, Snapshot } from './types/models'
 import { isRackTopManagedIdentity } from './utils/sshSetup'
 import { DeleteServerDialog } from './components/DeleteServerDialog'
+import { SshExportSheet, SshImportSourceSheet } from './components/SshTransferSheet'
 import { AppUpdateDialog } from './components/AppUpdateDialog'
 import { HistoryHeatmaps, StorageWaffleList } from './components/HistoryHeatmap'
 import { MetricBar } from './components/MetricBar'
@@ -309,6 +312,8 @@ function App() {
   const [updateCheckError, setUpdateCheckError] = useState<string | null>(null)
   const [ignoredUpdateVersion, setIgnoredUpdateVersion] = useState(loadIgnoredUpdateVersion)
   const [importingConfig, setImportingConfig] = useState(false)
+  const [showSshExport, setShowSshExport] = useState(false)
+  const [showImportSource, setShowImportSource] = useState(false)
   const [importDrafts, setImportDrafts] = useState<ServerDraft[] | null>(null)
   const [mainView, setMainView] = useState<'server' | 'fleet' | 'idle' | 'mine' | 'projects'>(() => browserPreviewState === 'reconnecting' || browserPreviewState === 'notifications' ? 'server' : 'fleet')
   const [projects, setProjects] = useState<Project[]>([])
@@ -422,7 +427,7 @@ function App() {
     if (quiet && serverConfig) {
       const fastStatusView = mainView === 'fleet' || (mainView === 'server' && selectedTab === 'overview' && selectedServerId === serverId)
       const refreshIntervalMs = statusRefreshIntervalMs(fastStatusView, document.hidden, serverConfig.samplingIntervalSeconds, settings?.backgroundSamplingIntervalSeconds ?? 15)
-      if (nowMs - (lastAttemptAt.current[serverId] ?? 0) < refreshIntervalMs || nowMs < (nextRetryAt.current[serverId] ?? 0)) return
+      if (nowMs - (lastAttemptAt.current[serverId] ?? 0) < refreshIntervalMs || shouldDeferConnection(nextRetryAt.current[serverId], nowMs)) return
     }
     lastAttemptAt.current[serverId] = nowMs
     if (!quiet) delete nextRetryAt.current[serverId]
@@ -513,8 +518,7 @@ function App() {
       const message = error instanceof Error ? error.message : String(error)
       failureCounts.current[serverId] = (failureCounts.current[serverId] ?? 0) + 1
       const failureCount = failureCounts.current[serverId]
-      const retryDelays = [1, 2, 5, 10, 30]
-      nextRetryAt.current[serverId] = Date.now() + retryDelays[Math.min(failureCount - 1, retryDelays.length - 1)] * 1000
+      nextRetryAt.current[serverId] = Date.now() + CONNECTION_RETRY_DELAY_MS
       if (failureCount >= offlineFailureThreshold(activeProjectSync)) {
         const key = `offline:${serverId}`
         if (!notifiedConditions.current.has(key)) {
@@ -527,8 +531,8 @@ function App() {
         ...server,
         status: serverStatusAfterSyncAwareFailure(server.status, failureCount, activeProjectSync, Boolean(snapshotsRef.current[serverId])),
         lastError: activeProjectSync && failureCount < offlineFailureThreshold(true)
-          ? `大文件同步期间采集暂时延迟 · ${retryDelays[Math.min(failureCount - 1, retryDelays.length - 1)]} 秒后重试`
-          : `${message} · ${retryDelays[Math.min(failureCount - 1, retryDelays.length - 1)]} 秒后重试`,
+          ? `大文件同步期间采集暂时延迟 · 30 分钟后自动重连，可手动刷新`
+          : `${message} · 30 分钟后自动重连，可手动刷新`,
       } : server))
       if (message.includes('主机指纹')) {
         try {
@@ -653,7 +657,7 @@ function App() {
   }, [checkingUpdate])
 
   const startAppUpdate = useCallback(async () => {
-    const requestedVersion = latestRelease?.version ?? '1.25.4'
+    const requestedVersion = latestRelease?.version ?? packageInfo.version
     if (!api.isDesktop) {
       setAppUpdateState({ phase: 'downloading', version: requestedVersion, downloadedBytes: 6.8 * 1024 ** 2, totalBytes: 11.4 * 1024 ** 2 })
       return
@@ -761,7 +765,7 @@ function App() {
       }
     }
     void retryRemoteCleanups()
-    const interval = window.setInterval(() => void retryRemoteCleanups(), 5 * 60 * 1000)
+    const interval = window.setInterval(() => void retryRemoteCleanups(), CONNECTION_RETRY_DELAY_MS)
     return () => { cancelled = true; window.clearInterval(interval) }
   }, [])
 
@@ -791,7 +795,7 @@ function App() {
       const allEnabledServers = remoteHistoryServersRef.current.filter((server) => server.remoteHistoryEnabled)
       const nowSeconds = Math.floor(Date.now() / 1000)
       const freshServerCount = initial ? allEnabledServers.filter((server) => isRemoteSyncFresh(server, nowSeconds)).length : 0
-      const enabledServers = allEnabledServers.filter((server) => (!initial || !isRemoteSyncFresh(server, nowSeconds)) && !remoteSyncInFlight.current.has(server.id))
+      const enabledServers = allEnabledServers.filter((server) => !shouldDeferConnection(nextRetryAt.current[server.id], Date.now()) && (!initial || !isRemoteSyncFresh(server, nowSeconds)) && !remoteSyncInFlight.current.has(server.id))
       if (enabledServers.length === 0) return
       let completed = freshServerCount
       const total = allEnabledServers.length
@@ -811,26 +815,17 @@ function App() {
         if (remoteSyncInFlight.current.has(server.id)) return
         remoteSyncInFlight.current.add(server.id)
         try {
-          let result: RemoteHistorySyncResult | null = null
-          let lastError: unknown = null
-          for (const delay of [0, 1_000, 2_000]) {
-            if (delay) await new Promise((resolve) => window.setTimeout(resolve, delay))
-            try {
-              await api.configureRemoteHistory(server.id)
-              result = await api.syncRemoteHistory(server.id)
-              lastError = null
-              break
-            } catch (reason) {
-              lastError = reason
-            }
-          }
-          if (lastError || !result) throw lastError ?? new Error('历史同步未返回结果')
+          if (shouldDeferConnection(nextRetryAt.current[server.id], Date.now())) return
+          await api.configureRemoteHistory(server.id)
+          if (shouldDeferConnection(nextRetryAt.current[server.id], Date.now())) return
+          const result = await api.syncRemoteHistory(server.id)
           remoteSyncRecoveryQueued.current.delete(server.id)
           importedCount += result.importedCount
           if (!cancelled && result.latestTimestamp) {
             setServers((current) => current.map((item) => item.id === server.id && item.remoteHistoryLastSyncAt !== result.latestTimestamp ? { ...item, remoteHistoryLastSyncAt: result.latestTimestamp } : item))
           }
         } catch {
+          nextRetryAt.current[server.id] = Date.now() + CONNECTION_RETRY_DELAY_MS
           failedServerIds.push(server.id)
         } finally {
           completed += 1
@@ -1396,7 +1391,9 @@ function App() {
     }
   }
 
-  async function importConfig() {
+  function importConfig() { setShowImportSource(true) }
+
+  async function readLocalConfig() {
     if (importingConfig) return
     setImportingConfig(true)
     try {
@@ -1406,6 +1403,7 @@ function App() {
         return
       }
       setImportDrafts(drafts)
+      setShowImportSource(false)
     } catch (error) {
       setToast(`SSH Config 导入失败：${String(error)}`)
     } finally {
@@ -1594,7 +1592,7 @@ function App() {
           <div className="brand-row">
             <button className="brand" onClick={() => { setShowAbout(true); void checkForUpdates(true) }} aria-label="关于 RackTop">
               <span className="brand__mark"><Activity size={18} strokeWidth={2.4} /></span>
-              <div><strong>RackTop</strong><small>算力监控</small></div>
+              <div><strong>RackTop</strong><small className="brand__version">v{packageInfo.version}</small></div>
             </button>
             {checkingUpdate && <span className="brand__update brand__update--checking" aria-label="正在检查更新"><RefreshCw className="spin" size={15} /></span>}
             {!checkingUpdate && shouldShowUpdateBadge(latestRelease?.version, ignoredUpdateVersion) && <button className="brand__update" onClick={() => void startAppUpdate()} aria-label={`下载并安装 RackTop ${latestRelease?.version}`} title={`更新到 RackTop ${latestRelease?.version}`}><CircleArrowUp size={16} /></button>}
@@ -1635,6 +1633,7 @@ function App() {
         <div className="sidebar__footer">
           <button onClick={() => { setEditingServer(null); setShowServerForm(true) }}><Plus size={16} />添加服务器</button>
           <button onClick={importConfig} disabled={importingConfig}><Download size={16} />{importingConfig ? '正在读取 SSH Config…' : '导入 SSH Config'}</button>
+          <button onClick={() => setShowSshExport(true)} disabled={servers.length === 0}><Upload size={16} />导出 SSH Config</button>
           <button onClick={() => setShowActivityLog(true)}><ScrollText size={16} />日志</button>
           <button onClick={() => setShowSettings(true)}><Settings size={16} />设置</button>
         </div>
@@ -1715,7 +1714,9 @@ function App() {
       {projectConflictTarget && <ProjectConflictDialog project={projectConflictTarget.project} server={servers.find((item) => item.id === projectConflictTarget.targetServerId)} onClose={() => setProjectConflictTarget(null)} onConfirm={() => { const pending = projectConflictTarget; setProjectConflictTarget(null); void syncProjectTarget(pending.project, pending.targetServerId, true, true) }} />}
       {showSettings && settings && <SettingsSheet settings={settings} onboardingVisible={!onboardingDismissed} onClose={() => setShowSettings(false)} onSave={async (value, showOnboarding) => { setSettings(await api.saveSettings(value)); if (showOnboarding) { localStorage.removeItem(ONBOARDING_DISMISSED_KEY); setOnboardingDismissed(false); setOnboardingUseActualState(true); setOnboardingCollapsed(false); if (onboardingDismissed) setMainView('fleet') } else { localStorage.setItem(ONBOARDING_DISMISSED_KEY, 'true'); setOnboardingDismissed(true) } setShowSettings(false); setToast('设置已保存') }} />}
       {showActivityLog && <ActivityLogSheet servers={servers} snapshots={snapshots} onClose={() => setShowActivityLog(false)} />}
-      {showAbout && <AboutSheet latestRelease={latestRelease} checkingUpdate={checkingUpdate} updateError={updateCheckError} ignoredVersion={ignoredUpdateVersion} onIgnoreUpdate={(version) => { saveIgnoredUpdateVersion(version); setIgnoredUpdateVersion(version); setToast(`已忽略 v${version} 的更新提示`) }} onCheckUpdate={() => void checkForUpdates(true)} onClose={() => setShowAbout(false)} onNotice={setToast} />}
+      {showSshExport && <SshExportSheet servers={servers} onClose={() => setShowSshExport(false)} />}
+      {showImportSource && <SshImportSourceSheet onClose={() => setShowImportSource(false)} onReadLocal={readLocalConfig} onParsed={(drafts) => { setImportDrafts(drafts); setShowImportSource(false) }} />}
+      {showAbout && <AboutSheet latestRelease={latestRelease} onInstallUpdate={() => { setShowAbout(false); void startAppUpdate() }} checkingUpdate={checkingUpdate} updateError={updateCheckError} ignoredVersion={ignoredUpdateVersion} onIgnoreUpdate={(version) => { saveIgnoredUpdateVersion(version); setIgnoredUpdateVersion(version); setToast(`已忽略 v${version} 的更新提示`) }} onCheckUpdate={() => void checkForUpdates(true)} onClose={() => setShowAbout(false)} onNotice={setToast} />}
       {appUpdateState && <AppUpdateDialog state={appUpdateState} onClose={() => setAppUpdateState(null)} onRetry={() => {
         const previous = desktopUpdateRef.current
         desktopUpdateRef.current = null
@@ -2604,14 +2605,14 @@ function SettingsGroup({ icon, title, children }: { icon: React.ReactNode; title
   return <section className="settings-group"><header><span>{icon}</span><h3>{title}</h3></header><div>{children}</div></section>
 }
 
-function AboutSheet({ latestRelease, checkingUpdate, updateError, ignoredVersion, onIgnoreUpdate, onCheckUpdate, onClose, onNotice }: { latestRelease?: ReleaseInfo; checkingUpdate: boolean; updateError: string | null; ignoredVersion?: string; onIgnoreUpdate: (version: string) => void; onCheckUpdate: () => void; onClose: () => void; onNotice: (message: string) => void }) {
+function AboutSheet({ latestRelease, onInstallUpdate, checkingUpdate, updateError, ignoredVersion, onIgnoreUpdate, onCheckUpdate, onClose, onNotice }: { latestRelease?: ReleaseInfo; onInstallUpdate: () => void; checkingUpdate: boolean; updateError: string | null; ignoredVersion?: string; onIgnoreUpdate: (version: string) => void; onCheckUpdate: () => void; onClose: () => void; onNotice: (message: string) => void }) {
   const [licenses, setLicenses] = useState(false)
   const openExternal = (url: string) => {
     void openExternalUrl(url).catch((error) => onNotice(`无法打开默认浏览器：${String(error)}`))
   }
   const ignored = Boolean(latestRelease && latestRelease.version === ignoredVersion)
   const updateStatus = checkingUpdate ? '正在检查 GitHub Releases…' : updateError ? `检查失败：${updateError}` : latestRelease ? `发现新版本 v${latestRelease.version}${ignored ? ' · 已忽略此版本提醒' : ''}` : '当前已是最新版本'
-  return <div className="scrim" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="sheet about-sheet" role="dialog" aria-modal="true" aria-labelledby="about-title"><header className="sheet__header"><div><p className="eyebrow">About</p><h2 id="about-title">RackTop</h2></div><button className="icon-button" onClick={onClose} aria-label="关闭"><X size={18} /></button></header><div className="about-body"><div className="about-product"><span className="about-product__mark"><Activity size={28} /></span><div><strong>RackTop {packageInfo.version}</strong><p>面向共享算力服务器的安静、实时资源监控与 SSH 工作台。</p></div></div><div className="about-update" role="status"><span className={latestRelease && !ignored ? 'is-new' : ''}>{checkingUpdate ? <RefreshCw className="spin" size={17} /> : <CircleArrowUp size={17} />}</span><div><strong>版本更新</strong><small>{updateStatus}</small></div><div className="about-update__actions">{latestRelease && !checkingUpdate ? <><button className="button button--secondary button--small" onClick={() => openExternal(latestRelease.url)}>查看版本<ExternalLink size={11} /></button>{!ignored && <button className="button button--quiet button--small" onClick={() => onIgnoreUpdate(latestRelease.version)}>忽略此版本</button>}</> : <><button className="button button--secondary button--small" onClick={() => openExternal(releaseUrl(packageInfo.version))}>版本说明</button><button className="button button--secondary button--small" disabled={checkingUpdate} onClick={onCheckUpdate}>{checkingUpdate ? '检查中…' : '重新检查'}</button></>}</div></div><div className="about-author"><img src={authorAvatar} alt="Tongzh-SEU 头像" /><div><strong>Tongzh-SEU</strong><small>作者与维护者</small><div className="about-author__links"><button className="about-external-link" onClick={() => openExternal('https://github.com/Tongzh-SEU')}><Github size={13} />GitHub @Tongzh-SEU<ExternalLink size={11} /></button><button className="about-external-link" onClick={() => openExternal('https://xhslink.cn/o/AsgFqJMZfR5')}>小红书 @tooongtooong<ExternalLink size={11} /></button></div></div></div><div className="about-links"><button onClick={() => openExternal('https://github.com/Tongzh-SEU/RackTop')}><Github size={15} /><span><strong>GitHub 仓库</strong><small>Tongzh-SEU/RackTop</small></span><ExternalLink size={13} /></button><button aria-expanded={licenses} aria-controls="about-licenses" onClick={() => setLicenses((value) => !value)}><Database size={15} /><span><strong>第三方许可</strong><small>{licenses ? '收起开源组件' : '查看主要运行时依赖'}</small></span><ChevronRight className={`disclosure-icon${licenses ? ' disclosure-icon--expanded' : ''}`} size={13} /></button></div>{licenses && <div className="about-licenses" id="about-licenses"><p><strong>React、Tauri、xterm.js、ECharts、Lucide</strong></p><p>各组件版权归其贡献者所有，并按各自开源许可证分发。完整版本与传递依赖记录见应用包内的 npm 与 Cargo 锁文件。</p></div>}<small className="about-contact">联系：通过 GitHub Issues 或作者主页发起讨论</small></div><footer className="sheet__footer"><button className="button button--primary" onClick={onClose}>完成</button></footer></section></div>
+  return <div className="scrim" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="sheet about-sheet" role="dialog" aria-modal="true" aria-labelledby="about-title"><header className="sheet__header"><div><p className="eyebrow">About</p><h2 id="about-title">RackTop</h2></div><button className="icon-button" onClick={onClose} aria-label="关闭"><X size={18} /></button></header><div className="about-body"><div className="about-product"><span className="about-product__mark"><Activity size={28} /></span><div><strong>当前版本：v{packageInfo.version}</strong><p>{packageInfo.version.includes('-linux.') ? 'Linux 社区版 · AIsMovDataInfra/RackTop' : '面向共享算力服务器的资源监控与 SSH 工作台'}</p></div></div><div className="about-update" role="status"><span className={latestRelease && !ignored ? 'is-new' : ''}>{checkingUpdate ? <RefreshCw className="spin" size={17} /> : <CircleArrowUp size={17} />}</span><div><strong>版本更新</strong><small>{updateStatus}</small></div><div className="about-update__actions">{latestRelease && !checkingUpdate ? <><button className="button button--primary button--small" onClick={onInstallUpdate}>更新到 v{latestRelease.version}</button><button className="button button--secondary button--small" onClick={() => openExternal(latestRelease.url)}>查看版本<ExternalLink size={11} /></button>{!ignored && <button className="button button--quiet button--small" onClick={() => onIgnoreUpdate(latestRelease.version)}>忽略此版本</button>}</> : <><button className="button button--secondary button--small" onClick={() => openExternal(releaseUrl(packageInfo.version))}>版本说明</button><button className="button button--secondary button--small" disabled={checkingUpdate} onClick={onCheckUpdate}>{checkingUpdate ? '检查中…' : '重新检查'}</button></>}</div></div><div className="about-author"><img src={authorAvatar} alt="Tongzh-SEU 头像" /><div><strong>Tongzh-SEU</strong><small>作者与维护者</small><div className="about-author__links"><button className="about-external-link" onClick={() => openExternal('https://github.com/Tongzh-SEU')}><Github size={13} />GitHub @Tongzh-SEU<ExternalLink size={11} /></button><button className="about-external-link" onClick={() => openExternal('https://xhslink.cn/o/AsgFqJMZfR5')}>小红书 @tooongtooong<ExternalLink size={11} /></button></div></div></div><div className="about-links"><button onClick={() => openExternal('https://github.com/Tongzh-SEU/RackTop')}><Github size={15} /><span><strong>GitHub 仓库</strong><small>Tongzh-SEU/RackTop</small></span><ExternalLink size={13} /></button><button aria-expanded={licenses} aria-controls="about-licenses" onClick={() => setLicenses((value) => !value)}><Database size={15} /><span><strong>第三方许可</strong><small>{licenses ? '收起开源组件' : '查看主要运行时依赖'}</small></span><ChevronRight className={`disclosure-icon${licenses ? ' disclosure-icon--expanded' : ''}`} size={13} /></button></div>{licenses && <div className="about-licenses" id="about-licenses"><p><strong>React、Tauri、xterm.js、ECharts、Lucide</strong></p><p>各组件版权归其贡献者所有，并按各自开源许可证分发。完整版本与传递依赖记录见应用包内的 npm 与 Cargo 锁文件。</p></div>}<small className="about-contact">联系：通过 GitHub Issues 或作者主页发起讨论</small></div><footer className="sheet__footer"><button className="button button--primary" onClick={onClose}>完成</button></footer></section></div>
 }
 
 function SshImportSheet({ drafts, servers, onClose, onImport }: { drafts: ServerDraft[]; servers: Server[]; onClose: () => void; onImport: (drafts: ServerDraft[]) => Promise<void> }) {

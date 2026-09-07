@@ -2,9 +2,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { check } from '@tauri-apps/plugin-updater'
 import { checkDesktopAppUpdate } from './appUpdater'
+import { invoke } from '@tauri-apps/api/core'
 
 vi.mock('@tauri-apps/plugin-updater', () => ({ check: vi.fn().mockResolvedValue(null) }))
 vi.mock('@tauri-apps/plugin-process', () => ({ relaunch: vi.fn() }))
+vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(), Channel: class { onmessage: unknown } }))
 
 beforeEach(() => vi.mocked(check).mockResolvedValue(null))
 
@@ -14,10 +16,26 @@ afterEach(() => {
 })
 
 describe('desktop update platform support', () => {
-  it('explains manual Linux updates without querying the macOS/Windows feed', async () => {
+  it('checks the signed Linux channel without querying the upstream feed', async () => {
     vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (X11; Linux x86_64)')
-    await expect(checkDesktopAppUpdate()).rejects.toThrow('github.com/AIsMovDataInfra/RackTop/releases')
+    vi.mocked(invoke).mockResolvedValueOnce({ version: '1.26.0-linux.10' }).mockResolvedValueOnce(undefined)
+    const update = await checkDesktopAppUpdate()
+    expect(update?.version).toBe('1.26.0-linux.10')
+    expect(invoke).toHaveBeenCalledWith('check_linux_update')
+    const events = vi.fn()
+    await update?.downloadAndInstall(events)
+    expect(invoke).toHaveBeenLastCalledWith('install_linux_update', expect.objectContaining({ version: '1.26.0-linux.10' }))
+    const channel = (vi.mocked(invoke).mock.calls.at(-1)?.[1] as { onEvent: { onmessage: (event: unknown) => void } }).onEvent
+    channel.onmessage({ event: 'Progress', data: { chunkLength: 100 } })
+    expect(events).toHaveBeenCalledWith({ event: 'Progress', data: { chunkLength: 100 } })
     expect(check).not.toHaveBeenCalled()
+  })
+
+  it('reports no Linux update and preserves check errors', async () => {
+    vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (X11; Linux x86_64)')
+    vi.mocked(invoke).mockResolvedValueOnce(null).mockRejectedValueOnce(new Error('network unavailable'))
+    await expect(checkDesktopAppUpdate()).resolves.toBeNull()
+    await expect(checkDesktopAppUpdate()).rejects.toThrow('network unavailable')
   })
 
   it.each(['Windows NT 10.0', 'Macintosh; Intel Mac OS X 10_15_7'])('preserves updates on %s', async (platform) => {

@@ -1,3 +1,7 @@
+#[cfg(target_os = "linux")]
+pub mod linux_update;
+#[cfg(target_os = "linux")]
+use linux_update::{check_linux_update, install_linux_update, relaunch_linux_app};
 pub mod collector;
 pub mod ssh_connection;
 pub mod models;
@@ -559,6 +563,21 @@ fn import_ssh_config(path: Option<String>) -> Result<Vec<ServerDraft>, String> {
 }
 
 #[tauri::command]
+fn save_ssh_export(content: String) -> Result<String, String> {
+    use std::io::Write;
+    if content.len() > 2 * 1024 * 1024 || !content.starts_with("# RackTop SSH Config\n") { return Err("无效的 SSH 导出内容".into()); }
+    let directory = dirs::download_dir().ok_or("无法定位下载目录")?;
+    std::fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+    let path = directory.join(format!("RackTop_ssh_{}.conf", uuid::Uuid::new_v4()));
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    { use std::os::unix::fs::OpenOptionsExt; options.mode(0o600); }
+    options.open(&path).and_then(|mut file| file.write_all(content.as_bytes())).map_err(|error| format!("无法保存 SSH 配置：{error}"))?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
 fn get_settings(database: State<'_, Database>) -> Result<AppSettings, String> {
     database.get_settings()
 }
@@ -817,6 +836,16 @@ fn window_close(window: tauri::WebviewWindow) -> Result<(), String> {
     window.close().map_err(|error| error.to_string())
 }
 
+#[cfg(not(target_os = "linux"))]
+#[tauri::command]
+fn check_linux_update() -> Result<(), String> { Err("此更新入口仅用于 Linux".into()) }
+#[cfg(not(target_os = "linux"))]
+#[tauri::command]
+fn install_linux_update() -> Result<(), String> { Err("此更新入口仅用于 Linux".into()) }
+#[cfg(not(target_os = "linux"))]
+#[tauri::command]
+fn relaunch_linux_app() -> Result<(), String> { Err("此更新入口仅用于 Linux".into()) }
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
@@ -828,6 +857,8 @@ pub fn run() {
             let database = Database::open(&app_data.join("racktop.sqlite")).map_err(|error| Box::<dyn std::error::Error>::from(std::io::Error::other(error)))?;
             app.manage(database);
             app.manage(TerminalManager::default());
+            #[cfg(target_os = "linux")]
+            app.manage(linux_update::LinuxUpdateState::default());
             app.manage(InteractionLogStore::default());
 
             #[cfg(target_os = "windows")]
@@ -888,7 +919,7 @@ pub fn run() {
             }
             _ => {}
         })
-        .invoke_handler(tauri::generate_handler![list_servers, save_server, list_server_notification_settings, save_server_notification_settings, delete_server, retry_remote_cleanups, reorder_servers, start_terminal, write_terminal, resize_terminal, close_terminal, open_setup_terminal, verify_ssh_setup, collect_server, list_latest_snapshots, get_interaction_log_summary, get_history, get_history_heatmap, get_usage_distribution, configure_remote_history, sync_remote_history, list_idle_reservations, save_idle_reservation, delete_idle_reservation, list_projects, save_project, delete_project, probe_project_paths, suggest_project_paths, inspect_project, inspect_project_source, sync_project, list_project_sync_progress, cancel_project_sync, import_ssh_config, get_settings, save_settings, scan_host_key, trust_host_key, install_nvidia_driver, terminate_process, launch_managed_run, read_managed_run_log, get_managed_run_status, update_tray_summary, window_minimize, window_toggle_maximize, window_close])
+        .invoke_handler(tauri::generate_handler![check_linux_update, install_linux_update, relaunch_linux_app, list_servers, save_server, list_server_notification_settings, save_server_notification_settings, delete_server, retry_remote_cleanups, reorder_servers, start_terminal, write_terminal, resize_terminal, close_terminal, open_setup_terminal, verify_ssh_setup, collect_server, list_latest_snapshots, get_interaction_log_summary, get_history, get_history_heatmap, get_usage_distribution, configure_remote_history, sync_remote_history, list_idle_reservations, save_idle_reservation, delete_idle_reservation, list_projects, save_project, delete_project, probe_project_paths, suggest_project_paths, inspect_project, inspect_project_source, sync_project, list_project_sync_progress, cancel_project_sync, import_ssh_config, save_ssh_export, get_settings, save_settings, scan_host_key, trust_host_key, install_nvidia_driver, terminate_process, launch_managed_run, read_managed_run_log, get_managed_run_status, update_tray_summary, window_minimize, window_toggle_maximize, window_close])
         .run(tauri::generate_context!())
         .expect("RackTop 启动失败");
 }

@@ -12,6 +12,12 @@ describe('update checks', () => {
     expect(isNewerVersion('v1.25.0', '1.24.5')).toBe(true)
     expect(isNewerVersion('v1.24.5', '1.24.5')).toBe(false)
     expect(isNewerVersion('v1.9.0', '1.10.0')).toBe(false)
+    expect(isNewerVersion('1.26.0-linux.4', '1.26.0-linux.3')).toBe(true)
+    expect(isNewerVersion('1.26.0-linux.10', '1.26.0-linux.9')).toBe(true)
+    expect(isNewerVersion('1.26.0-linux.4', '1.26.0-linux.4')).toBe(false)
+    expect(isNewerVersion('1.26.0-linux.3', '1.26.0-linux.4')).toBe(false)
+    expect(isNewerVersion('1.26.0', '1.26.0-linux.4')).toBe(true)
+    expect(isNewerVersion('invalid', '1.26.0-linux.4')).toBe(false)
   })
 
   it('hides only the ignored release and reappears for a newer release', () => {
