@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { AlertTriangle, ArrowRight, Check, ChevronRight, Copy, Database, KeyRound, Terminal, X } from 'lucide-react'
 import type { ServerDraft } from '../types/models'
 import { api } from '../services/api'
+import { sshKeyManagerApi, type SshKeyInfo } from '../services/sshKeyManager'
 import { RACKTOP_MANAGED_IDENTITY_PATH, sshSetupTargetValidationMessage, unixSshSetupScript, windowsSshSetupScript } from '../utils/sshSetup'
 
 const MAX_SERVER_NAME_LENGTH = 24
@@ -61,6 +62,22 @@ export function ServerForm({ initial, defaultRemoteHistoryEnabled = true, showGu
   const setupVerificationAttempt = useRef(0)
   const [dismissGuide, setDismissGuide] = useState(false)
   const [guideOpen, setGuideOpen] = useState(!initial?.id && showGuide)
+  const [availableKeys, setAvailableKeys] = useState<SshKeyInfo[]>([])
+  const [keysLoading, setKeysLoading] = useState(false)
+  const [keysError, setKeysError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (draft.authMethod !== 'privateKey' || !sshKeyManagerApi.isDesktop) return
+    let cancelled = false
+    setKeysLoading(true)
+    setKeysError(null)
+    sshKeyManagerApi.list().then((keys) => {
+      if (!cancelled) setAvailableKeys(keys.filter((key) => key.privateKeyPath))
+    }).catch((reason: unknown) => {
+      if (!cancelled) setKeysError(`无法读取密钥列表：${String(reason)}`)
+    }).finally(() => { if (!cancelled) setKeysLoading(false) })
+    return () => { cancelled = true }
+  }, [draft.authMethod])
 
   useEffect(() => () => { setupVerificationAttempt.current += 1 }, [])
 
@@ -276,7 +293,12 @@ export function ServerForm({ initial, defaultRemoteHistoryEnabled = true, showGu
               <label>SSH Config 别名<input value={draft.sshAlias ?? ''} onChange={(event) => set('sshAlias', event.target.value)} placeholder="~/.ssh/config 中的 Host，例如 gpu-a" /></label>
             )}
             {draft.authMethod === 'privateKey' && (
-              <><label>私钥路径<input value={draft.identityFile ?? ''} onChange={(event) => set('identityFile', event.target.value)} placeholder="~/.ssh/id_ed25519" /></label>{setupVerification.phase === 'success' && <p className="key-guide__validation key-guide__validation--success" role="status"><Check size={14} />{setupVerification.message}</p>}</>
+              <>
+                {sshKeyManagerApi.isDesktop && <label>选择已管理的密钥<select aria-label="选择已管理的密钥" disabled={keysLoading} value={availableKeys.some((key) => key.privateKeyPath === draft.identityFile) ? draft.identityFile : ''} onChange={(event) => { if (event.target.value) set('identityFile', event.target.value) }}><option value="">{keysLoading ? '正在读取密钥…' : '手动填写路径，或从列表选择'}</option>{availableKeys.map((key) => <option key={key.id} value={key.privateKeyPath!}>{key.name} · {key.algorithm} · {key.fingerprint.slice(0, 20)}…</option>)}</select></label>}
+                {keysError && <p className="form-error" role="status">{keysError}，也可以手动填写路径。</p>}
+                <label>私钥路径<input value={draft.identityFile ?? ''} onChange={(event) => set('identityFile', event.target.value)} placeholder="~/.ssh/id_ed25519" /></label>
+                {setupVerification.phase === 'success' && <p className="key-guide__validation key-guide__validation--success" role="status"><Check size={14} />{setupVerification.message}</p>}
+              </>
             )}
             {draft.authMethod === 'password' && (
               <div className="security-warning">

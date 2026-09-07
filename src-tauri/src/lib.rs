@@ -10,6 +10,7 @@ mod project_sync;
 pub mod host_key;
 mod ssh_config;
 mod ssh_keys;
+mod key_manager;
 pub mod storage;
 mod terminal;
 
@@ -197,6 +198,35 @@ fn get_interaction_log_summary(database: State<'_, Database>, logs: State<'_, In
 #[tauri::command]
 fn list_servers(database: State<'_, Database>) -> Result<Vec<Server>, String> {
     database.list_servers()
+}
+
+#[tauri::command]
+async fn list_ssh_keys(database: State<'_, Database>) -> Result<Vec<key_manager::SshKeyInfo>, String> {
+    let servers = database.list_servers()?;
+    tauri::async_runtime::spawn_blocking(move || key_manager::list(&servers)).await.map_err(|_| "无法完成密钥读取".to_string())?
+}
+
+#[tauri::command]
+async fn generate_ssh_key(name: String, algorithm: String, passphrase: String) -> Result<key_manager::SshKeyInfo, String> {
+    tauri::async_runtime::spawn_blocking(move || key_manager::generate(name, algorithm, passphrase)).await.map_err(|_| "无法完成密钥生成".to_string())?
+}
+
+#[tauri::command]
+async fn import_ssh_key(database: State<'_, Database>, path: String, name: Option<String>) -> Result<key_manager::SshKeyInfo, String> {
+    let servers = database.list_servers()?;
+    tauri::async_runtime::spawn_blocking(move || key_manager::import(path, name, &servers)).await.map_err(|_| "无法完成密钥导入".to_string())?
+}
+
+#[tauri::command]
+async fn rename_ssh_key(database: State<'_, Database>, id: String, name: String) -> Result<(), String> {
+    let servers = database.list_servers()?;
+    tauri::async_runtime::spawn_blocking(move || key_manager::rename(id, name, &servers)).await.map_err(|_| "无法完成密钥重命名".to_string())?
+}
+
+#[tauri::command]
+async fn forget_ssh_key(database: State<'_, Database>, id: String) -> Result<(), String> {
+    let servers = database.list_servers()?;
+    tauri::async_runtime::spawn_blocking(move || key_manager::forget(id, &servers)).await.map_err(|_| "无法将密钥移出列表".to_string())?
 }
 
 #[tauri::command]
@@ -919,7 +949,7 @@ pub fn run() {
             }
             _ => {}
         })
-        .invoke_handler(tauri::generate_handler![check_linux_update, install_linux_update, relaunch_linux_app, list_servers, save_server, list_server_notification_settings, save_server_notification_settings, delete_server, retry_remote_cleanups, reorder_servers, start_terminal, write_terminal, resize_terminal, close_terminal, open_setup_terminal, verify_ssh_setup, collect_server, list_latest_snapshots, get_interaction_log_summary, get_history, get_history_heatmap, get_usage_distribution, configure_remote_history, sync_remote_history, list_idle_reservations, save_idle_reservation, delete_idle_reservation, list_projects, save_project, delete_project, probe_project_paths, suggest_project_paths, inspect_project, inspect_project_source, sync_project, list_project_sync_progress, cancel_project_sync, import_ssh_config, save_ssh_export, get_settings, save_settings, scan_host_key, trust_host_key, install_nvidia_driver, terminate_process, launch_managed_run, read_managed_run_log, get_managed_run_status, update_tray_summary, window_minimize, window_toggle_maximize, window_close])
+        .invoke_handler(tauri::generate_handler![check_linux_update, install_linux_update, relaunch_linux_app, list_ssh_keys, generate_ssh_key, import_ssh_key, rename_ssh_key, forget_ssh_key, list_servers, save_server, list_server_notification_settings, save_server_notification_settings, delete_server, retry_remote_cleanups, reorder_servers, start_terminal, write_terminal, resize_terminal, close_terminal, open_setup_terminal, verify_ssh_setup, collect_server, list_latest_snapshots, get_interaction_log_summary, get_history, get_history_heatmap, get_usage_distribution, configure_remote_history, sync_remote_history, list_idle_reservations, save_idle_reservation, delete_idle_reservation, list_projects, save_project, delete_project, probe_project_paths, suggest_project_paths, inspect_project, inspect_project_source, sync_project, list_project_sync_progress, cancel_project_sync, import_ssh_config, save_ssh_export, get_settings, save_settings, scan_host_key, trust_host_key, install_nvidia_driver, terminate_process, launch_managed_run, read_managed_run_log, get_managed_run_status, update_tray_summary, window_minimize, window_toggle_maximize, window_close])
         .run(tauri::generate_context!())
         .expect("RackTop 启动失败");
 }

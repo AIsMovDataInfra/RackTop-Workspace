@@ -81,6 +81,7 @@ import { isRemoteSyncFresh, RemoteSyncCoordinator, RemoteSyncStatus, REMOTE_SYNC
 import { ResourceTrend } from './components/ResourceTrend'
 import { ServerForm } from './components/ServerForm'
 import { SshTerminal } from './components/SshTerminal'
+import { SshKeyManager } from './components/SshKeyManager'
 import { StatusPill } from './components/StatusPill'
 import { TrendChart } from './components/TrendChart'
 import { UsageDistribution } from './components/UsageDistribution'
@@ -295,6 +296,7 @@ function App() {
   const [editingServer, setEditingServer] = useState<Server | null>(null)
   const [showSettings, setShowSettings] = useState(false)
   const [showActivityLog, setShowActivityLog] = useState(false)
+  const [showKeyManager, setShowKeyManager] = useState(false)
   const [showAbout, setShowAbout] = useState(browserPreviewState === 'about')
   const [latestRelease, setLatestRelease] = useState<ReleaseInfo | undefined>(() => {
     if (browserPreviewState === 'update' || browserPreviewState === 'update-error') return { version: '1.25.4', url: releaseUrl('1.25.4') }
@@ -1634,6 +1636,7 @@ function App() {
           <button onClick={() => { setEditingServer(null); setShowServerForm(true) }}><Plus size={16} />添加服务器</button>
           <button onClick={importConfig} disabled={importingConfig}><Download size={16} />{importingConfig ? '正在读取 SSH Config…' : '导入 SSH Config'}</button>
           <button onClick={() => setShowSshExport(true)} disabled={servers.length === 0}><Upload size={16} />导出 SSH Config</button>
+          <button onClick={() => setShowKeyManager(true)}><KeyRound size={16} />密钥管理</button>
           <button onClick={() => setShowActivityLog(true)}><ScrollText size={16} />日志</button>
           <button onClick={() => setShowSettings(true)}><Settings size={16} />设置</button>
         </div>
@@ -1714,6 +1717,7 @@ function App() {
       {projectConflictTarget && <ProjectConflictDialog project={projectConflictTarget.project} server={servers.find((item) => item.id === projectConflictTarget.targetServerId)} onClose={() => setProjectConflictTarget(null)} onConfirm={() => { const pending = projectConflictTarget; setProjectConflictTarget(null); void syncProjectTarget(pending.project, pending.targetServerId, true, true) }} />}
       {showSettings && settings && <SettingsSheet settings={settings} onboardingVisible={!onboardingDismissed} onClose={() => setShowSettings(false)} onSave={async (value, showOnboarding) => { setSettings(await api.saveSettings(value)); if (showOnboarding) { localStorage.removeItem(ONBOARDING_DISMISSED_KEY); setOnboardingDismissed(false); setOnboardingUseActualState(true); setOnboardingCollapsed(false); if (onboardingDismissed) setMainView('fleet') } else { localStorage.setItem(ONBOARDING_DISMISSED_KEY, 'true'); setOnboardingDismissed(true) } setShowSettings(false); setToast('设置已保存') }} />}
       {showActivityLog && <ActivityLogSheet servers={servers} snapshots={snapshots} onClose={() => setShowActivityLog(false)} />}
+      {showKeyManager && <SshKeyManager onClose={() => setShowKeyManager(false)} />}
       {showSshExport && <SshExportSheet servers={servers} onClose={() => setShowSshExport(false)} />}
       {showImportSource && <SshImportSourceSheet onClose={() => setShowImportSource(false)} onReadLocal={readLocalConfig} onParsed={(drafts) => { setImportDrafts(drafts); setShowImportSource(false) }} />}
       {showAbout && <AboutSheet latestRelease={latestRelease} onInstallUpdate={() => { setShowAbout(false); void startAppUpdate() }} checkingUpdate={checkingUpdate} updateError={updateCheckError} ignoredVersion={ignoredUpdateVersion} onIgnoreUpdate={(version) => { saveIgnoredUpdateVersion(version); setIgnoredUpdateVersion(version); setToast(`已忽略 v${version} 的更新提示`) }} onCheckUpdate={() => void checkForUpdates(true)} onClose={() => setShowAbout(false)} onNotice={setToast} />}
