@@ -5,4 +5,5 @@ src-tauri/target/
 output/playwright/
 .DS_Store
 *.log
+__pycache__/
 src-tauri/gen/schemas/linux-schema.json

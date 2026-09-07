@@ -12,6 +12,8 @@ mod ssh_config;
 mod ssh_keys;
 pub mod storage;
 mod terminal;
+pub mod sharing;
+use sharing::{SharingManager, commands::*};
 
 use models::{AppSettings, HistoryHeatmapPoint, HistoryPoint, HostKeyInfo, IdleReservation, InteractionLogSummary, InteractionServerSummary, ManagedRunLaunchResult, ManagedRunRemoteStatus, Project, ProjectDraft, ProjectPathCheck, ProjectSyncProgress, ProjectSyncResult, RemoteCleanupResult, RemoteCleanupSweepResult, RemoteHistorySyncResult, Server, ServerDraft, ServerNotificationSettings, Snapshot, UsageDistribution};
 use std::collections::HashMap;
@@ -857,6 +859,19 @@ pub fn run() {
             let database = Database::open(&app_data.join("racktop.sqlite")).map_err(|error| Box::<dyn std::error::Error>::from(std::io::Error::other(error)))?;
             app.manage(database);
             app.manage(TerminalManager::default());
+            let context_app = app.handle().clone();
+            let events_app = app.handle().clone();
+            let share_store = sharing::store::ShareStore::new(&app_data).map_err(std::io::Error::other)?;
+            let sharing = sharing::runtime::SharingRuntime::new(share_store,
+                std::sync::Arc::new(move |id| {
+                    let database = context_app.state::<Database>();
+                    let server = database.get_server(id)?;
+                    let passwords = database.get_ssh_passwords(&server, false)?.unwrap_or_default();
+                    Ok((server, passwords))
+                }),
+                std::sync::Arc::new(move |event, data| { let _ = events_app.emit(event, data); }));
+            app.manage(SharingManager(sharing.clone()));
+            sharing.start();
             #[cfg(target_os = "linux")]
             app.manage(linux_update::LinuxUpdateState::default());
             app.manage(InteractionLogStore::default());
@@ -897,6 +912,7 @@ pub fn run() {
                         let _ = app.emit("tray-action", event.id().as_ref());
                     }
                     "quit" => {
+                        app.state::<SharingManager>().0.shutdown();
                         app.state::<TerminalManager>().close_all();
                         app.exit(0)
                     },
@@ -907,6 +923,7 @@ pub fn run() {
         })
         .on_menu_event(|app, event| match event.id().as_ref() {
             "menu-quit" => {
+                app.state::<SharingManager>().0.shutdown();
                 app.state::<TerminalManager>().close_all();
                 app.exit(0);
             }
@@ -919,7 +936,15 @@ pub fn run() {
             }
             _ => {}
         })
-        .invoke_handler(tauri::generate_handler![check_linux_update, install_linux_update, relaunch_linux_app, list_servers, save_server, list_server_notification_settings, save_server_notification_settings, delete_server, retry_remote_cleanups, reorder_servers, start_terminal, write_terminal, resize_terminal, close_terminal, open_setup_terminal, verify_ssh_setup, collect_server, list_latest_snapshots, get_interaction_log_summary, get_history, get_history_heatmap, get_usage_distribution, configure_remote_history, sync_remote_history, list_idle_reservations, save_idle_reservation, delete_idle_reservation, list_projects, save_project, delete_project, probe_project_paths, suggest_project_paths, inspect_project, inspect_project_source, sync_project, list_project_sync_progress, cancel_project_sync, import_ssh_config, save_ssh_export, get_settings, save_settings, scan_host_key, trust_host_key, install_nvidia_driver, terminate_process, launch_managed_run, read_managed_run_log, get_managed_run_status, update_tray_summary, window_minimize, window_toggle_maximize, window_close])
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if window.app_handle().state::<SharingManager>().0.has_active_shares() {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+        })
+        .invoke_handler(tauri::generate_handler![sharing_status, sharing_configure, sharing_create, sharing_invite, sharing_pause, sharing_revoke_member, sharing_delete, sharing_accept, sharing_connect, sharing_disconnect, sharing_forget, sharing_snapshot, sharing_terminal_open, sharing_terminal_input, sharing_terminal_resize, sharing_terminal_close, sharing_list_files, sharing_upload, sharing_download, sharing_cancel_transfer, check_linux_update, install_linux_update, relaunch_linux_app, list_servers, save_server, list_server_notification_settings, save_server_notification_settings, delete_server, retry_remote_cleanups, reorder_servers, start_terminal, write_terminal, resize_terminal, close_terminal, open_setup_terminal, verify_ssh_setup, collect_server, list_latest_snapshots, get_interaction_log_summary, get_history, get_history_heatmap, get_usage_distribution, configure_remote_history, sync_remote_history, list_idle_reservations, save_idle_reservation, delete_idle_reservation, list_projects, save_project, delete_project, probe_project_paths, suggest_project_paths, inspect_project, inspect_project_source, sync_project, list_project_sync_progress, cancel_project_sync, import_ssh_config, save_ssh_export, get_settings, save_settings, scan_host_key, trust_host_key, install_nvidia_driver, terminate_process, launch_managed_run, read_managed_run_log, get_managed_run_status, update_tray_summary, window_minimize, window_toggle_maximize, window_close])
         .run(tauri::generate_context!())
         .expect("RackTop 启动失败");
 }

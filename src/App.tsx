@@ -47,6 +47,7 @@ import {
   RefreshCw,
   RotateCcw,
   Search,
+  Share2,
   Server as ServerIcon,
   Settings,
   ShieldAlert,
@@ -81,6 +82,8 @@ import { isRemoteSyncFresh, RemoteSyncCoordinator, RemoteSyncStatus, REMOTE_SYNC
 import { ResourceTrend } from './components/ResourceTrend'
 import { ServerForm } from './components/ServerForm'
 import { SshTerminal } from './components/SshTerminal'
+import { SharingWorkspace } from './components/SharingWorkspace'
+import './components/sharing.css'
 import { StatusPill } from './components/StatusPill'
 import { TrendChart } from './components/TrendChart'
 import { UsageDistribution } from './components/UsageDistribution'
@@ -315,7 +318,7 @@ function App() {
   const [showSshExport, setShowSshExport] = useState(false)
   const [showImportSource, setShowImportSource] = useState(false)
   const [importDrafts, setImportDrafts] = useState<ServerDraft[] | null>(null)
-  const [mainView, setMainView] = useState<'server' | 'fleet' | 'idle' | 'mine' | 'projects'>(() => browserPreviewState === 'reconnecting' || browserPreviewState === 'notifications' ? 'server' : 'fleet')
+  const [mainView, setMainView] = useState<'server' | 'fleet' | 'idle' | 'mine' | 'projects' | 'sharing'>(() => browserPreviewState === 'sharing' ? 'sharing' : browserPreviewState === 'reconnecting' || browserPreviewState === 'notifications' ? 'server' : 'fleet')
   const [projects, setProjects] = useState<Project[]>([])
   const [projectEditor, setProjectEditor] = useState<Project | null | 'new'>(null)
   const [projectPendingDelete, setProjectPendingDelete] = useState<Project | null>(null)
@@ -1603,6 +1606,7 @@ function App() {
           <button className={mainView === 'idle' ? 'is-active' : ''} onClick={() => setMainView('idle')}><Zap size={17} />空闲算力 <span className="nav-count">{totals.idle}</span></button>
           <button className={mainView === 'mine' ? 'is-active' : ''} onClick={() => setMainView('mine')}><UserRound size={17} />我的进程 <span className="nav-count">{servers.reduce((sum, server) => sum + (snapshots[server.id] ? currentUserProcessCount(snapshots[server.id]) : 0), 0)}</span></button>
           <button className={mainView === 'projects' ? 'is-active' : ''} onClick={() => setMainView('projects')}><FolderGit2 size={17} />我的项目 <span className="nav-count">{projects.length}</span></button>
+          <button className={mainView === 'sharing' ? 'is-active' : ''} onClick={() => setMainView('sharing')}><Share2 size={17} />资源共享</button>
         </nav>
         <div className="sidebar__section-header"><span>服务器</span><span>{totals.online}/{servers.length}</span></div>
         <div className="search-field"><Search size={14} /><input aria-label="搜索服务器" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索" />{search && <button onClick={() => setSearch('')} aria-label="清除搜索"><X size={13} /></button>}</div>
@@ -1642,10 +1646,11 @@ function App() {
       <main className="workspace">
         <header className="topbar" onMouseDown={startWindowDrag} onDoubleClick={(event) => void toggleWindowMaximize(event)}>
           <div className="topbar__title">
-            <p className="eyebrow">{mainView === 'projects' ? '跨服务器文件同步' : mainView === 'idle' ? '资源发现' : mainView === 'mine' ? '当前用户任务' : mainView === 'fleet' ? `${totals.online} / ${servers.length} 台在线` : selectedServer ? selectedServer.host : '所有服务器'}</p>
-            <h1>{mainView === 'projects' ? '我的项目' : mainView === 'idle' ? '寻找空闲算力' : mainView === 'mine' ? '我的进程' : mainView === 'fleet' ? '算力总览' : selectedServer ? serverDisplayName(selectedServer.name) : 'RackTop 总览'}</h1>
+            <p className="eyebrow">{mainView === 'sharing' ? '与你信任的人协作' : mainView === 'projects' ? '跨服务器文件同步' : mainView === 'idle' ? '资源发现' : mainView === 'mine' ? '当前用户任务' : mainView === 'fleet' ? `${totals.online} / ${servers.length} 台在线` : selectedServer ? selectedServer.host : '所有服务器'}</p>
+            <h1>{mainView === 'sharing' ? '资源共享' : mainView === 'projects' ? '我的项目' : mainView === 'idle' ? '寻找空闲算力' : mainView === 'mine' ? '我的进程' : mainView === 'fleet' ? '算力总览' : selectedServer ? serverDisplayName(selectedServer.name) : 'RackTop 总览'}</h1>
           </div>
           <div className="topbar__actions">
+            {mainView !== 'sharing' && <>
             {(manualRefreshProgress || (remoteHistoryServerKey && remoteSyncStatus)) && <span className="remote-sync-slot">{manualRefreshProgress ? <span className="remote-sync-status remote-sync-status--syncing" role="status" aria-live="polite"><RefreshCw className={manualRefreshingAll ? 'spin' : ''} size={13} />正在重新连接 · {manualRefreshProgress.completed}/{manualRefreshProgress.total} 台</span> : remoteSyncStatus && <RemoteSyncStatus status={remoteSyncStatus} onOpenFailure={() => {
               const serverId = remoteSyncStatus.failedServerIds[0]
               if (!serverId) return
@@ -1657,12 +1662,15 @@ function App() {
             <span className={`refresh-label ${paused ? 'is-paused' : ''}`}><Clock3 size={14} />{paused ? '采集已暂停' : mainView === 'server' && selectedServer ? relativeTime(selectedServer.lastSeenAt) : totals.latestRefresh ? relativeTime(totals.latestRefresh) : `${settings?.defaultSamplingIntervalSeconds ?? 2} 秒采样`}</span>
             <button className="button button--secondary" onClick={() => void runManualRefreshAll()} disabled={manualRefreshingAll}><RefreshCw size={16} className={manualRefreshingAll ? 'spin' : ''} />刷新全部</button>
             <button className="icon-button" aria-label="预约与通知" onClick={() => setShowReservationCenter(true)}><Bell size={18} />{(totals.hot > 0 || activeIdleReservationCount > 0 || gpuMemoryStallWarnings.length > 0 || mineProcessWarnings.length > 0) && <span className="notification-dot" />}</button>
+            </>}
             <WindowsWindowControls />
           </div>
         </header>
 
         <div className="workspace__scroll">
-          {shouldShowGuidedEmptyState(mainView, servers.length) ? (
+          {mainView === 'sharing' ? (
+            <SharingWorkspace servers={servers} currentServerId={selectedServerId} />
+          ) : shouldShowGuidedEmptyState(mainView, servers.length) ? (
             <EmptyState onboarding={<OnboardingChecklist steps={onboardingSteps} previewStep={onboardingPreviewStep} collapsed={onboardingCollapsed} dismissed={onboardingDismissed} useActualState={onboardingUseActualState} showPreviewControls={!api.isDesktop} onPreviewStepChange={setOnboardingPreviewStep} onCollapsedChange={setOnboardingCollapsed} onDismiss={() => { localStorage.setItem(ONBOARDING_DISMISSED_KEY, 'true'); setOnboardingDismissed(true); setToast('已隐藏新手引导，可在“设置 → 通用”中重新显示') }} onUseActualStateChange={setOnboardingUseActualState} />} onAdd={() => { setEditingServer(null); setShowServerForm(true) }} onImport={importConfig} />
           ) : servers.length === 0 ? (
             <EmptyState onAdd={() => { setEditingServer(null); setShowServerForm(true) }} onImport={importConfig} />
