@@ -2,7 +2,7 @@
 
 基于 [Tongzh-SEU/RackTop](https://github.com/Tongzh-SEU/RackTop) 官方 **v1.25.4**，由 **AIsMovDataInfra** 提供 Ubuntu Linux 客户端适配。原作者为 **Tongzh-SEU**；本仓库保留上游 Git 历史、作者信息和 [GPL-3.0 许可证](LICENSE)。这是独立的社区 fork，Linux 安装包并非上游官方发布。
 
-Linux 当前源码版本：**1.26.0-linux.4**；下方下载表保留最近已发布的测试版，目标为 **Ubuntu 22.04 x86_64 / amd64 图形桌面**。上游功能说明与截图保留在下方；Linux 的实际验证范围见 [安装与构建说明](docs/LINUX.md#验证范围)。
+Linux 当前源码版本：**1.26.0-linux.4**；下方下载表对应本次测试版，目标为 **Ubuntu 22.04 x86_64 / amd64 图形桌面**。上游功能说明与截图保留在下方；Linux 的实际验证范围见 [安装与构建说明](docs/LINUX.md#验证范围)。
 
 <div align="right">
   🌐 Language:
@@ -46,16 +46,16 @@ RackTop 是面向个人研究者和小型团队的 GPU 服务器桌面工作台�
 
 | 客户端平台 | 提供方 | 安装包与下载 |
 | --- | --- | --- |
-| **Ubuntu 22.04 x86_64 / amd64** | **AIsMovDataInfra 社区测试版 1.26.0-linux.2** | [下载 Linux .deb](https://github.com/AIsMovDataInfra/RackTop/releases/download/v1.26.0-linux.2/RackTop_1.26.0-linux.2_amd64.deb) · [版本说明、源码与校验文件](https://github.com/AIsMovDataInfra/RackTop/releases/tag/v1.26.0-linux.2) |
+| **Ubuntu 22.04 x86_64 / amd64** | **AIsMovDataInfra 社区测试版 1.26.0-linux.4** | [下载 Linux .deb](https://github.com/AIsMovDataInfra/RackTop/releases/download/v1.26.0-linux.4/RackTop_1.26.0-linux.4_amd64.deb) · [版本说明、源码与校验文件](https://github.com/AIsMovDataInfra/RackTop/releases/tag/v1.26.0-linux.4) |
 | macOS Apple Silicon | Tongzh-SEU 官方 v1.25.4 | [下载官方 .dmg](https://github.com/Tongzh-SEU/RackTop/releases/download/v1.25.4/RackTop_1.25.4_macos-arm64.dmg) |
 | Windows x64 | Tongzh-SEU 官方 v1.25.4 | [下载官方安装程序](https://github.com/Tongzh-SEU/RackTop/releases/download/v1.25.4/RackTop_1.25.4_x64-setup.exe) |
 
-Windows/macOS 安装包由官方仓库提供；后续版本请查看 [上游 Releases](https://github.com/Tongzh-SEU/RackTop/releases)。Linux 新版发布在 [本仓库 Releases](https://github.com/AIsMovDataInfra/RackTop/releases)，采用手动安装升级。
+Windows/macOS 安装包由官方仓库提供；后续版本请查看 [上游 Releases](https://github.com/Tongzh-SEU/RackTop/releases)。Linux 新版发布在 [本仓库 Releases](https://github.com/AIsMovDataInfra/RackTop/releases)，首次安装或从 linux.1～linux.3 升级需手动安装一次；linux.4 起可在应用中检查并安装后续签名更新。
 
 下载 `.deb` 后，在下载目录运行：
 
 ```bash
-sudo apt install ./RackTop_1.26.0-linux.2_amd64.deb
+sudo apt install ./RackTop_1.26.0-linux.4_amd64.deb
 racktop
 ```
 

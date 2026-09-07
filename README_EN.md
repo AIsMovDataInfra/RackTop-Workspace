@@ -2,7 +2,7 @@
 
 Based on official [Tongzh-SEU/RackTop](https://github.com/Tongzh-SEU/RackTop) **v1.25.4**, with Ubuntu Linux support provided by **AIsMovDataInfra**. **Tongzh-SEU** is the original author. This independent community fork preserves upstream Git history, attribution and the [GPL-3.0 license](LICENSE). Linux packages are not official upstream releases.
 
-Current Linux source version: **1.26.0-linux.4**; the download table retains the latest published pre-release for **Ubuntu 22.04 x86_64 / amd64 desktops**. The upstream feature guide and screenshots appear below; see [Linux validation and limitations](docs/LINUX.md#验证范围) for the scope tested on Linux.
+Current Linux source version: **1.26.0-linux.4**; the download table points to this pre-release for **Ubuntu 22.04 x86_64 / amd64 desktops**. The upstream feature guide and screenshots appear below; see [Linux validation and limitations](docs/LINUX.md#验证范围) for the scope tested on Linux.
 
 <div align="right">
   🌐 Language:
@@ -43,16 +43,16 @@ Find the right GPU before launching a job, monitor resources and processes while
 
 | Client platform | Publisher | Installer |
 | --- | --- | --- |
-| **Ubuntu 22.04 x86_64 / amd64** | **AIsMovDataInfra community pre-release 1.26.0-linux.2** | [Linux .deb](https://github.com/AIsMovDataInfra/RackTop/releases/download/v1.26.0-linux.2/RackTop_1.26.0-linux.2_amd64.deb) · [Release notes, source and checksums](https://github.com/AIsMovDataInfra/RackTop/releases/tag/v1.26.0-linux.2) |
+| **Ubuntu 22.04 x86_64 / amd64** | **AIsMovDataInfra community pre-release 1.26.0-linux.4** | [Linux .deb](https://github.com/AIsMovDataInfra/RackTop/releases/download/v1.26.0-linux.4/RackTop_1.26.0-linux.4_amd64.deb) · [Release notes, source and checksums](https://github.com/AIsMovDataInfra/RackTop/releases/tag/v1.26.0-linux.4) |
 | macOS Apple Silicon | Tongzh-SEU official v1.25.4 | [Official .dmg](https://github.com/Tongzh-SEU/RackTop/releases/download/v1.25.4/RackTop_1.25.4_macos-arm64.dmg) |
 | Windows x64 | Tongzh-SEU official v1.25.4 | [Official installer](https://github.com/Tongzh-SEU/RackTop/releases/download/v1.25.4/RackTop_1.25.4_x64-setup.exe) |
 
-Windows/macOS downloads are hosted by the original project. Check [upstream Releases](https://github.com/Tongzh-SEU/RackTop/releases) for newer official versions. Linux packages are available from [this repository's Releases](https://github.com/AIsMovDataInfra/RackTop/releases) and require manual updates.
+Windows/macOS downloads are hosted by the original project. Check [upstream Releases](https://github.com/Tongzh-SEU/RackTop/releases) for newer official versions. Linux packages are available from [this repository's Releases](https://github.com/AIsMovDataInfra/RackTop/releases) and require one manual installation when upgrading from linux.1–linux.3. From linux.4 onward, the app can check for and install subsequent signed updates.
 
 Install the downloaded package from its directory:
 
 ```bash
-sudo apt install ./RackTop_1.26.0-linux.2_amd64.deb
+sudo apt install ./RackTop_1.26.0-linux.4_amd64.deb
 racktop
 ```
 
