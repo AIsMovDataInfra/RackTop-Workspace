@@ -23,7 +23,7 @@ rm -rf -- "$state"
 printf '__RACKTOP_REMOTE_HISTORY_REMOVED__\n'
 "#;
 
-pub async fn configure(server: &Server, password: Option<&str>) -> Result<(), String> {
+pub async fn configure(server: &Server, password: Option<&crate::ssh_connection::SshPasswords>) -> Result<(), String> {
     if server.remote_history_enabled {
         install(server, password).await
     } else {
@@ -31,7 +31,7 @@ pub async fn configure(server: &Server, password: Option<&str>) -> Result<(), St
     }
 }
 
-pub async fn remove(server: &Server, password: Option<&str>, managed_public_key: Option<&str>) -> Result<(), String> {
+pub async fn remove(server: &Server, password: Option<&crate::ssh_connection::SshPasswords>, managed_public_key: Option<&str>) -> Result<(), String> {
     let script = build_remove_script(managed_public_key)?;
     let output = run_remote_cleanup_command(server, password, &script, Duration::from_secs(8)).await?;
     if !output.lines().any(|line| line.trim() == "__RACKTOP_REMOTE_HISTORY_REMOVED__") {
@@ -64,7 +64,7 @@ printf '__RACKTOP_SSH_ACCESS_REVOKED__\n'
 "#))
 }
 
-pub async fn fetch(server: &Server, password: Option<&str>, since_timestamp: i64) -> Result<Vec<HistoryPoint>, String> {
+pub async fn fetch(server: &Server, password: Option<&crate::ssh_connection::SshPasswords>, since_timestamp: i64) -> Result<Vec<HistoryPoint>, String> {
     if !server.remote_history_enabled { return Ok(Vec::new()); }
     let since = since_timestamp.max(0);
     let script = format!(
@@ -74,7 +74,7 @@ pub async fn fetch(server: &Server, password: Option<&str>, since_timestamp: i64
     parse_history(&output)
 }
 
-pub async fn fetch_usage(server: &Server, password: Option<&str>, since_timestamp: i64) -> Result<Vec<UsagePoint>, String> {
+pub async fn fetch_usage(server: &Server, password: Option<&crate::ssh_connection::SshPasswords>, since_timestamp: i64) -> Result<Vec<UsagePoint>, String> {
     if !server.remote_history_enabled { return Ok(Vec::new()); }
     let since = since_timestamp.max(0);
     let script = format!("usage={REMOTE_DIRECTORY}/.usage-v1.tsv; if [ -r \"$usage\" ]; then awk -F '|' -v since={since} '$1 == \"v1\" && $2 >= since' \"$usage\"; fi");
@@ -82,7 +82,7 @@ pub async fn fetch_usage(server: &Server, password: Option<&str>, since_timestam
     Ok(output.lines().filter(|line| !line.trim().is_empty()).filter_map(|line| parse_usage_line(line).ok()).collect())
 }
 
-async fn install(server: &Server, password: Option<&str>) -> Result<(), String> {
+async fn install(server: &Server, password: Option<&crate::ssh_connection::SshPasswords>) -> Result<(), String> {
     // Windows checkouts may expose bundled shell assets as CRLF. Normalize before
     // sending them to Linux, where a trailing CR changes `set -e` into an invalid option.
     let collector_script = REMOTE_COLLECTOR_SCRIPT.replace("\r\n", "\n");
@@ -129,7 +129,7 @@ printf '__RACKTOP_REMOTE_HISTORY_READY__\n'
     if output.lines().any(|line| line.trim() == "__RACKTOP_REMOTE_HISTORY_READY__") { Ok(()) } else { Err("远端历史任务安装后未返回确认标记".into()) }
 }
 
-async fn disable(server: &Server, password: Option<&str>) -> Result<(), String> {
+async fn disable(server: &Server, password: Option<&crate::ssh_connection::SshPasswords>) -> Result<(), String> {
     let script = r#"state=$HOME/.racktop
 if [ -r "$state/.daemon.pid" ]; then
   pid="$(cat "$state/.daemon.pid" 2>/dev/null || true)"
@@ -144,7 +144,7 @@ printf '__RACKTOP_REMOTE_HISTORY_DISABLED__\n'
     if output.lines().any(|line| line.trim() == "__RACKTOP_REMOTE_HISTORY_DISABLED__") { Ok(()) } else { Err("远端历史任务停止后未返回确认标记".into()) }
 }
 
-async fn run_remote_command(server: &Server, password: Option<&str>, script: &str, duration: Duration) -> Result<String, String> {
+async fn run_remote_command(server: &Server, password: Option<&crate::ssh_connection::SshPasswords>, script: &str, duration: Duration) -> Result<String, String> {
     let (mut command, target) = configured_ssh_command(server, password)?;
     command.arg(target).arg(script).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     let output = timeout(duration, command.output()).await.map_err(|_| format!("连接 {} 同步历史超时", server.name))?.map_err(|error| format!("无法启动系统 ssh：{error}"))?;
@@ -154,7 +154,7 @@ async fn run_remote_command(server: &Server, password: Option<&str>, script: &st
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
-async fn run_remote_cleanup_command(server: &Server, password: Option<&str>, script: &str, duration: Duration) -> Result<String, String> {
+async fn run_remote_cleanup_command(server: &Server, password: Option<&crate::ssh_connection::SshPasswords>, script: &str, duration: Duration) -> Result<String, String> {
     let (mut command, target) = configured_ssh_command_without_control(server, password)?;
     command.arg(target).arg(script).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     let output = timeout(duration, command.output()).await.map_err(|_| format!("连接 {} 删除远端数据超时", server.name))?.map_err(|error| format!("无法启动系统 ssh：{error}"))?;

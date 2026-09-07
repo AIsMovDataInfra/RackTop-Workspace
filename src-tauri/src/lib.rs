@@ -1,8 +1,13 @@
+#[cfg(target_os = "linux")]
+pub mod linux_update;
+#[cfg(target_os = "linux")]
+use linux_update::{check_linux_update, install_linux_update, relaunch_linux_app};
 pub mod collector;
+pub mod ssh_connection;
 pub mod models;
 mod remote_history;
 mod project_sync;
-mod host_key;
+pub mod host_key;
 mod ssh_config;
 mod ssh_keys;
 pub mod storage;
@@ -137,7 +142,7 @@ mod interaction_log_tests {
     fn server(id: &str, name: &str) -> Server {
         Server {
             id: id.into(), name: name.into(), location: None, host: "10.0.0.1".into(), port: 22,
-            username: "test".into(), ssh_alias: None, identity_file: None, proxy_jump: None, tags: vec![],
+            username: "test".into(), ssh_alias: None, identity_file: None, proxy_jump: None, proxy_use_password: false, save_proxy_password: false, tags: vec![],
             sampling_interval_seconds: 2, history_retention_days: 90, remote_history_enabled: false,
             remote_history_last_sync_at: None, sort_order: 0, auth_method: "sshAgent".into(),
             status: "online".into(), last_error: None, last_seen_at: None,
@@ -212,13 +217,13 @@ fn save_server_notification_settings(database: State<'_, Database>, settings: Se
 #[tauri::command]
 async fn delete_server(database: State<'_, Database>, server_id: String, revoke_ssh_access: bool) -> Result<RemoteCleanupResult, String> {
     let server = database.get_server(&server_id)?;
-    let password = if server.auth_method == "password" { database.get_password(&server_id, false).unwrap_or(None) } else { None };
+    let password = database.get_ssh_passwords(&server, false).unwrap_or(None);
     let managed_public_key = if revoke_ssh_access {
         Some(ssh_keys::managed_public_key(&server)?.ok_or("这台服务器未使用 RackTop 专用密钥，无法自动撤销免密登录")?)
     } else {
         None
     };
-    match remote_history::remove(&server, password.as_deref(), managed_public_key.as_deref()).await {
+    match remote_history::remove(&server, password.as_ref(), managed_public_key.as_deref()).await {
         Ok(()) => {
             database.delete_server(&server_id)?;
             let suffix = if revoke_ssh_access { "，并已撤销 RackTop 免密登录" } else { "" };
@@ -242,8 +247,8 @@ fn reorder_servers(database: State<'_, Database>, server_ids: Vec<String>) -> Re
 #[tauri::command]
 fn start_terminal(app: tauri::AppHandle, database: State<'_, Database>, terminals: State<'_, TerminalManager>, server_id: String, columns: u16, rows: u16, gpu_index: Option<u32>, accelerator_vendor: Option<String>) -> Result<String, String> {
     let server = database.get_server(&server_id)?;
-    let password = if server.auth_method == "password" { database.get_password(&server_id, true)? } else { None };
-    terminals.start(app, &server, password.as_deref(), columns, rows, gpu_index, accelerator_vendor.as_deref().unwrap_or("nvidia"))
+    let password = database.get_ssh_passwords(&server, true)?;
+    terminals.start(app, &server, password.as_ref(), columns, rows, gpu_index, accelerator_vendor.as_deref().unwrap_or("nvidia"))
 }
 
 #[tauri::command]
@@ -325,6 +330,8 @@ async fn verify_ssh_setup(draft: ServerDraft) -> Result<(), String> {
         ssh_alias: None,
         identity_file: Some("~/.ssh/racktop_ed25519".into()),
         proxy_jump: draft.proxy_jump,
+        proxy_use_password: draft.proxy_use_password,
+        save_proxy_password: false,
         tags: Vec::new(),
         sampling_interval_seconds: 2,
         history_retention_days: 90,
@@ -336,7 +343,8 @@ async fn verify_ssh_setup(draft: ServerDraft) -> Result<(), String> {
         last_error: None,
         last_seen_at: None,
     };
-    let (mut command, target) = collector::configured_ssh_command(&server, None)?;
+    let passwords = crate::ssh_connection::SshPasswords { target: None, proxy: draft.proxy_password };
+    let (mut command, target) = collector::configured_ssh_command(&server, Some(&passwords))?;
     command.arg(target).arg("printf '__RACKTOP_SSH_READY__\\n'").stdin(std::process::Stdio::null()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
     let output = tokio::time::timeout(std::time::Duration::from_secs(12), command.output()).await
         .map_err(|_| "等待 RackTop 专用密钥验证超时".to_string())?
@@ -354,14 +362,14 @@ async fn verify_ssh_setup(draft: ServerDraft) -> Result<(), String> {
 async fn collect_server(database: State<'_, Database>, logs: State<'_, InteractionLogStore>, server_id: String, include_processes: bool, include_disks: bool, record_history: bool, allow_credential_prompt: bool) -> Result<Snapshot, String> {
     let server = database.get_server(&server_id)?;
     let log_id = logs.begin(&server, collector::collection_display_command(&server, include_processes, include_disks));
-    let password = match if server.auth_method == "password" { database.get_password(&server_id, allow_credential_prompt) } else { Ok(None) } {
+    let password = match database.get_ssh_passwords(&server, allow_credential_prompt) {
         Ok(password) => password,
         Err(error) => {
             logs.finish(log_id, 0, 0, Some(error.clone()));
             return Err(error);
         }
     };
-    match collector::collect_with_password_detailed(&server, password.as_deref(), include_processes, include_disks).await {
+    match collector::collect_with_password_detailed(&server, password.as_ref(), include_processes, include_disks).await {
         Ok(collected) => {
             let response_bytes = collected.response_bytes;
             let snapshot = collected.snapshot;
@@ -425,8 +433,8 @@ fn get_usage_distribution(database: State<'_, Database>, server_id: String, from
 #[tauri::command]
 async fn configure_remote_history(database: State<'_, Database>, server_id: String) -> Result<(), String> {
     let server = database.get_server(&server_id)?;
-    let password = if server.auth_method == "password" { database.get_password(&server_id, false)? } else { None };
-    remote_history::configure(&server, password.as_deref()).await
+    let password = database.get_ssh_passwords(&server, false)?;
+    remote_history::configure(&server, password.as_ref()).await
 }
 
 #[tauri::command]
@@ -440,9 +448,9 @@ async fn sync_remote_history(database: State<'_, Database>, server_id: String) -
     }
     let now = SystemTime::now().duration_since(UNIX_EPOCH).map_err(|error| error.to_string())?.as_secs() as i64;
     let since = database.remote_history_cursor(&server_id, now)?;
-    let password = if server.auth_method == "password" { database.get_password(&server_id, false)? } else { None };
-    let fetched_points = remote_history::fetch(&server, password.as_deref(), since).await?;
-    let usage_points = remote_history::fetch_usage(&server, password.as_deref(), since).await?;
+    let password = database.get_ssh_passwords(&server, false)?;
+    let fetched_points = remote_history::fetch(&server, password.as_ref(), since).await?;
+    let usage_points = remote_history::fetch_usage(&server, password.as_ref(), since).await?;
     let points: Vec<_> = fetched_points.iter().filter(|point| point.timestamp >= now - 31 * 86_400 && point.timestamp <= now + 300).cloned().collect();
     if !fetched_points.is_empty() && points.is_empty() {
         return Err("远端历史时间戳超出有效范围，请检查服务器系统时间和时区".into());
@@ -463,8 +471,8 @@ async fn retry_remote_cleanups(database: State<'_, Database>) -> Result<RemoteCl
             result.expired_names.push(task.server.name);
             continue;
         }
-        let password = if task.server.auth_method == "password" { database.get_password(&task.server.id, false)? } else { None };
-        match remote_history::remove(&task.server, password.as_deref(), task.managed_public_key.as_deref()).await {
+        let password = database.get_ssh_passwords(&task.server, false)?;
+        match remote_history::remove(&task.server, password.as_ref(), task.managed_public_key.as_deref()).await {
             Ok(()) => {
                 database.finish_remote_cleanup(&task.server.id, task.server.auth_method == "password")?;
                 result.cleaned_names.push(task.server.name);
@@ -516,8 +524,8 @@ async fn probe_project_paths(database: State<'_, Database>, draft: ProjectDraft)
 #[tauri::command]
 async fn suggest_project_paths(database: State<'_, Database>, server_id: String, query: String) -> Result<Vec<String>, String> {
     let server = database.get_server(&server_id)?;
-    let password = if server.auth_method == "password" { database.get_password(&server.id, false)? } else { None };
-    project_sync::suggest_paths(&server, password.as_deref(), &query).await
+    let password = database.get_ssh_passwords(&server, false)?;
+    project_sync::suggest_paths(&server, password.as_ref(), &query).await
 }
 
 #[tauri::command]
@@ -555,6 +563,21 @@ fn import_ssh_config(path: Option<String>) -> Result<Vec<ServerDraft>, String> {
 }
 
 #[tauri::command]
+fn save_ssh_export(content: String) -> Result<String, String> {
+    use std::io::Write;
+    if content.len() > 2 * 1024 * 1024 || !content.starts_with("# RackTop SSH Config\n") { return Err("无效的 SSH 导出内容".into()); }
+    let directory = dirs::download_dir().ok_or("无法定位下载目录")?;
+    std::fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+    let path = directory.join(format!("RackTop_ssh_{}.conf", uuid::Uuid::new_v4()));
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    { use std::os::unix::fs::OpenOptionsExt; options.mode(0o600); }
+    options.open(&path).and_then(|mut file| file.write_all(content.as_bytes())).map_err(|error| format!("无法保存 SSH 配置：{error}"))?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
 fn get_settings(database: State<'_, Database>) -> Result<AppSettings, String> {
     database.get_settings()
 }
@@ -577,7 +600,8 @@ fn save_settings(database: State<'_, Database>, settings: AppSettings) -> Result
 #[tauri::command]
 async fn scan_host_key(database: State<'_, Database>, server_id: String) -> Result<HostKeyInfo, String> {
     let server = database.get_server(&server_id)?;
-    host_key::scan(&server).await
+    let passwords = database.get_ssh_passwords(&server, true)?;
+    host_key::scan_with_passwords(&server, passwords.as_ref()).await
 }
 
 #[tauri::command]
@@ -590,37 +614,37 @@ fn trust_host_key(database: State<'_, Database>, info: HostKeyInfo) -> Result<()
 async fn install_nvidia_driver(database: State<'_, Database>, server_id: String, confirmed: bool) -> Result<String, String> {
     if !confirmed { return Err("必须在界面明确确认后才能安装驱动".into()); }
     let server = database.get_server(&server_id)?;
-    let password = if server.auth_method == "password" { database.get_password(&server_id, true)? } else { None };
-    collector::install_nvidia_driver(&server, password.as_deref()).await
+    let password = database.get_ssh_passwords(&server, true)?;
+    collector::install_nvidia_driver(&server, password.as_ref()).await
 }
 
 #[tauri::command]
 async fn terminate_process(database: State<'_, Database>, server_id: String, pid: u32, confirmed: bool) -> Result<String, String> {
     if !confirmed { return Err("必须在界面完成二次确认后才能结束进程".into()); }
     let server = database.get_server(&server_id)?;
-    let password = if server.auth_method == "password" { database.get_password(&server_id, true)? } else { None };
-    collector::terminate_process_tree(&server, password.as_deref(), pid).await
+    let password = database.get_ssh_passwords(&server, true)?;
+    collector::terminate_process_tree(&server, password.as_ref(), pid).await
 }
 
 #[tauri::command]
 async fn launch_managed_run(database: State<'_, Database>, server_id: String, run_id: String, working_directory: String, command: String, gpu_indices: Vec<u32>, project_log_path: Option<String>, accelerator_vendor: Option<String>) -> Result<ManagedRunLaunchResult, String> {
     let server = database.get_server(&server_id)?;
-    let password = if server.auth_method == "password" { database.get_password(&server_id, true)? } else { None };
-    collector::launch_managed_run(&server, password.as_deref(), &run_id, &working_directory, &command, &gpu_indices, project_log_path.as_deref(), accelerator_vendor.as_deref().unwrap_or("nvidia")).await
+    let password = database.get_ssh_passwords(&server, true)?;
+    collector::launch_managed_run(&server, password.as_ref(), &run_id, &working_directory, &command, &gpu_indices, project_log_path.as_deref(), accelerator_vendor.as_deref().unwrap_or("nvidia")).await
 }
 
 #[tauri::command]
 async fn read_managed_run_log(database: State<'_, Database>, server_id: String, run_id: String, lines: u32) -> Result<String, String> {
     let server = database.get_server(&server_id)?;
-    let password = if server.auth_method == "password" { database.get_password(&server_id, true)? } else { None };
-    collector::read_managed_run_log(&server, password.as_deref(), &run_id, lines).await
+    let password = database.get_ssh_passwords(&server, true)?;
+    collector::read_managed_run_log(&server, password.as_ref(), &run_id, lines).await
 }
 
 #[tauri::command]
 async fn get_managed_run_status(database: State<'_, Database>, server_id: String, run_id: String, pid: u32) -> Result<ManagedRunRemoteStatus, String> {
     let server = database.get_server(&server_id)?;
-    let password = if server.auth_method == "password" { database.get_password(&server_id, true)? } else { None };
-    collector::managed_run_status(&server, password.as_deref(), &run_id, pid).await
+    let password = database.get_ssh_passwords(&server, true)?;
+    collector::managed_run_status(&server, password.as_ref(), &run_id, pid).await
 }
 
 fn tray_pixel(rgba: &mut [u8], width: usize, x: usize, y: usize, alpha: u8) {
@@ -812,6 +836,16 @@ fn window_close(window: tauri::WebviewWindow) -> Result<(), String> {
     window.close().map_err(|error| error.to_string())
 }
 
+#[cfg(not(target_os = "linux"))]
+#[tauri::command]
+fn check_linux_update() -> Result<(), String> { Err("此更新入口仅用于 Linux".into()) }
+#[cfg(not(target_os = "linux"))]
+#[tauri::command]
+fn install_linux_update() -> Result<(), String> { Err("此更新入口仅用于 Linux".into()) }
+#[cfg(not(target_os = "linux"))]
+#[tauri::command]
+fn relaunch_linux_app() -> Result<(), String> { Err("此更新入口仅用于 Linux".into()) }
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
@@ -823,6 +857,8 @@ pub fn run() {
             let database = Database::open(&app_data.join("racktop.sqlite")).map_err(|error| Box::<dyn std::error::Error>::from(std::io::Error::other(error)))?;
             app.manage(database);
             app.manage(TerminalManager::default());
+            #[cfg(target_os = "linux")]
+            app.manage(linux_update::LinuxUpdateState::default());
             app.manage(InteractionLogStore::default());
 
             #[cfg(target_os = "windows")]
@@ -883,7 +919,12 @@ pub fn run() {
             }
             _ => {}
         })
-        .invoke_handler(tauri::generate_handler![list_servers, save_server, list_server_notification_settings, save_server_notification_settings, delete_server, retry_remote_cleanups, reorder_servers, start_terminal, write_terminal, resize_terminal, close_terminal, open_setup_terminal, verify_ssh_setup, collect_server, list_latest_snapshots, get_interaction_log_summary, get_history, get_history_heatmap, get_usage_distribution, configure_remote_history, sync_remote_history, list_idle_reservations, save_idle_reservation, delete_idle_reservation, list_projects, save_project, delete_project, probe_project_paths, suggest_project_paths, inspect_project, inspect_project_source, sync_project, list_project_sync_progress, cancel_project_sync, import_ssh_config, get_settings, save_settings, scan_host_key, trust_host_key, install_nvidia_driver, terminate_process, launch_managed_run, read_managed_run_log, get_managed_run_status, update_tray_summary, window_minimize, window_toggle_maximize, window_close])
+        .invoke_handler(tauri::generate_handler![check_linux_update, install_linux_update, relaunch_linux_app, list_servers, save_server, list_server_notification_settings, save_server_notification_settings, delete_server, retry_remote_cleanups, reorder_servers, start_terminal, write_terminal, resize_terminal, close_terminal, open_setup_terminal, verify_ssh_setup, collect_server, list_latest_snapshots, get_interaction_log_summary, get_history, get_history_heatmap, get_usage_distribution, configure_remote_history, sync_remote_history, list_idle_reservations, save_idle_reservation, delete_idle_reservation, list_projects, save_project, delete_project, probe_project_paths, suggest_project_paths, inspect_project, inspect_project_source, sync_project, list_project_sync_progress, cancel_project_sync, import_ssh_config, save_ssh_export, get_settings, save_settings, scan_host_key, trust_host_key, install_nvidia_driver, terminate_process, launch_managed_run, read_managed_run_log, get_managed_run_status, update_tray_summary, window_minimize, window_toggle_maximize, window_close])
         .run(tauri::generate_context!())
         .expect("RackTop 启动失败");
+}
+
+#[cfg(feature = "integration-probe")]
+pub fn password_terminal_probe(server: &Server, password: Option<&ssh_connection::SshPasswords>) -> Result<String, String> {
+    terminal::password_probe(server, password)
 }

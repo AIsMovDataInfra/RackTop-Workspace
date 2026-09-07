@@ -13,6 +13,10 @@ pub struct Server {
     pub ssh_alias: Option<String>,
     pub identity_file: Option<String>,
     pub proxy_jump: Option<String>,
+    #[serde(default)]
+    pub proxy_use_password: bool,
+    #[serde(default)]
+    pub save_proxy_password: bool,
     pub tags: Vec<String>,
     pub sampling_interval_seconds: u64,
     pub history_retention_days: u32,
@@ -28,7 +32,7 @@ pub struct Server {
     pub last_seen_at: Option<i64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ServerDraft {
     pub id: Option<String>,
@@ -41,15 +45,30 @@ pub struct ServerDraft {
     pub identity_file: Option<String>,
     pub proxy_jump: Option<String>,
     #[serde(default)]
+    pub proxy_use_password: bool,
+    #[serde(default)]
     pub tags: Vec<String>,
     pub sampling_interval_seconds: u64,
     pub history_retention_days: u32,
     #[serde(default)]
     pub remote_history_enabled: bool,
     pub auth_method: String,
+    #[serde(skip_serializing)]
     pub password: Option<String>,
     #[serde(default)]
     pub save_password: bool,
+    #[serde(default, skip_serializing)]
+    pub proxy_password: Option<String>,
+    #[serde(default)]
+    pub save_proxy_password: bool,
+}
+
+impl std::fmt::Debug for ServerDraft {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ServerDraft").field("id", &self.id).field("name", &self.name)
+            .field("host", &self.host).field("port", &self.port).field("auth_method", &self.auth_method)
+            .field("proxy_use_password", &self.proxy_use_password).finish_non_exhaustive()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -457,6 +476,8 @@ pub struct IdleReservation {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HostKeyInfo {
+    #[serde(default)]
+    pub is_proxy: bool,
     pub server_id: String,
     pub host: String,
     pub algorithm: String,

@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest'
 import { canDisplayServerDetails, offlineFailureThreshold, serverStatusAfterFailure, serverStatusAfterSyncAwareFailure, shouldShowConnectingOnAttempt } from './connectionStatus'
 
 describe('connection status', () => {
-  it('keeps initial retry waits blue and turns red after three consecutive failures', () => {
-    expect(serverStatusAfterFailure(1)).toBe('connecting')
-    expect(serverStatusAfterFailure(2)).toBe('connecting')
+  it('shows a failed connection as offline during the thirty-minute wait', () => {
+    expect(serverStatusAfterFailure(1)).toBe('offline')
+    expect(serverStatusAfterFailure(2)).toBe('offline')
     expect(serverStatusAfterFailure(3)).toBe('offline')
   })
 
@@ -21,7 +21,7 @@ describe('connection status', () => {
 
   it('keeps a healthy server green during quiet background sampling', () => {
     expect(shouldShowConnectingOnAttempt(true, true, 0)).toBe(false)
-    expect(shouldShowConnectingOnAttempt(true, true, 1)).toBe(true)
+    expect(shouldShowConnectingOnAttempt(true, true, 1)).toBe(false)
     expect(shouldShowConnectingOnAttempt(true, false, 0)).toBe(true)
   })
 
@@ -33,12 +33,12 @@ describe('connection status', () => {
     expect(canDisplayServerDetails('unknown')).toBe(false)
   })
 
-  it('keeps the last online snapshot through short collection stalls during project sync', () => {
-    expect(offlineFailureThreshold(false)).toBe(3)
-    expect(offlineFailureThreshold(true)).toBe(6)
-    expect(serverStatusAfterSyncAwareFailure('online', 3, true, true)).toBe('online')
-    expect(serverStatusAfterSyncAwareFailure('warning', 5, true, true)).toBe('warning')
+  it('marks failed sync connections offline while cached details remain available', () => {
+    expect(offlineFailureThreshold(false)).toBe(1)
+    expect(offlineFailureThreshold(true)).toBe(1)
+    expect(serverStatusAfterSyncAwareFailure('online', 3, true, true)).toBe('offline')
+    expect(serverStatusAfterSyncAwareFailure('warning', 5, true, true)).toBe('offline')
     expect(serverStatusAfterSyncAwareFailure('online', 6, true, true)).toBe('offline')
-    expect(serverStatusAfterSyncAwareFailure('online', 1, false, true)).toBe('connecting')
+    expect(serverStatusAfterSyncAwareFailure('online', 1, false, true)).toBe('offline')
   })
 })

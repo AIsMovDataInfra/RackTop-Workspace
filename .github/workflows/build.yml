@@ -45,6 +45,16 @@ jobs:
       - run: npm run build
       - run: cargo test --release --locked --lib --manifest-path src-tauri/Cargo.toml
       - run: npm run bundle:linux -- --locked
+      - name: Sign Linux updater package
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.LINUX_UPDATER_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+        run: |
+          version=$(node -p "require('./package.json').version")
+          python3 scripts/sign-linux-update.py "src-tauri/target/release/bundle/deb/RackTop_${version}_amd64.deb"
+          cargo run --release --locked --features integration-probe --bin racktop-probe --manifest-path src-tauri/Cargo.toml -- --verify-update-files "src-tauri/target/release/bundle/deb/RackTop_${version}_amd64.deb" "src-tauri/target/release/bundle/deb/RackTop_${version}_amd64.deb.sig"
+          python3 scripts/test-linux-update.py src-tauri/target/release/racktop-probe "src-tauri/target/release/bundle/deb/RackTop_${version}_amd64.deb"
       - name: Inspect package and smoke-test native startup
         shell: bash
         run: |
@@ -68,6 +78,31 @@ jobs:
           path: |
             src-tauri/target/release/bundle/deb/*.deb
             src-tauri/target/release/bundle/deb/*.sha256
+            src-tauri/target/release/bundle/deb/*.sig
+            src-tauri/target/release/bundle/deb/linux-amd64.json
+
+  publish-linux:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: linux
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    concurrency:
+      group: linux-release-feed
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: RackTop_*_linux-amd64-deb
+          path: release-assets
+          merge-multiple: true
+      - name: Publish verified release, then update Linux feed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/publish-linux-update.py release-assets
 
   macos:
     if: github.event_name == 'workflow_dispatch' && inputs.build_macos

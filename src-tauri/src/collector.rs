@@ -201,7 +201,7 @@ pub async fn collect(server: &Server) -> Result<Snapshot, String> {
     collect_with_password(server, None, true, true).await
 }
 
-pub async fn collect_with_password(server: &Server, password: Option<&str>, include_processes: bool, include_disks: bool) -> Result<Snapshot, String> {
+pub async fn collect_with_password(server: &Server, password: Option<&crate::ssh_connection::SshPasswords>, include_processes: bool, include_disks: bool) -> Result<Snapshot, String> {
     collect_with_password_detailed(server, password, include_processes, include_disks).await.map(|result| result.snapshot)
 }
 
@@ -210,7 +210,7 @@ pub struct CollectionResult {
     pub response_bytes: u64,
 }
 
-pub async fn collect_with_password_detailed(server: &Server, password: Option<&str>, include_processes: bool, include_disks: bool) -> Result<CollectionResult, String> {
+pub async fn collect_with_password_detailed(server: &Server, password: Option<&crate::ssh_connection::SshPasswords>, include_processes: bool, include_disks: bool) -> Result<CollectionResult, String> {
     let (mut command, target) = configured_ssh_command(server, password)?;
     command.arg(target).arg(format!(
         "RACKTOP_INCLUDE_PROCESSES={} RACKTOP_INCLUDE_DISKS={} RACKTOP_REMOTE_HISTORY={};{REMOTE_SCRIPT}",
@@ -275,44 +275,23 @@ pub fn collection_display_command(server: &Server, include_processes: bool, incl
     format!("ssh {} {} {}", arguments.join(" "), shell_quote(&target), shell_quote(&remote_command))
 }
 
-pub(crate) fn configured_ssh_command(server: &Server, password: Option<&str>) -> Result<(Command, String), String> {
+pub(crate) fn configured_ssh_command(server: &Server, password: Option<&crate::ssh_connection::SshPasswords>) -> Result<(Command, String), String> {
     configured_ssh_command_with_control(server, password, false)
 }
 
-pub(crate) fn configured_ssh_command_without_control(server: &Server, password: Option<&str>) -> Result<(Command, String), String> {
+pub(crate) fn configured_ssh_command_without_control(server: &Server, password: Option<&crate::ssh_connection::SshPasswords>) -> Result<(Command, String), String> {
     configured_ssh_command_with_control(server, password, false)
 }
 
-fn configured_ssh_command_with_control(server: &Server, password: Option<&str>, _use_control_master: bool) -> Result<(Command, String), String> {
+fn configured_ssh_command_with_control(server: &Server, password: Option<&crate::ssh_connection::SshPasswords>, _use_control_master: bool) -> Result<(Command, String), String> {
     let mut command = Command::new("ssh");
     #[cfg(windows)]
     command.creation_flags(0x08000000);
-    command.args(["-o", "ConnectTimeout=8", "-o", "ServerAliveInterval=5", "-o", "ServerAliveCountMax=2", "-o", "StrictHostKeyChecking=yes"]);
-    if server.auth_method == "password" {
-        let password = password.ok_or("没有可用密码；请重新编辑服务器并输入密码")?;
-        let executable = std::env::current_exe().map_err(|error| format!("无法定位 RackTop SSH_ASKPASS：{error}"))?;
-        command
-            .args(["-o", "BatchMode=no", "-o", "PreferredAuthentications=password,keyboard-interactive", "-o", "PubkeyAuthentication=no", "-o", "NumberOfPasswordPrompts=1"])
-            .env("SSH_ASKPASS", executable)
-            .env("SSH_ASKPASS_REQUIRE", "force")
-            .env("RACKTOP_ASKPASS_PASSWORD", password);
-        #[cfg(unix)]
-        command.env("DISPLAY", "racktop:0");
-    } else {
-        command.args(["-o", "BatchMode=yes"]);
-    }
-    #[cfg(unix)]
-    if _use_control_master {
-        command.args(["-o", "ControlMaster=auto", "-o", "ControlPersist=600", "-o", "ControlPath=/tmp/racktop-%C"]);
-    } else {
-        command.args(["-o", "ControlMaster=no", "-o", "ControlPath=none"]);
-    }
+    let options = crate::ssh_connection::options(server, password, None)?;
+    command.args(options.args).envs(options.env).kill_on_drop(true);
     if let Some(identity) = explicit_identity_file(server) {
         command.args(["-o", "IdentitiesOnly=yes"]);
         command.arg("-i").arg(expand_identity_path(identity));
-    }
-    if let Some(proxy) = server.proxy_jump.as_deref().filter(|value| !value.is_empty()) {
-        command.args(["-J", proxy]);
     }
     let target = if let Some(alias) = server.ssh_alias.as_deref().filter(|value| !value.is_empty()) {
         alias.to_string()
@@ -323,7 +302,7 @@ fn configured_ssh_command_with_control(server: &Server, password: Option<&str>, 
     Ok((command, target))
 }
 
-pub async fn install_nvidia_driver(server: &Server, password: Option<&str>) -> Result<String, String> {
+pub async fn install_nvidia_driver(server: &Server, password: Option<&crate::ssh_connection::SshPasswords>) -> Result<String, String> {
     let (mut detect, target) = configured_ssh_command(server, password)?;
     detect.arg(&target).arg("if [ -r /etc/os-release ]; then . /etc/os-release; printf '%s' \"${ID:-unknown}\"; else printf unknown; fi").stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     let detected = timeout(Duration::from_secs(10), detect.output()).await.map_err(|_| "识别 Linux 发行版超时".to_string())?.map_err(|error| format!("无法启动系统 ssh：{error}"))?;
@@ -667,7 +646,7 @@ fi
 printf '__RACKTOP_TERMINATE_OK__\n'"#))
 }
 
-pub async fn terminate_process_tree(server: &Server, password: Option<&str>, pid: u32) -> Result<String, String> {
+pub async fn terminate_process_tree(server: &Server, password: Option<&crate::ssh_connection::SshPasswords>, pid: u32) -> Result<String, String> {
     let script = termination_script(pid)?;
     let (mut command, target) = configured_ssh_command(server, password)?;
     command.arg(target).arg(script).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
@@ -694,7 +673,7 @@ pub(crate) fn visible_devices_variable(accelerator_vendor: &str) -> &'static str
     if accelerator_vendor == "ascend" { "ASCEND_RT_VISIBLE_DEVICES" } else { "CUDA_VISIBLE_DEVICES" }
 }
 
-pub async fn launch_managed_run(server: &Server, password: Option<&str>, run_id: &str, working_directory: &str, task_command: &str, gpu_indices: &[u32], project_log_path: Option<&str>, accelerator_vendor: &str) -> Result<ManagedRunLaunchResult, String> {
+pub async fn launch_managed_run(server: &Server, password: Option<&crate::ssh_connection::SshPasswords>, run_id: &str, working_directory: &str, task_command: &str, gpu_indices: &[u32], project_log_path: Option<&str>, accelerator_vendor: &str) -> Result<ManagedRunLaunchResult, String> {
     validate_run_id(run_id)?;
     if working_directory.trim().is_empty() { return Err("工作目录不能为空".into()); }
     if task_command.trim().is_empty() { return Err("启动命令不能为空".into()); }
@@ -762,7 +741,7 @@ printf '__RACKTOP_RUN_OK__%s\n' "$pid"
     Err(if stderr.is_empty() { "远端未返回任务 PID".into() } else { classify_ssh_error(&stderr) })
 }
 
-pub async fn read_managed_run_log(server: &Server, password: Option<&str>, run_id: &str, lines: u32) -> Result<String, String> {
+pub async fn read_managed_run_log(server: &Server, password: Option<&crate::ssh_connection::SshPasswords>, run_id: &str, lines: u32) -> Result<String, String> {
     validate_run_id(run_id)?;
     let lines = lines.clamp(20, 1_000);
     let script = format!("tail -n {lines} \"$HOME/.racktop/runs/{run_id}/output.log\" 2>/dev/null || true");
@@ -773,7 +752,7 @@ pub async fn read_managed_run_log(server: &Server, password: Option<&str>, run_i
     Err(classify_ssh_error(String::from_utf8_lossy(&output.stderr).trim()))
 }
 
-pub async fn managed_run_status(server: &Server, password: Option<&str>, run_id: &str, pid: u32) -> Result<ManagedRunRemoteStatus, String> {
+pub async fn managed_run_status(server: &Server, password: Option<&crate::ssh_connection::SshPasswords>, run_id: &str, pid: u32) -> Result<ManagedRunRemoteStatus, String> {
     validate_run_id(run_id)?;
     if pid <= 1 { return Err("任务 PID 无效".into()); }
     let script = format!(r#"exit_file="$HOME/.racktop/runs/{run_id}/exit-code"
@@ -1009,7 +988,7 @@ mod tests {
     fn ssh_agent_ignores_stale_identity_file() {
         let server = Server {
             id: "server-1".into(), name: "GPU".into(), location: None, host: "example.com".into(), port: 22,
-            username: "user".into(), ssh_alias: None, identity_file: Some("~/.ssh/stale_key".into()), proxy_jump: None,
+            username: "user".into(), ssh_alias: None, identity_file: Some("~/.ssh/stale_key".into()), proxy_jump: None, proxy_use_password: false, save_proxy_password: false,
             tags: Vec::new(), sampling_interval_seconds: 2, history_retention_days: 90, remote_history_enabled: false,
             remote_history_last_sync_at: None, sort_order: 0, auth_method: "sshAgent".into(), status: "unknown".into(),
             last_error: None, last_seen_at: None,
@@ -1023,7 +1002,7 @@ mod tests {
     fn explicit_private_key_is_restricted_to_that_identity() {
         let server = Server {
             id: "server-1".into(), name: "GPU".into(), location: None, host: "example.com".into(), port: 22,
-            username: "user".into(), ssh_alias: None, identity_file: Some("~/.ssh/id_ed25519".into()), proxy_jump: None,
+            username: "user".into(), ssh_alias: None, identity_file: Some("~/.ssh/id_ed25519".into()), proxy_jump: None, proxy_use_password: false, save_proxy_password: false,
             tags: Vec::new(), sampling_interval_seconds: 2, history_retention_days: 90, remote_history_enabled: false,
             remote_history_last_sync_at: None, sort_order: 0, auth_method: "privateKey".into(), status: "unknown".into(),
             last_error: None, last_seen_at: None,

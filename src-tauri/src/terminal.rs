@@ -41,7 +41,7 @@ impl TerminalManager {
         &self,
         app: AppHandle,
         server: &Server,
-        password: Option<&str>,
+        password: Option<&crate::ssh_connection::SshPasswords>,
         columns: u16,
         rows: u16,
         gpu_index: Option<u32>,
@@ -117,30 +117,16 @@ impl TerminalManager {
     }
 }
 
-fn configured_ssh_command(server: &Server, password: Option<&str>) -> Result<CommandBuilder, String> {
+fn configured_ssh_command(server: &Server, password: Option<&crate::ssh_connection::SshPasswords>) -> Result<CommandBuilder, String> {
     let mut command = CommandBuilder::new("ssh");
-    command.args(["-tt", "-o", "ConnectTimeout=8", "-o", "ServerAliveInterval=5", "-o", "ServerAliveCountMax=2", "-o", "StrictHostKeyChecking=yes"]);
-    if server.auth_method == "password" {
-        let password = password.ok_or("没有可用密码；请重新编辑服务器并输入密码")?;
-        let executable = std::env::current_exe().map_err(|error| format!("无法定位 RackTop SSH_ASKPASS：{error}"))?;
-        command.args(["-o", "BatchMode=no", "-o", "PreferredAuthentications=password,keyboard-interactive", "-o", "PubkeyAuthentication=no", "-o", "NumberOfPasswordPrompts=1"]);
-        command.env("SSH_ASKPASS", executable);
-        command.env("SSH_ASKPASS_REQUIRE", "force");
-        command.env("RACKTOP_ASKPASS_PASSWORD", password);
-        #[cfg(unix)]
-        command.env("DISPLAY", "racktop:0");
-    } else {
-        command.args(["-o", "BatchMode=yes"]);
-    }
-    #[cfg(unix)]
-    command.args(["-o", "ControlMaster=auto", "-o", "ControlPersist=600", "-o", "ControlPath=/tmp/racktop-%C"]);
+    command.arg("-tt");
+    let options = crate::ssh_connection::options(server, password, None)?;
+    command.args(options.args);
+    for (key, value) in options.env { command.env(key, value); }
     if let Some(identity) = explicit_identity_file(server) {
         command.args(["-o", "IdentitiesOnly=yes"]);
         command.arg("-i");
         command.arg(expand_identity_path(identity));
-    }
-    if let Some(proxy) = server.proxy_jump.as_deref().filter(|value| !value.is_empty()) {
-        command.args(["-J", proxy]);
     }
     if let Some(alias) = server.ssh_alias.as_deref().filter(|value| !value.is_empty()) {
         command.arg(alias);
@@ -157,4 +143,20 @@ mod tests {
         let command = format!("export CUDA_VISIBLE_DEVICES={}; exec \"${{SHELL:-/bin/sh}}\" -l", 3);
         assert_eq!(command, "export CUDA_VISIBLE_DEVICES=3; exec \"${SHELL:-/bin/sh}\" -l");
     }
+}
+
+#[cfg(feature = "integration-probe")]
+pub fn password_probe(server: &Server, password: Option<&crate::ssh_connection::SshPasswords>) -> Result<String, String> {
+    use std::io::Read;
+    let pty = native_pty_system();
+    let pair = pty.openpty(PtySize { rows: 24, cols: 80, pixel_width: 0, pixel_height: 0 }).map_err(|e| e.to_string())?;
+    let mut command = configured_ssh_command(server, password)?;
+    command.arg("printf 'racktop-terminal-ok\\n'");
+    let mut child = pair.slave.spawn_command(command).map_err(|e| e.to_string())?;
+    drop(pair.slave);
+    let mut text = String::new();
+    pair.master.try_clone_reader().map_err(|e| e.to_string())?.read_to_string(&mut text).map_err(|e| e.to_string())?;
+    let result = child.wait().map_err(|e| e.to_string())?;
+    if !result.success() { return Err(text); }
+    Ok(text)
 }

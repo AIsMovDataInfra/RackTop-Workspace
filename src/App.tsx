@@ -55,17 +55,20 @@ import {
   TerminalSquare,
   Trash2,
   UserRound,
+  Upload,
   WifiOff,
   X,
   Zap,
 } from 'lucide-react'
 import { api } from './services/api'
+import { CONNECTION_RETRY_DELAY_MS, shouldDeferConnection } from './utils/connectionRetry'
 import { checkDesktopAppUpdate, relaunchUpdatedApp, type DesktopAppUpdate, type DesktopDownloadEvent } from './services/appUpdater'
 import { openExternalUrl } from './services/external'
 import { popupServerContextMenu } from './services/serverContextMenu'
 import type { AppSettings, DetailTab, GpuMemoryStallWarning, HistoryHeatmapPoint, HistoryPoint, HostKeyInfo, IdleReservation, IdleReservationFilters, InteractionLogSummary, LinkedProjectResourcePlan, Project, ProjectDraft, ProjectSyncProgress, RemoteHistorySyncResult, Server, ServerDraft, ServerNotificationCategory, ServerNotificationSettings, Snapshot } from './types/models'
 import { isRackTopManagedIdentity } from './utils/sshSetup'
 import { DeleteServerDialog } from './components/DeleteServerDialog'
+import { SshExportSheet, SshImportSourceSheet } from './components/SshTransferSheet'
 import { AppUpdateDialog } from './components/AppUpdateDialog'
 import { HistoryHeatmaps, StorageWaffleList } from './components/HistoryHeatmap'
 import { MetricBar } from './components/MetricBar'
@@ -210,6 +213,8 @@ function serverToDraft(server: Server): Partial<ServerDraft> {
     sshAlias: server.sshAlias ?? undefined,
     identityFile: server.identityFile ?? undefined,
     proxyJump: server.proxyJump ?? undefined,
+    proxyUsePassword: server.proxyUsePassword ?? false,
+    saveProxyPassword: server.saveProxyPassword ?? false,
     tags: server.tags,
     samplingIntervalSeconds: server.samplingIntervalSeconds,
     historyRetentionDays: server.historyRetentionDays,
@@ -307,6 +312,8 @@ function App() {
   const [updateCheckError, setUpdateCheckError] = useState<string | null>(null)
   const [ignoredUpdateVersion, setIgnoredUpdateVersion] = useState(loadIgnoredUpdateVersion)
   const [importingConfig, setImportingConfig] = useState(false)
+  const [showSshExport, setShowSshExport] = useState(false)
+  const [showImportSource, setShowImportSource] = useState(false)
   const [importDrafts, setImportDrafts] = useState<ServerDraft[] | null>(null)
   const [mainView, setMainView] = useState<'server' | 'fleet' | 'idle' | 'mine' | 'projects'>(() => browserPreviewState === 'reconnecting' || browserPreviewState === 'notifications' ? 'server' : 'fleet')
   const [projects, setProjects] = useState<Project[]>([])
@@ -420,7 +427,7 @@ function App() {
     if (quiet && serverConfig) {
       const fastStatusView = mainView === 'fleet' || (mainView === 'server' && selectedTab === 'overview' && selectedServerId === serverId)
       const refreshIntervalMs = statusRefreshIntervalMs(fastStatusView, document.hidden, serverConfig.samplingIntervalSeconds, settings?.backgroundSamplingIntervalSeconds ?? 15)
-      if (nowMs - (lastAttemptAt.current[serverId] ?? 0) < refreshIntervalMs || nowMs < (nextRetryAt.current[serverId] ?? 0)) return
+      if (nowMs - (lastAttemptAt.current[serverId] ?? 0) < refreshIntervalMs || shouldDeferConnection(nextRetryAt.current[serverId], nowMs)) return
     }
     lastAttemptAt.current[serverId] = nowMs
     if (!quiet) delete nextRetryAt.current[serverId]
@@ -511,8 +518,7 @@ function App() {
       const message = error instanceof Error ? error.message : String(error)
       failureCounts.current[serverId] = (failureCounts.current[serverId] ?? 0) + 1
       const failureCount = failureCounts.current[serverId]
-      const retryDelays = [1, 2, 5, 10, 30]
-      nextRetryAt.current[serverId] = Date.now() + retryDelays[Math.min(failureCount - 1, retryDelays.length - 1)] * 1000
+      nextRetryAt.current[serverId] = Date.now() + CONNECTION_RETRY_DELAY_MS
       if (failureCount >= offlineFailureThreshold(activeProjectSync)) {
         const key = `offline:${serverId}`
         if (!notifiedConditions.current.has(key)) {
@@ -525,8 +531,8 @@ function App() {
         ...server,
         status: serverStatusAfterSyncAwareFailure(server.status, failureCount, activeProjectSync, Boolean(snapshotsRef.current[serverId])),
         lastError: activeProjectSync && failureCount < offlineFailureThreshold(true)
-          ? `大文件同步期间采集暂时延迟 · ${retryDelays[Math.min(failureCount - 1, retryDelays.length - 1)]} 秒后重试`
-          : `${message} · ${retryDelays[Math.min(failureCount - 1, retryDelays.length - 1)]} 秒后重试`,
+          ? `大文件同步期间采集暂时延迟 · 30 分钟后自动重连，可手动刷新`
+          : `${message} · 30 分钟后自动重连，可手动刷新`,
       } : server))
       if (message.includes('主机指纹')) {
         try {
@@ -651,7 +657,7 @@ function App() {
   }, [checkingUpdate])
 
   const startAppUpdate = useCallback(async () => {
-    const requestedVersion = latestRelease?.version ?? '1.25.4'
+    const requestedVersion = latestRelease?.version ?? packageInfo.version
     if (!api.isDesktop) {
       setAppUpdateState({ phase: 'downloading', version: requestedVersion, downloadedBytes: 6.8 * 1024 ** 2, totalBytes: 11.4 * 1024 ** 2 })
       return
@@ -759,7 +765,7 @@ function App() {
       }
     }
     void retryRemoteCleanups()
-    const interval = window.setInterval(() => void retryRemoteCleanups(), 5 * 60 * 1000)
+    const interval = window.setInterval(() => void retryRemoteCleanups(), CONNECTION_RETRY_DELAY_MS)
     return () => { cancelled = true; window.clearInterval(interval) }
   }, [])
 
@@ -789,7 +795,7 @@ function App() {
       const allEnabledServers = remoteHistoryServersRef.current.filter((server) => server.remoteHistoryEnabled)
       const nowSeconds = Math.floor(Date.now() / 1000)
       const freshServerCount = initial ? allEnabledServers.filter((server) => isRemoteSyncFresh(server, nowSeconds)).length : 0
-      const enabledServers = allEnabledServers.filter((server) => (!initial || !isRemoteSyncFresh(server, nowSeconds)) && !remoteSyncInFlight.current.has(server.id))
+      const enabledServers = allEnabledServers.filter((server) => !shouldDeferConnection(nextRetryAt.current[server.id], Date.now()) && (!initial || !isRemoteSyncFresh(server, nowSeconds)) && !remoteSyncInFlight.current.has(server.id))
       if (enabledServers.length === 0) return
       let completed = freshServerCount
       const total = allEnabledServers.length
@@ -809,26 +815,17 @@ function App() {
         if (remoteSyncInFlight.current.has(server.id)) return
         remoteSyncInFlight.current.add(server.id)
         try {
-          let result: RemoteHistorySyncResult | null = null
-          let lastError: unknown = null
-          for (const delay of [0, 1_000, 2_000]) {
-            if (delay) await new Promise((resolve) => window.setTimeout(resolve, delay))
-            try {
-              await api.configureRemoteHistory(server.id)
-              result = await api.syncRemoteHistory(server.id)
-              lastError = null
-              break
-            } catch (reason) {
-              lastError = reason
-            }
-          }
-          if (lastError || !result) throw lastError ?? new Error('历史同步未返回结果')
+          if (shouldDeferConnection(nextRetryAt.current[server.id], Date.now())) return
+          await api.configureRemoteHistory(server.id)
+          if (shouldDeferConnection(nextRetryAt.current[server.id], Date.now())) return
+          const result = await api.syncRemoteHistory(server.id)
           remoteSyncRecoveryQueued.current.delete(server.id)
           importedCount += result.importedCount
           if (!cancelled && result.latestTimestamp) {
             setServers((current) => current.map((item) => item.id === server.id && item.remoteHistoryLastSyncAt !== result.latestTimestamp ? { ...item, remoteHistoryLastSyncAt: result.latestTimestamp } : item))
           }
         } catch {
+          nextRetryAt.current[server.id] = Date.now() + CONNECTION_RETRY_DELAY_MS
           failedServerIds.push(server.id)
         } finally {
           completed += 1
@@ -1394,7 +1391,9 @@ function App() {
     }
   }
 
-  async function importConfig() {
+  function importConfig() { setShowImportSource(true) }
+
+  async function readLocalConfig() {
     if (importingConfig) return
     setImportingConfig(true)
     try {
@@ -1404,6 +1403,7 @@ function App() {
         return
       }
       setImportDrafts(drafts)
+      setShowImportSource(false)
     } catch (error) {
       setToast(`SSH Config 导入失败：${String(error)}`)
     } finally {
@@ -1592,7 +1592,7 @@ function App() {
           <div className="brand-row">
             <button className="brand" onClick={() => { setShowAbout(true); void checkForUpdates(true) }} aria-label="关于 RackTop">
               <span className="brand__mark"><Activity size={18} strokeWidth={2.4} /></span>
-              <div><strong>RackTop</strong><small>算力监控</small></div>
+              <div><strong>RackTop</strong><small className="brand__version">v{packageInfo.version}</small></div>
             </button>
             {checkingUpdate && <span className="brand__update brand__update--checking" aria-label="正在检查更新"><RefreshCw className="spin" size={15} /></span>}
             {!checkingUpdate && shouldShowUpdateBadge(latestRelease?.version, ignoredUpdateVersion) && <button className="brand__update" onClick={() => void startAppUpdate()} aria-label={`下载并安装 RackTop ${latestRelease?.version}`} title={`更新到 RackTop ${latestRelease?.version}`}><CircleArrowUp size={16} /></button>}
@@ -1633,6 +1633,7 @@ function App() {
         <div className="sidebar__footer">
           <button onClick={() => { setEditingServer(null); setShowServerForm(true) }}><Plus size={16} />添加服务器</button>
           <button onClick={importConfig} disabled={importingConfig}><Download size={16} />{importingConfig ? '正在读取 SSH Config…' : '导入 SSH Config'}</button>
+          <button onClick={() => setShowSshExport(true)} disabled={servers.length === 0}><Upload size={16} />导出 SSH Config</button>
           <button onClick={() => setShowActivityLog(true)}><ScrollText size={16} />日志</button>
           <button onClick={() => setShowSettings(true)}><Settings size={16} />设置</button>
         </div>
@@ -1713,7 +1714,9 @@ function App() {
       {projectConflictTarget && <ProjectConflictDialog project={projectConflictTarget.project} server={servers.find((item) => item.id === projectConflictTarget.targetServerId)} onClose={() => setProjectConflictTarget(null)} onConfirm={() => { const pending = projectConflictTarget; setProjectConflictTarget(null); void syncProjectTarget(pending.project, pending.targetServerId, true, true) }} />}
       {showSettings && settings && <SettingsSheet settings={settings} onboardingVisible={!onboardingDismissed} onClose={() => setShowSettings(false)} onSave={async (value, showOnboarding) => { setSettings(await api.saveSettings(value)); if (showOnboarding) { localStorage.removeItem(ONBOARDING_DISMISSED_KEY); setOnboardingDismissed(false); setOnboardingUseActualState(true); setOnboardingCollapsed(false); if (onboardingDismissed) setMainView('fleet') } else { localStorage.setItem(ONBOARDING_DISMISSED_KEY, 'true'); setOnboardingDismissed(true) } setShowSettings(false); setToast('设置已保存') }} />}
       {showActivityLog && <ActivityLogSheet servers={servers} snapshots={snapshots} onClose={() => setShowActivityLog(false)} />}
-      {showAbout && <AboutSheet latestRelease={latestRelease} checkingUpdate={checkingUpdate} updateError={updateCheckError} ignoredVersion={ignoredUpdateVersion} onIgnoreUpdate={(version) => { saveIgnoredUpdateVersion(version); setIgnoredUpdateVersion(version); setToast(`已忽略 v${version} 的更新提示`) }} onCheckUpdate={() => void checkForUpdates(true)} onClose={() => setShowAbout(false)} onNotice={setToast} />}
+      {showSshExport && <SshExportSheet servers={servers} onClose={() => setShowSshExport(false)} />}
+      {showImportSource && <SshImportSourceSheet onClose={() => setShowImportSource(false)} onReadLocal={readLocalConfig} onParsed={(drafts) => { setImportDrafts(drafts); setShowImportSource(false) }} />}
+      {showAbout && <AboutSheet latestRelease={latestRelease} onInstallUpdate={() => { setShowAbout(false); void startAppUpdate() }} checkingUpdate={checkingUpdate} updateError={updateCheckError} ignoredVersion={ignoredUpdateVersion} onIgnoreUpdate={(version) => { saveIgnoredUpdateVersion(version); setIgnoredUpdateVersion(version); setToast(`已忽略 v${version} 的更新提示`) }} onCheckUpdate={() => void checkForUpdates(true)} onClose={() => setShowAbout(false)} onNotice={setToast} />}
       {appUpdateState && <AppUpdateDialog state={appUpdateState} onClose={() => setAppUpdateState(null)} onRetry={() => {
         const previous = desktopUpdateRef.current
         desktopUpdateRef.current = null
@@ -1721,7 +1724,7 @@ function App() {
         void startAppUpdate()
       }} onManualDownload={() => void openExternalUrl(latestRelease?.url ?? releaseUrl(appUpdateState.version)).catch((error) => setToast(`无法打开默认浏览器：${String(error)}`))} />}
       {importDrafts && <SshImportSheet drafts={importDrafts} servers={servers} onClose={() => setImportDrafts(null)} onImport={async (selected) => { for (const draft of selected) await api.saveServer(draft); setServers(await api.listServers()); setImportDrafts(null); setToast(`已导入 ${selected.length} 台服务器`) }} />}
-      {pendingHostKey && <HostKeyDialog info={pendingHostKey} onClose={() => setPendingHostKey(null)} onTrust={async () => { const serverId = pendingHostKey.serverId; await api.trustHostKey(pendingHostKey); setPendingHostKey(null); setToast('已信任服务器指纹'); await refreshServer(serverId) }} />}
+      {pendingHostKey && <HostKeyDialog info={pendingHostKey} onClose={() => setPendingHostKey(null)} onTrust={async () => { const serverId = pendingHostKey.serverId; await api.trustHostKey(pendingHostKey); setPendingHostKey(null); setToast(pendingHostKey.isProxy ? '已信任跳板机指纹' : '已信任服务器指纹'); await refreshServer(serverId) }} />}
       {serverPendingDelete && <DeleteServerDialog server={serverPendingDelete} onClose={() => setServerPendingDelete(null)} onDelete={(revokeSshAccess) => removeServer(serverPendingDelete, revokeSshAccess)} />}
       {processPendingTermination && <TerminateProcessDialog target={processPendingTermination} onClose={() => setProcessPendingTermination(null)} onTerminate={() => { const target = processPendingTermination; setProcessPendingTermination(null); setTerminatingProcess({ serverId: target.serverId, pid: target.process.pid }); void api.terminateProcess(target.serverId, target.process.pid).then(async (result) => { expectedProcessExitsRef.current.add(`exit:${target.serverId}:${target.process.pid}`); setToast(result); await refreshServer(target.serverId) }).catch((reason) => setToast(`结束 PID ${target.process.pid} 失败：${String(reason)}`)).finally(() => setTerminatingProcess(null)) }} />}
       {reservationEditor && <IdleReservationSheet reservation={reservationEditor.reservation} filters={reservationEditor.filters} availableGpuKeys={reservationEditorItems.filter((item) => item.available).map(({ server, gpu }) => idleReservationGpuKey(server.id, gpu.uuid))} onClose={() => setReservationEditor(null)} onSave={saveIdleReservation} />}
@@ -2197,7 +2200,7 @@ function ConnectionView({ server, snapshot, nvidiaWarningIgnored, ignoredGpuMemo
   const canRestoreNvidiaWarning = nvidiaWarningIgnored && snapshot.nvidiaSmi !== 'available'
   const ignoredMemoryWarnings = ignoredGpuMemoryStallGpus(server.id, snapshot, ignoredGpuMemoryStallWarningIds)
   const ignoredCount = ignoredMemoryWarnings.length + (canRestoreNvidiaWarning ? 1 : 0)
-  return <div className="content-stack"><section className="panel connection-panel"><PanelHeader icon={<KeyRound />} title="SSH 连接" subtitle="认证信息仅在本机使用" /><dl className="definition-list"><div><dt>物理位置</dt><dd>{server.location || '未填写'}</dd></div><div><dt>连接地址</dt><dd className="mono">{server.username}@{server.host}:{server.port}</dd></div><div><dt>认证</dt><dd>{isRackTopManagedIdentity(server.identityFile) ? 'RackTop 专用密钥' : server.authMethod === 'sshAgent' ? 'SSH Agent / 默认密钥' : server.authMethod === 'privateKey' ? '指定私钥' : server.authMethod === 'sshConfig' ? 'SSH Config' : '系统钥匙串密码'}</dd></div><div><dt>SSH Config</dt><dd>{server.sshAlias || '未使用别名'}</dd></div><div><dt>私钥</dt><dd className="mono">{server.identityFile || '由 OpenSSH 自动选择'}</dd></div><div><dt>ProxyJump</dt><dd className="mono">{server.proxyJump || '无'}</dd></div><div><dt>远端历史</dt><dd>{server.remoteHistoryEnabled ? `已启用 · ${server.remoteHistoryLastSyncAt ? `同步于 ${relativeTime(server.remoteHistoryLastSyncAt)}` : '等待首次同步'}` : '未启用'}</dd></div></dl><div className="panel__actions"><button className="button button--primary" onClick={onRefresh} disabled={isRefreshing}><RefreshCw size={16} className={isRefreshing ? 'spin' : ''} />测试并重新连接</button><button className="button button--secondary" onClick={onEdit}><Settings size={16} />编辑配置</button></div></section>{ignoredCount > 0 && <section className="panel ignored-warning-list"><PanelHeader icon={<BellOff />} title={`已忽略的 ${accelerator} 提醒`} subtitle={`${ignoredCount} 项提醒仅在此处保留`} /><div>{canRestoreNvidiaWarning && <div className="ignored-warning-row"><div><strong>GPU 读取异常</strong><p>不可读取的显卡仍会显示，但服务器状态暂按在线处理。</p></div><button className="button button--secondary button--small" onClick={onRestoreNvidiaWarning}><Bell size={14} />恢复提醒</button></div>}{ignoredMemoryWarnings.map((gpu) => <div className="ignored-warning-row" key={gpu.uuid}><div><strong>{accelerator} {gpu.index} · {gpu.name.replace(/^NVIDIA\s+/i, '')} 显存占用预警</strong><p>当前占用 {(gpu.memoryUsedMb / 1024).toFixed(1)} / {(gpu.memoryTotalMb / 1024).toFixed(1)} GB，UTL {clampPercent(gpu.utilization).toFixed(0)}%。</p></div><button className="button button--secondary button--small" onClick={() => onRestoreGpuMemoryStallWarning(`gpu-memory-stall:${server.id}:${gpu.uuid}`)}><Bell size={14} />恢复提醒</button></div>)}</div></section>}<ServerNotificationSettingsMenu settings={notificationSettings} onChange={onNotificationSettingsChange} openRequested={notificationMenuRequested} onOpenRequestHandled={onNotificationMenuRequestHandled} /><section className="panel danger-zone"><div><strong>删除服务器</strong><p>删除本机记录、历史数据、远端采集进程和服务器用户目录中的 RackTop 数据。</p></div><button className="button button--danger" onClick={onDelete}><Trash2 size={16} />删除</button></section></div>
+  return <div className="content-stack"><section className="panel connection-panel"><PanelHeader icon={<KeyRound />} title="SSH 连接" subtitle="认证信息仅在本机使用" /><dl className="definition-list"><div><dt>物理位置</dt><dd>{server.location || '未填写'}</dd></div><div><dt>连接地址</dt><dd className="mono">{server.username}@{server.host}:{server.port}</dd></div><div><dt>认证</dt><dd>{isRackTopManagedIdentity(server.identityFile) ? 'RackTop 专用密钥' : server.authMethod === 'sshAgent' ? 'SSH Agent / 默认密钥' : server.authMethod === 'privateKey' ? '指定私钥' : server.authMethod === 'sshConfig' ? 'SSH Config' : '系统钥匙串密码'}</dd></div><div><dt>SSH Config</dt><dd>{server.sshAlias || '未使用别名'}</dd></div><div><dt>私钥</dt><dd className="mono">{server.identityFile || '由 OpenSSH 自动选择'}</dd></div><div><dt>ProxyJump</dt><dd className="mono">{server.proxyJump || '无'}</dd></div>{server.proxyJump && <div><dt>跳板机认证</dt><dd>{server.proxyUsePassword ? '独立密码' : 'OpenSSH 配置'}</dd></div>}<div><dt>远端历史</dt><dd>{server.remoteHistoryEnabled ? `已启用 · ${server.remoteHistoryLastSyncAt ? `同步于 ${relativeTime(server.remoteHistoryLastSyncAt)}` : '等待首次同步'}` : '未启用'}</dd></div></dl><div className="panel__actions"><button className="button button--primary" onClick={onRefresh} disabled={isRefreshing}><RefreshCw size={16} className={isRefreshing ? 'spin' : ''} />测试并重新连接</button><button className="button button--secondary" onClick={onEdit}><Settings size={16} />编辑配置</button></div></section>{ignoredCount > 0 && <section className="panel ignored-warning-list"><PanelHeader icon={<BellOff />} title={`已忽略的 ${accelerator} 提醒`} subtitle={`${ignoredCount} 项提醒仅在此处保留`} /><div>{canRestoreNvidiaWarning && <div className="ignored-warning-row"><div><strong>GPU 读取异常</strong><p>不可读取的显卡仍会显示，但服务器状态暂按在线处理。</p></div><button className="button button--secondary button--small" onClick={onRestoreNvidiaWarning}><Bell size={14} />恢复提醒</button></div>}{ignoredMemoryWarnings.map((gpu) => <div className="ignored-warning-row" key={gpu.uuid}><div><strong>{accelerator} {gpu.index} · {gpu.name.replace(/^NVIDIA\s+/i, '')} 显存占用预警</strong><p>当前占用 {(gpu.memoryUsedMb / 1024).toFixed(1)} / {(gpu.memoryTotalMb / 1024).toFixed(1)} GB，UTL {clampPercent(gpu.utilization).toFixed(0)}%。</p></div><button className="button button--secondary button--small" onClick={() => onRestoreGpuMemoryStallWarning(`gpu-memory-stall:${server.id}:${gpu.uuid}`)}><Bell size={14} />恢复提醒</button></div>)}</div></section>}<ServerNotificationSettingsMenu settings={notificationSettings} onChange={onNotificationSettingsChange} openRequested={notificationMenuRequested} onOpenRequestHandled={onNotificationMenuRequestHandled} /><section className="panel danger-zone"><div><strong>删除服务器</strong><p>删除本机记录、历史数据、远端采集进程和服务器用户目录中的 RackTop 数据。</p></div><button className="button button--danger" onClick={onDelete}><Trash2 size={16} />删除</button></section></div>
 }
 
 function NvidiaWarning({ snapshot, onRefresh, onIgnore }: { snapshot: Snapshot; onRefresh: () => void; onIgnore: () => void }) {
@@ -2602,14 +2605,14 @@ function SettingsGroup({ icon, title, children }: { icon: React.ReactNode; title
   return <section className="settings-group"><header><span>{icon}</span><h3>{title}</h3></header><div>{children}</div></section>
 }
 
-function AboutSheet({ latestRelease, checkingUpdate, updateError, ignoredVersion, onIgnoreUpdate, onCheckUpdate, onClose, onNotice }: { latestRelease?: ReleaseInfo; checkingUpdate: boolean; updateError: string | null; ignoredVersion?: string; onIgnoreUpdate: (version: string) => void; onCheckUpdate: () => void; onClose: () => void; onNotice: (message: string) => void }) {
+function AboutSheet({ latestRelease, onInstallUpdate, checkingUpdate, updateError, ignoredVersion, onIgnoreUpdate, onCheckUpdate, onClose, onNotice }: { latestRelease?: ReleaseInfo; onInstallUpdate: () => void; checkingUpdate: boolean; updateError: string | null; ignoredVersion?: string; onIgnoreUpdate: (version: string) => void; onCheckUpdate: () => void; onClose: () => void; onNotice: (message: string) => void }) {
   const [licenses, setLicenses] = useState(false)
   const openExternal = (url: string) => {
     void openExternalUrl(url).catch((error) => onNotice(`无法打开默认浏览器：${String(error)}`))
   }
   const ignored = Boolean(latestRelease && latestRelease.version === ignoredVersion)
   const updateStatus = checkingUpdate ? '正在检查 GitHub Releases…' : updateError ? `检查失败：${updateError}` : latestRelease ? `发现新版本 v${latestRelease.version}${ignored ? ' · 已忽略此版本提醒' : ''}` : '当前已是最新版本'
-  return <div className="scrim" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="sheet about-sheet" role="dialog" aria-modal="true" aria-labelledby="about-title"><header className="sheet__header"><div><p className="eyebrow">About</p><h2 id="about-title">RackTop</h2></div><button className="icon-button" onClick={onClose} aria-label="关闭"><X size={18} /></button></header><div className="about-body"><div className="about-product"><span className="about-product__mark"><Activity size={28} /></span><div><strong>RackTop {packageInfo.version}</strong><p>面向共享算力服务器的安静、实时资源监控与 SSH 工作台。</p></div></div><div className="about-update" role="status"><span className={latestRelease && !ignored ? 'is-new' : ''}>{checkingUpdate ? <RefreshCw className="spin" size={17} /> : <CircleArrowUp size={17} />}</span><div><strong>版本更新</strong><small>{updateStatus}</small></div><div className="about-update__actions">{latestRelease && !checkingUpdate ? <><button className="button button--secondary button--small" onClick={() => openExternal(latestRelease.url)}>查看版本<ExternalLink size={11} /></button>{!ignored && <button className="button button--quiet button--small" onClick={() => onIgnoreUpdate(latestRelease.version)}>忽略此版本</button>}</> : <><button className="button button--secondary button--small" onClick={() => openExternal(releaseUrl(packageInfo.version))}>版本说明</button><button className="button button--secondary button--small" disabled={checkingUpdate} onClick={onCheckUpdate}>{checkingUpdate ? '检查中…' : '重新检查'}</button></>}</div></div><div className="about-author"><img src={authorAvatar} alt="Tongzh-SEU 头像" /><div><strong>Tongzh-SEU</strong><small>作者与维护者</small><div className="about-author__links"><button className="about-external-link" onClick={() => openExternal('https://github.com/Tongzh-SEU')}><Github size={13} />GitHub @Tongzh-SEU<ExternalLink size={11} /></button><button className="about-external-link" onClick={() => openExternal('https://xhslink.cn/o/AsgFqJMZfR5')}>小红书 @tooongtooong<ExternalLink size={11} /></button></div></div></div><div className="about-links"><button onClick={() => openExternal('https://github.com/Tongzh-SEU/RackTop')}><Github size={15} /><span><strong>GitHub 仓库</strong><small>Tongzh-SEU/RackTop</small></span><ExternalLink size={13} /></button><button aria-expanded={licenses} aria-controls="about-licenses" onClick={() => setLicenses((value) => !value)}><Database size={15} /><span><strong>第三方许可</strong><small>{licenses ? '收起开源组件' : '查看主要运行时依赖'}</small></span><ChevronRight className={`disclosure-icon${licenses ? ' disclosure-icon--expanded' : ''}`} size={13} /></button></div>{licenses && <div className="about-licenses" id="about-licenses"><p><strong>React、Tauri、xterm.js、ECharts、Lucide</strong></p><p>各组件版权归其贡献者所有，并按各自开源许可证分发。完整版本与传递依赖记录见应用包内的 npm 与 Cargo 锁文件。</p></div>}<small className="about-contact">联系：通过 GitHub Issues 或作者主页发起讨论</small></div><footer className="sheet__footer"><button className="button button--primary" onClick={onClose}>完成</button></footer></section></div>
+  return <div className="scrim" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="sheet about-sheet" role="dialog" aria-modal="true" aria-labelledby="about-title"><header className="sheet__header"><div><p className="eyebrow">About</p><h2 id="about-title">RackTop</h2></div><button className="icon-button" onClick={onClose} aria-label="关闭"><X size={18} /></button></header><div className="about-body"><div className="about-product"><span className="about-product__mark"><Activity size={28} /></span><div><strong>当前版本：v{packageInfo.version}</strong><p>{packageInfo.version.includes('-linux.') ? 'Linux 社区版 · AIsMovDataInfra/RackTop' : '面向共享算力服务器的资源监控与 SSH 工作台'}</p></div></div><div className="about-update" role="status"><span className={latestRelease && !ignored ? 'is-new' : ''}>{checkingUpdate ? <RefreshCw className="spin" size={17} /> : <CircleArrowUp size={17} />}</span><div><strong>版本更新</strong><small>{updateStatus}</small></div><div className="about-update__actions">{latestRelease && !checkingUpdate ? <><button className="button button--primary button--small" onClick={onInstallUpdate}>更新到 v{latestRelease.version}</button><button className="button button--secondary button--small" onClick={() => openExternal(latestRelease.url)}>查看版本<ExternalLink size={11} /></button>{!ignored && <button className="button button--quiet button--small" onClick={() => onIgnoreUpdate(latestRelease.version)}>忽略此版本</button>}</> : <><button className="button button--secondary button--small" onClick={() => openExternal(releaseUrl(packageInfo.version))}>版本说明</button><button className="button button--secondary button--small" disabled={checkingUpdate} onClick={onCheckUpdate}>{checkingUpdate ? '检查中…' : '重新检查'}</button></>}</div></div><div className="about-author"><img src={authorAvatar} alt="Tongzh-SEU 头像" /><div><strong>Tongzh-SEU</strong><small>作者与维护者</small><div className="about-author__links"><button className="about-external-link" onClick={() => openExternal('https://github.com/Tongzh-SEU')}><Github size={13} />GitHub @Tongzh-SEU<ExternalLink size={11} /></button><button className="about-external-link" onClick={() => openExternal('https://xhslink.cn/o/AsgFqJMZfR5')}>小红书 @tooongtooong<ExternalLink size={11} /></button></div></div></div><div className="about-links"><button onClick={() => openExternal('https://github.com/Tongzh-SEU/RackTop')}><Github size={15} /><span><strong>GitHub 仓库</strong><small>Tongzh-SEU/RackTop</small></span><ExternalLink size={13} /></button><button aria-expanded={licenses} aria-controls="about-licenses" onClick={() => setLicenses((value) => !value)}><Database size={15} /><span><strong>第三方许可</strong><small>{licenses ? '收起开源组件' : '查看主要运行时依赖'}</small></span><ChevronRight className={`disclosure-icon${licenses ? ' disclosure-icon--expanded' : ''}`} size={13} /></button></div>{licenses && <div className="about-licenses" id="about-licenses"><p><strong>React、Tauri、xterm.js、ECharts、Lucide</strong></p><p>各组件版权归其贡献者所有，并按各自开源许可证分发。完整版本与传递依赖记录见应用包内的 npm 与 Cargo 锁文件。</p></div>}<small className="about-contact">联系：通过 GitHub Issues 或作者主页发起讨论</small></div><footer className="sheet__footer"><button className="button button--primary" onClick={onClose}>完成</button></footer></section></div>
 }
 
 function SshImportSheet({ drafts, servers, onClose, onImport }: { drafts: ServerDraft[]; servers: Server[]; onClose: () => void; onImport: (drafts: ServerDraft[]) => Promise<void> }) {
@@ -2643,7 +2646,7 @@ function TerminateProcessDialog({ target, onClose, onTerminate }: { target: Proc
 
 function HostKeyDialog({ info, onClose, onTrust }: { info: HostKeyInfo; onClose: () => void; onTrust: () => Promise<void> }) {
   const [saving, setSaving] = useState(false)
-  return <div className="scrim"><section className={`sheet host-key-sheet ${info.changed ? 'host-key-sheet--changed' : ''}`} role="alertdialog" aria-modal="true" aria-labelledby="host-key-title"><header className="sheet__header"><div><p className="eyebrow">{info.changed ? 'SSH 安全警告' : '首次 SSH 连接'}</p><h2 id="host-key-title">{info.changed ? '服务器 Host Key 已变化' : '核对服务器指纹'}</h2></div><button className="icon-button" onClick={onClose} aria-label="关闭"><X size={18} /></button></header><div className="host-key-body"><span className="host-key-icon"><ShieldAlert size={26} /></span><p>{info.changed ? <>RackTop 检测到 <strong>{info.host}</strong> 的密钥与本机记录不一致。这可能是服务器重装，也可能是中间人攻击。</> : <>这是 RackTop 第一次连接 <strong>{info.host}</strong>。请通过可信渠道与服务器管理员核对以下指纹。</>}</p><div className="fingerprint"><small>{info.algorithm}</small><code>{info.fingerprint}</code></div><p className="host-key-note">{info.changed ? '连接已被阻止。请先通过独立可信渠道核实新指纹，再使用系统 ssh-keygen 手动移除旧记录；RackTop 不会覆盖现有密钥。' : '只有在确认指纹一致后才继续。RackTop 不会自动接受未知 Host Key。'}</p></div><footer className="sheet__footer"><button className="button button--secondary" onClick={onClose}>{info.changed ? '保持阻止' : '取消连接'}</button>{!info.changed && <button className="button button--primary" disabled={saving} onClick={async () => { setSaving(true); try { await onTrust() } finally { setSaving(false) } }}>{saving ? '保存中…' : '指纹一致，信任并连接'}</button>}</footer></section></div>
+  return <div className="scrim"><section className={`sheet host-key-sheet ${info.changed ? 'host-key-sheet--changed' : ''}`} role="alertdialog" aria-modal="true" aria-labelledby="host-key-title"><header className="sheet__header"><div><p className="eyebrow">{info.changed ? 'SSH 安全警告' : '首次 SSH 连接'}</p><h2 id="host-key-title">{info.changed ? `${info.isProxy ? '跳板机' : '服务器'} Host Key 已变化` : `核对${info.isProxy ? '跳板机' : '服务器'}指纹`}</h2></div><button className="icon-button" onClick={onClose} aria-label="关闭"><X size={18} /></button></header><div className="host-key-body"><span className="host-key-icon"><ShieldAlert size={26} /></span><p>{info.changed ? <>RackTop 检测到 <strong>{info.host}</strong> 的密钥与本机记录不一致。这可能是服务器重装，也可能是中间人攻击。</> : <>这是 RackTop 第一次连接 <strong>{info.host}</strong>。请通过可信渠道与服务器管理员核对以下指纹。</>}</p><div className="fingerprint"><small>{info.algorithm}</small><code>{info.fingerprint}</code></div><p className="host-key-note">{info.changed ? '连接已被阻止。请先通过独立可信渠道核实新指纹，再使用系统 ssh-keygen 手动移除旧记录；RackTop 不会覆盖现有密钥。' : '只有在确认指纹一致后才继续。RackTop 不会自动接受未知 Host Key。'}</p></div><footer className="sheet__footer"><button className="button button--secondary" onClick={onClose}>{info.changed ? '保持阻止' : '取消连接'}</button>{!info.changed && <button className="button button--primary" disabled={saving} onClick={async () => { setSaving(true); try { await onTrust() } finally { setSaving(false) } }}>{saving ? '保存中…' : '指纹一致，信任并连接'}</button>}</footer></section></div>
 }
 
 export default App

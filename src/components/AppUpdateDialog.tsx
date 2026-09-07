@@ -1,5 +1,6 @@
 import { ExternalLink, RefreshCw, X } from 'lucide-react'
 import { appUpdatePercent, formatUpdateBytes, type AppUpdateState } from '../utils/appUpdate'
+import packageInfo from '../../package.json'
 
 interface AppUpdateDialogProps {
   state: AppUpdateState
@@ -27,7 +28,7 @@ export function AppUpdateDialog({ state, onClose, onRetry, onManualDownload }: A
       </div></> : <div className="app-update-body">
         <div className="app-update-status-copy">
           <strong id="app-update-title">{checking ? '正在检查更新' : installing ? `正在安装 RackTop ${state.version}` : `正在下载 RackTop ${state.version}`}</strong>
-          <span>{checking ? '请稍候...' : installing ? '下载完成' : progressLabel}</span>
+          <span>{checking ? '请稍候...' : installing ? (packageInfo.version.includes('-linux.') ? '正在校验并安装；系统可能要求管理员授权' : '下载完成') : progressLabel}</span>
         </div>
         <div className={`app-update-progress${percent === null || checking || installing ? ' is-indeterminate' : ''}`} role="progressbar" aria-label={checking ? '正在检查更新' : installing ? '正在安装更新' : '更新下载进度'} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent === null || checking || installing ? undefined : Math.round(percent)}>
           <span style={percent === null || checking || installing ? undefined : { transform: `scaleX(${percent / 100})` }} />

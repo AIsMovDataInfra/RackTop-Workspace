@@ -2,7 +2,7 @@
 
 Based on official [Tongzh-SEU/RackTop](https://github.com/Tongzh-SEU/RackTop) **v1.25.4**, with Ubuntu Linux support provided by **AIsMovDataInfra**. **Tongzh-SEU** is the original author. This independent community fork preserves upstream Git history, attribution and the [GPL-3.0 license](LICENSE). Linux packages are not official upstream releases.
 
-Current Linux version: **1.26.0-linux.2 (pre-release)** for **Ubuntu 22.04 x86_64 / amd64 desktops**. The upstream feature guide and screenshots appear below; see [Linux validation and limitations](docs/LINUX.md#验证范围) for the scope tested on Linux.
+Current Linux source version: **1.26.0-linux.4**; the download table retains the latest published pre-release for **Ubuntu 22.04 x86_64 / amd64 desktops**. The upstream feature guide and screenshots appear below; see [Linux validation and limitations](docs/LINUX.md#验证范围) for the scope tested on Linux.
 
 <div align="right">
   🌐 Language:
