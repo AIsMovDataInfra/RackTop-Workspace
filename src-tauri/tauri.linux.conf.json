@@ -21,7 +21,11 @@
     "linux": {
       "deb": {
         "depends": ["openssh-client", "libdbus-1-3"],
-        "recommends": ["gnome-keyring", "x-terminal-emulator"]
+        "recommends": ["gnome-keyring", "x-terminal-emulator"],
+        "files": {
+          "/usr/share/doc/rack-top/LICENSE": "../LICENSE",
+          "/usr/share/doc/rack-top/NOTICE.md": "../NOTICE.md"
+        }
       }
     }
   }

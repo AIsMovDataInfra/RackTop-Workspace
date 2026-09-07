@@ -1,3 +1,9 @@
+## Linux 社区 fork 的发布目标
+
+本仓库为 `AIsMovDataInfra/RackTop`，Linux 社区移植基于 `Tongzh-SEU/RackTop`。用户已指定在组织内公开分发 Linux；发布操作必须以本 fork 为目标，未经明确授权不得推送到上游。保留原作者信息、Git 历史、GPL-3.0 许可证与上游下载链接。
+
+以下上游工作规范保留用于参考，其中固定 macOS 本机路径不适用于 Linux 维护者：使用实际检出的仓库路径与当前可用 GitHub CLI。Linux 版本使用 `x.y.z-linux.N`，每次 Linux 修订增加 N；版本记录只追加。Linux 标签仅默认构建 Ubuntu `.deb`，Windows/macOS 安装包引用上游官方 Releases，覆盖下文要求每次同时发布 macOS/Windows 的上游流程。Linux 真实硬件验证尚未完成的范围必须明确标注。
+
 ## 0 固定工作区与工具路径
 
 RackTop 开发 Agent 必须优先使用以下固定路径，不得仅依赖当前 shell 的 `PATH` 或工作目录推断工具是否存在：

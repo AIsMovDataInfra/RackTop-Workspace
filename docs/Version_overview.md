@@ -2,6 +2,12 @@
 
 面向用户的简明更新说明，最新版本位于最上方。
 
+## 1.26.0-linux.2
+
+- 新增 Linux 社区安装包与官方 Windows/macOS 下载入口说明。
+- 修复 Linux 版本说明链接，指向对应的社区 Release。
+- 明确 Linux 手动更新下载来源。
+
 ## 1.26.0-linux.1
 
 - 新增 Ubuntu 22.04 x86_64 原生 Linux 客户端及 .deb 安装包。

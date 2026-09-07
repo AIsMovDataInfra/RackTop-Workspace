@@ -91,7 +91,7 @@ describe('App startup update check', () => {
     expect(releaseNotes).toBeDefined()
     await act(async () => releaseNotes?.click())
     expect(open).toHaveBeenCalledWith(
-      `https://github.com/Tongzh-SEU/RackTop/releases/tag/v${packageInfo.version}`,
+      `https://github.com/AIsMovDataInfra/RackTop/releases/tag/v${packageInfo.version}`,
       '_blank',
       'noopener,noreferrer',
     )

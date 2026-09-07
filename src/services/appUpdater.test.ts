@@ -16,7 +16,7 @@ afterEach(() => {
 describe('desktop update platform support', () => {
   it('explains manual Linux updates without querying the macOS/Windows feed', async () => {
     vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (X11; Linux x86_64)')
-    await expect(checkDesktopAppUpdate()).rejects.toThrow('手动更新')
+    await expect(checkDesktopAppUpdate()).rejects.toThrow('github.com/AIsMovDataInfra/RackTop/releases')
     expect(check).not.toHaveBeenCalled()
   })
 

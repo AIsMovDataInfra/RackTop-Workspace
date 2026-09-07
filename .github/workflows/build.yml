@@ -1,4 +1,4 @@
-name: Build RackTop
+name: Build RackTop Linux
 
 on:
   workflow_dispatch:
@@ -7,12 +7,12 @@ on:
         description: Build macOS Apple Silicon packages
         required: true
         type: boolean
-        default: true
+        default: false
       build_windows:
         description: Build Windows x64 packages
         required: true
         type: boolean
-        default: true
+        default: false
       build_linux:
         description: Build Ubuntu 22.04 x64 Debian package
         required: true
@@ -20,7 +20,7 @@ on:
         default: true
   push:
     tags:
-      - "v*"
+      - "v*-linux.*"
 
 permissions:
   contents: read
@@ -70,7 +70,7 @@ jobs:
             src-tauri/target/release/bundle/deb/*.sha256
 
   macos:
-    if: github.event_name != 'workflow_dispatch' || inputs.build_macos
+    if: github.event_name == 'workflow_dispatch' && inputs.build_macos
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
@@ -172,7 +172,7 @@ jobs:
             src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app.tar.gz.sig
 
   windows:
-    if: github.event_name != 'workflow_dispatch' || inputs.build_windows
+    if: github.event_name == 'workflow_dispatch' && inputs.build_windows
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4

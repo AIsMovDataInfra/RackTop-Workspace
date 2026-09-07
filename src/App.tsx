@@ -101,14 +101,13 @@ import { loadLaunchProfiles, loadManagedRuns } from './utils/managedRuns'
 import { detectAppPlatform } from './utils/platform'
 import { acceleratorDeviceName, acceleratorDriverLabel, acceleratorLabel } from './utils/accelerator'
 import { allowsServerNotification, defaultServerNotificationSettings, normalizeServerNotificationSettings, SERVER_NOTIFICATION_CATEGORY_ITEMS } from './utils/serverNotifications'
-import { isNewerVersion, loadCachedUpdate, loadIgnoredUpdateVersion, saveCachedUpdate, saveIgnoredUpdateVersion, shouldShowUpdateBadge, UPDATE_CHECK_INTERVAL_MS, type ReleaseInfo } from './utils/updateCheck'
+import { isNewerVersion, loadCachedUpdate, loadIgnoredUpdateVersion, releaseUrl, saveCachedUpdate, saveIgnoredUpdateVersion, shouldShowUpdateBadge, UPDATE_CHECK_INTERVAL_MS, type ReleaseInfo } from './utils/updateCheck'
 import { applyAppUpdateDownloadEvent, initialAppUpdateState, type AppUpdateState } from './utils/appUpdate'
 import authorAvatar from './assets/tongzh-seu.png'
 import packageInfo from '../package.json'
 
 const appPlatform = detectAppPlatform(api.isDesktop, navigator.userAgent)
 const browserPreviewState = api.isDesktop || typeof window === 'undefined' ? null : new URLSearchParams(window.location.search).get('previewState')
-const releaseUrl = (version: string) => `https://github.com/Tongzh-SEU/RackTop/releases/tag/v${version.replace(/^v/i, '')}`
 
 const ONBOARDING_DISMISSED_KEY = 'racktop.onboardingDismissed.v1'
 

@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { isNewerVersion, shouldShowUpdateBadge } from './updateCheck'
+import { isNewerVersion, releaseUrl, shouldShowUpdateBadge } from './updateCheck'
 
 describe('update checks', () => {
+  it('opens community release notes for Linux versions and upstream notes for official versions', () => {
+    expect(releaseUrl('1.26.0-linux.2')).toBe('https://github.com/AIsMovDataInfra/RackTop/releases/tag/v1.26.0-linux.2')
+    expect(releaseUrl('v1.26.0-linux.2')).toBe('https://github.com/AIsMovDataInfra/RackTop/releases/tag/v1.26.0-linux.2')
+    expect(releaseUrl('v1.25.4')).toBe('https://github.com/Tongzh-SEU/RackTop/releases/tag/v1.25.4')
+  })
+
   it('compares semantic versions numerically', () => {
     expect(isNewerVersion('v1.25.0', '1.24.5')).toBe(true)
     expect(isNewerVersion('v1.24.5', '1.24.5')).toBe(false)

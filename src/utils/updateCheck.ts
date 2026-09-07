@@ -4,6 +4,12 @@ export interface ReleaseInfo {
   publishedAt?: string
 }
 
+export function releaseUrl(version: string) {
+  const tag = version.replace(/^v/i, '')
+  const repository = tag.includes('-linux.') ? 'AIsMovDataInfra/RackTop' : 'Tongzh-SEU/RackTop'
+  return `https://github.com/${repository}/releases/tag/v${tag}`
+}
+
 export const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000
 export const UPDATE_CHECK_STORAGE_KEY = 'racktop.updateCheck.v1'
 export const IGNORED_UPDATE_VERSION_KEY = 'racktop.ignoredUpdateVersion.v1'

@@ -1,4 +1,8 @@
-> 此分支含非官方 Ubuntu 22.04 x86_64 实验版 `1.26.0-linux.1`，安装与构建说明见 [Linux 客户端](docs/LINUX.md)。下方下载表为上游官方版本。
+# RackTop Linux 社区移植版
+
+基于 [Tongzh-SEU/RackTop](https://github.com/Tongzh-SEU/RackTop) 官方 **v1.25.4**，由 **AIsMovDataInfra** 提供 Ubuntu Linux 客户端适配。原作者为 **Tongzh-SEU**；本仓库保留上游 Git 历史、作者信息和 [GPL-3.0 许可证](LICENSE)。这是独立的社区 fork，Linux 安装包并非上游官方发布。
+
+Linux 当前版本：**1.26.0-linux.2（测试版）**，目标为 **Ubuntu 22.04 x86_64 / amd64 图形桌面**。上游功能说明与截图保留在下方；Linux 的实际验证范围见 [安装与构建说明](docs/LINUX.md#验证范围)。
 
 <div align="right">
   🌐 Language:
@@ -7,7 +11,7 @@
 </div>
 
 <p align="center">
-  <img src="docs/assets/readme/racktop-icon.png" alt="RackTop macOS Logo" width="300" />
+  <img src="docs/assets/readme/racktop-icon.png" alt="RackTop Logo" width="300" />
 </p>
 
 <h2 align="center">多台服务器，一个训练工作台</h2>
@@ -24,7 +28,7 @@ RackTop 是面向个人研究者和小型团队的 GPU 服务器桌面工作台�
 <p align="center">
   <a href="https://github.com/Tongzh-SEU/RackTop/releases/latest"><img src="https://img.shields.io/github/v/release/Tongzh-SEU/RackTop?style=flat-square&logo=github&label=release" alt="Release"></a>
   <a href="https://github.com/Tongzh-SEU/RackTop/stargazers"><img src="https://img.shields.io/github/stars/Tongzh-SEU/RackTop?style=flat-square&logo=github&label=stars" alt="GitHub Stars"></a>
-  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows-1687b8?style=flat-square" alt="Platform">
+  <img src="https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-1687b8?style=flat-square" alt="Platform">
   <a href="https://github.com/Tongzh-SEU/RackTop/releases"><img src="https://img.shields.io/github/downloads/Tongzh-SEU/RackTop/total?style=flat-square&logo=github&label=downloads" alt="Downloads"></a>
   <a href="https://github.com/Tongzh-SEU/RackTop/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-green?style=flat-square" alt="GPL-3.0 License"></a>
 </p>
@@ -40,22 +44,28 @@ RackTop 是面向个人研究者和小型团队的 GPU 服务器桌面工作台�
 
 ## 下载
 
-当前稳定版：**v1.25.4**
+| 客户端平台 | 提供方 | 安装包与下载 |
+| --- | --- | --- |
+| **Ubuntu 22.04 x86_64 / amd64** | **AIsMovDataInfra 社区测试版 1.26.0-linux.2** | [下载 Linux .deb](https://github.com/AIsMovDataInfra/RackTop/releases/download/v1.26.0-linux.2/RackTop_1.26.0-linux.2_amd64.deb) · [版本说明、源码与校验文件](https://github.com/AIsMovDataInfra/RackTop/releases/tag/v1.26.0-linux.2) |
+| macOS Apple Silicon | Tongzh-SEU 官方 v1.25.4 | [下载官方 .dmg](https://github.com/Tongzh-SEU/RackTop/releases/download/v1.25.4/RackTop_1.25.4_macos-arm64.dmg) |
+| Windows x64 | Tongzh-SEU 官方 v1.25.4 | [下载官方安装程序](https://github.com/Tongzh-SEU/RackTop/releases/download/v1.25.4/RackTop_1.25.4_x64-setup.exe) |
 
-| 平台                  | 安装包                              | 下载                                                                                                            |
-| ------------------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| macOS Apple Silicon | `RackTop_1.25.4_macos-arm64.dmg` | [下载 macOS 版本](https://github.com/Tongzh-SEU/RackTop/releases/download/v1.25.4/RackTop_1.25.4_macos-arm64.dmg) |
-| Windows x64         | `RackTop_1.25.4_x64-setup.exe`   | [下载 Windows 版本](https://github.com/Tongzh-SEU/RackTop/releases/download/v1.25.4/RackTop_1.25.4_x64-setup.exe) |
+Windows/macOS 安装包由官方仓库提供；后续版本请查看 [上游 Releases](https://github.com/Tongzh-SEU/RackTop/releases)。Linux 新版发布在 [本仓库 Releases](https://github.com/AIsMovDataInfra/RackTop/releases)，采用手动安装升级。
 
-更多版本见 [GitHub Releases](https://github.com/Tongzh-SEU/RackTop/releases)。
-macOS版本若首次打开时提示应用来源受限，请前往“系统设置 → 隐私与安全性”，确认允许打开该应用。
-Windows版本若提示“智能应用控制已阻止可能不安全的应用”，请在“设置”中搜索“智能应用控制”，并将其关闭。
+下载 `.deb` 后，在下载目录运行：
 
-## 作者的话
+```bash
+sudo apt install ./RackTop_1.26.0-linux.2_amd64.deb
+racktop
+```
 
-实验室服务器越来越多以后，项目之间的同步、任务运行和服务器状态查看会变得越来越麻烦。把这些事情交给 AI 做，往往又会浪费不少 token 和时间，所以我决定开发 RackTop，把这些重复的操作收进一个真正可操作的工具里。
+也可以从应用菜单启动。更多依赖、密码存储、源码构建和已知限制见 [Linux 使用说明](docs/LINUX.md)。如需校验，下载同一 Release 的 `SHA256SUMS` 后运行 `sha256sum --check --ignore-missing SHA256SUMS`。
 
-当然，开发这个 App 的过程本身也花了很多 token，笑死。至少现在，下一次启动任务时不用再从头解释一遍服务器、项目和命令了。
+## 项目来源与反馈
+
+RackTop 由 [Tongzh-SEU](https://github.com/Tongzh-SEU) 开发，面向研究者和小团队集中管理 GPU 服务器，减少反复 SSH 检查与重复说明环境的工作。感谢原作者及上游贡献者提供完整的桌面应用基础。
+
+本 fork 增加 Linux 平台识别、系统钥匙串接入、原生窗口适配、Debian 打包和 Ubuntu 构建验证。详细变更见 [版本记录](docs/VERSION_INFOS.md) 与 [来源说明](NOTICE.md)。Linux 安装和适配问题请提交到 [本仓库 Issues](https://github.com/AIsMovDataInfra/RackTop/issues)；官方版本与原项目介绍见 [上游仓库](https://github.com/Tongzh-SEU/RackTop)。
 
 ## 主要功能
 
@@ -72,12 +82,12 @@ Windows版本若提示“智能应用控制已阻止可能不安全的应用”�
 
 - Host Key 未确认时不会自动接受；指纹变化会阻止连接。
 - 密码不会写入命令行、日志或 SQLite，只保存在会话内存或系统钥匙串。
-- RackTop 不会自动执行 `sudo` 或未经确认修改远程服务器。
+- RackTop 使用本机 OpenSSH 连接远程服务器；历史采样和任务/文件管理功能可能在远端写入文件，请按需配置。
 - 服务器、项目、数据集、模型、启动配置和历史数据保存在本机应用数据目录；卸载应用通常不会自动删除这些数据，如需彻底清理请先在应用设置中导出或删除，再按操作系统清理应用数据目录。
 
 ## 开发者说明
 
-RackTop 使用 Tauri 2、React、TypeScript、Rust 和 SQLite 构建。开发环境需要 Node.js 20+、Rust stable 和系统 OpenSSH。
+RackTop 使用 Tauri 2、React、TypeScript、Rust 和 SQLite 构建。开发环境需要 Node.js 22+、Rust stable 和系统 OpenSSH。
 
 ```bash
 npm install
@@ -98,7 +108,7 @@ cargo test --manifest-path src-tauri/Cargo.toml
 npm run tauri build
 ```
 
-macOS 的应用和 DMG 会输出到 `src-tauri/target/release/bundle/`。GitHub Actions 会分别构建 macOS 和 Windows 安装包。
+Linux 开发者请先安装 [系统开发依赖](docs/LINUX.md#从源码构建)，再运行 `npm run bundle:linux -- --locked`；产物在 `src-tauri/target/release/bundle/deb/`。本仓库 GitHub Actions 默认构建 Linux，Windows/macOS 用户请下载上游官方版本。
 
 ## 产品说明书
 

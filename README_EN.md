@@ -1,3 +1,9 @@
+# RackTop Linux Community Port
+
+Based on official [Tongzh-SEU/RackTop](https://github.com/Tongzh-SEU/RackTop) **v1.25.4**, with Ubuntu Linux support provided by **AIsMovDataInfra**. **Tongzh-SEU** is the original author. This independent community fork preserves upstream Git history, attribution and the [GPL-3.0 license](LICENSE). Linux packages are not official upstream releases.
+
+Current Linux version: **1.26.0-linux.2 (pre-release)** for **Ubuntu 22.04 x86_64 / amd64 desktops**. The upstream feature guide and screenshots appear below; see [Linux validation and limitations](docs/LINUX.md#验证范围) for the scope tested on Linux.
+
 <div align="right">
   🌐 Language:
   <a href="./README.md"><kbd>简体中文</kbd></a>
@@ -5,7 +11,7 @@
 </div>
 
 <p align="center">
-  <img src="docs/assets/readme/racktop-icon.png" alt="RackTop macOS Logo" width="300" />
+  <img src="docs/assets/readme/racktop-icon.png" alt="RackTop Logo" width="300" />
 </p>
 
 <h2 align="center">Multiple Servers, One Training Workspace</h2>
@@ -22,7 +28,7 @@ Find the right GPU before launching a job, monitor resources and processes while
 <p align="center">
   <a href="https://github.com/Tongzh-SEU/RackTop/releases/latest"><img src="https://img.shields.io/github/v/release/Tongzh-SEU/RackTop?style=flat-square&logo=github&label=release" alt="Release"></a>
   <a href="https://github.com/Tongzh-SEU/RackTop/stargazers"><img src="https://img.shields.io/github/stars/Tongzh-SEU/RackTop?style=flat-square&logo=github&label=stars" alt="GitHub Stars"></a>
-  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows-1687b8?style=flat-square" alt="Platform">
+  <img src="https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-1687b8?style=flat-square" alt="Platform">
   <a href="https://github.com/Tongzh-SEU/RackTop/releases"><img src="https://img.shields.io/github/downloads/Tongzh-SEU/RackTop/total?style=flat-square&logo=github&label=downloads" alt="Downloads"></a>
   <a href="https://github.com/Tongzh-SEU/RackTop/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-green?style=flat-square" alt="GPL-3.0 License"></a>
 </p>
@@ -35,24 +41,30 @@ Find the right GPU before launching a job, monitor resources and processes while
 
 ## Download
 
-Current stable version: **v1.25.4**
+| Client platform | Publisher | Installer |
+| --- | --- | --- |
+| **Ubuntu 22.04 x86_64 / amd64** | **AIsMovDataInfra community pre-release 1.26.0-linux.2** | [Linux .deb](https://github.com/AIsMovDataInfra/RackTop/releases/download/v1.26.0-linux.2/RackTop_1.26.0-linux.2_amd64.deb) · [Release notes, source and checksums](https://github.com/AIsMovDataInfra/RackTop/releases/tag/v1.26.0-linux.2) |
+| macOS Apple Silicon | Tongzh-SEU official v1.25.4 | [Official .dmg](https://github.com/Tongzh-SEU/RackTop/releases/download/v1.25.4/RackTop_1.25.4_macos-arm64.dmg) |
+| Windows x64 | Tongzh-SEU official v1.25.4 | [Official installer](https://github.com/Tongzh-SEU/RackTop/releases/download/v1.25.4/RackTop_1.25.4_x64-setup.exe) |
 
-| Platform              | Installer                        | Download                                                                                                               |
-| --------------------- | -------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| macOS Apple Silicon   | `RackTop_1.25.4_macos-arm64.dmg` | [Download for macOS](https://github.com/Tongzh-SEU/RackTop/releases/download/v1.25.4/RackTop_1.25.4_macos-arm64.dmg)     |
-| Windows x64           | `RackTop_1.25.4_x64-setup.exe`   | [Download for Windows](https://github.com/Tongzh-SEU/RackTop/releases/download/v1.25.4/RackTop_1.25.4_x64-setup.exe)     |
+Windows/macOS downloads are hosted by the original project. Check [upstream Releases](https://github.com/Tongzh-SEU/RackTop/releases) for newer official versions. Linux packages are available from [this repository's Releases](https://github.com/AIsMovDataInfra/RackTop/releases) and require manual updates.
 
-See [GitHub Releases](https://github.com/Tongzh-SEU/RackTop/releases) for additional versions.
+Install the downloaded package from its directory:
 
-If macOS blocks the app the first time you open it, go to **System Settings → Privacy & Security** and allow the app to open.
+```bash
+sudo apt install ./RackTop_1.26.0-linux.2_amd64.deb
+racktop
+```
 
-If Windows reports that "Smart App Control has blocked an app that may be unsafe," search for **Smart App Control** in Settings and turn it off.
+You can also launch RackTop from your application menu. A graphical desktop, WebKitGTK 4.1 and OpenSSH are required. The package is for amd64, not ARM. Password persistence uses a compatible Secret Service keyring, such as GNOME Keyring; you can instead use session-only passwords. Download `SHA256SUMS` alongside the package and run `sha256sum --check --ignore-missing SHA256SUMS` to check the files you downloaded.
 
-## A Note from the Author
+Unit tests, frontend builds, Debian package integrity, dynamic libraries, isolated native startup and Secret Service persistence have been checked on Ubuntu 22.04. Real GPU server monitoring, job execution, synchronization, ARM, Wayland and other distributions still need end-to-end testing. See [the Linux guide](docs/LINUX.md) for build dependencies and detailed verification records.
 
-As the number of lab servers grows, keeping projects in sync, launching jobs, and checking server status becomes increasingly cumbersome. Asking AI to handle these tasks often consumes a surprising amount of time and tokens, so I built RackTop to bring these repetitive operations into a tool you can actually use directly.
+## Attribution and Feedback
 
-Of course, building the app itself also consumed plenty of tokens. At least now, the next time I launch a job, I will not have to explain the servers, projects, and commands all over again.
+RackTop was created by [Tongzh-SEU](https://github.com/Tongzh-SEU) to help researchers and small teams manage GPU servers from a single desktop workspace. We thank the original author and upstream contributors.
+
+This fork adds Linux platform detection, native window integration, Secret Service support, Debian packaging and Ubuntu build checks. See [NOTICE](NOTICE.md) and the [changelog](docs/VERSION_INFOS.md). Report Linux packaging and compatibility issues to [this repository](https://github.com/AIsMovDataInfra/RackTop/issues). For the original application and official releases, visit [upstream](https://github.com/Tongzh-SEU/RackTop).
 
 ## Key Features
 
@@ -68,12 +80,12 @@ Of course, building the app itself also consumed plenty of tokens. At least now,
 
 - RackTop never accepts an unverified host key automatically, and a changed fingerprint blocks the connection.
 - Passwords are never written to command lines, logs, or SQLite. They remain in session memory or the system keychain.
-- RackTop never runs `sudo` or modifies remote servers without confirmation.
+- RackTop connects through the local OpenSSH client. Remote history sampling and job/file management features may write files on the server; configure them as needed.
 - Server, project, dataset, model, launch profile, and history data is stored in the local application data directory. Uninstalling the app usually does not remove this data automatically. To remove everything, first export or delete data from the app settings, then clear the application data directory according to your operating system.
 
 ## Developer Guide
 
-RackTop is built with Tauri 2, React, TypeScript, Rust, and SQLite. Development requires Node.js 20+, the stable Rust toolchain, and the system OpenSSH client.
+RackTop is built with Tauri 2, React, TypeScript, Rust, and SQLite. Development requires Node.js 22+, the stable Rust toolchain, and the system OpenSSH client.
 
 ```bash
 npm install
@@ -94,7 +106,7 @@ Build a local package:
 npm run tauri build
 ```
 
-On macOS, the application bundle and DMG are written to `src-tauri/target/release/bundle/`. GitHub Actions builds the macOS and Windows installers separately.
+For Linux, install the [system development dependencies](docs/LINUX.md#从源码构建), then run `npm run bundle:linux -- --locked`. Packages are written to `src-tauri/target/release/bundle/deb/`. This fork builds Linux by default in GitHub Actions; Windows/macOS users should use official upstream releases.
 
 ## Product Guide
 
