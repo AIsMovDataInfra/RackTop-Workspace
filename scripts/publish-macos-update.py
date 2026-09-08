@@ -128,7 +128,7 @@ def main():
     notes = assets / 'release-notes.md'
     notes.write_text(body)
     run('gh', 'release', 'create', tag, '--repo', REPO, '--verify-tag', '--prerelease',
-        '--title', f'RackTop {tag} 测试版', '--notes-file', str(notes), *map(str, files))
+        '--title', f'RackTop {tag} Mac 测试版（Apple Silicon / Intel）', '--notes-file', str(notes), *map(str, files))
     release = api(f'releases/tags/{tag}')
     for path in files:
         asset = next(item for item in release['assets'] if item['name'] == path.name)

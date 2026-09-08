@@ -60,7 +60,7 @@ notes = assets / 'release-notes.md'
 notes.write_text('## 主要更新\n\n' + '\n'.join(bullets) + '\n\n## 下载\n\n' +
                  f'- [{package.name}]({expected_url})：Ubuntu 22.04 / Debian 兼容 amd64 桌面安装包。\n' +
                  f'- [{source.name}](https://github.com/{REPO}/releases/download/{tag}/{source.name})：对应源码，GPL-3.0。\n')
-run('gh', 'release', 'create', tag, '--repo', REPO, '--verify-tag', '--prerelease', '--title', f'RackTop {tag} 测试版', '--notes-file', str(notes), *map(str, files))
+run('gh', 'release', 'create', tag, '--repo', REPO, '--verify-tag', '--prerelease', '--title', f'RackTop {tag} Linux 测试版（Ubuntu amd64）', '--notes-file', str(notes), *map(str, files))
 release = api(f'releases/tags/{tag}')
 for path in files:
     asset = next(item for item in release['assets'] if item['name'] == path.name)

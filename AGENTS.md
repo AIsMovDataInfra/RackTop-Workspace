@@ -374,7 +374,7 @@ v0.2.0 feat: 增加 GPU 告警规则管理
 
 1. 确认默认分支已经包含当前版本提交，版本号与 `package.json`、Cargo、Tauri 配置以及版本说明一致。
 2. 使用 `vX.Y.Z` 格式创建版本标签，并确保标签指向默认分支中实际发布的提交；不得把正式版本标签留在尚未合并的功能分支提交上。
-3. 创建同版本的 GitHub Release。正式可用版本应标记为 Latest，标题使用 `RackTop vX.Y.Z 稳定版`；测试版本应标记为 Pre-release，标题使用 `RackTop vX.Y.Z 测试版`。
+3. 创建同版本的 GitHub Release。正式可用版本应标记为 Latest，测试版本应标记为 Pre-release；标题必须明确平台和发布阶段，例如 `RackTop vX.Y.Z Mac 测试版（Apple Silicon / Intel）`、`RackTop vX.Y.Z-linux.N Linux 测试版（Ubuntu amd64）`。稳定版将“测试版”替换为“稳定版”，平台与架构须与实际附件一致。仅修正已有 Release 的展示标题和发布标题模板时，保留原版本、标签、附件及更新清单，无须重新构建安装包。
 4. GitHub 页面顶部显示的作者、发布时间、Latest、版本标签、目标提交和“自此版本以来的提交数量”由 GitHub 自动生成，不得重复写入 Release 正文。
 5. Release 正文只允许“主要更新”和“下载”两个模块，不加入验证、测试数量、开发过程、提交记录和内部实现细节。
 6. 上传实际构建并验证过的发布产物。macOS 应优先上传可直接下载的 `.dmg`；暂时无法生成 `.dmg` 时，可上传保留签名结构的 `.zip`。Windows 应上传实际验证过的安装程序，不得用源码压缩包冒充安装包。
