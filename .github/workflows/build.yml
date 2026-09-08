@@ -214,17 +214,16 @@ jobs:
           DMG="$(find "$BUNDLE/dmg" -maxdepth 1 -name '*.dmg' -print)"
           UPDATER="$(find "$BUNDLE/macos" -maxdepth 1 -name '*.app.tar.gz' -print)"
           MODE=ad-hoc
-          NOTARY_ARGS=()
-          if [ "${RACKTOP_MARK_UNSIGNED:-1}" = "0" ]; then
-            MODE=developer-id
-            NOTARY_ARGS=(--notarized)
-          fi
-          python3 scripts/test-macos-package.py \
-            --target "${{ matrix.target }}" --dmg "$DMG" --updater "$UPDATER" \
-            --public-key src-tauri/linux-updater.pub --version "$RACKTOP_VERSION" \
-            --signing-mode "$MODE" "${NOTARY_ARGS[@]}" --smoke \
-            --report "$RUNNER_TEMP/macos-${{ matrix.arch }}-verification.json" \
+          if [ "${RACKTOP_MARK_UNSIGNED:-1}" = "0" ]; then MODE=developer-id; fi
+          VERIFY_ARGS=(
+            --target "${{ matrix.target }}" --dmg "$DMG" --updater "$UPDATER"
+            --public-key src-tauri/linux-updater.pub --version "$RACKTOP_VERSION"
+            --signing-mode "$MODE" --smoke
+            --report "$RUNNER_TEMP/macos-${{ matrix.arch }}-verification.json"
             --screenshot "$RUNNER_TEMP/macos-${{ matrix.arch }}.png"
+          )
+          if [ "$MODE" = developer-id ]; then VERIFY_ARGS+=(--notarized); fi
+          python3 scripts/test-macos-package.py "${VERIFY_ARGS[@]}"
       - name: Upload Mac verification evidence
         if: always()
         uses: actions/upload-artifact@v4
