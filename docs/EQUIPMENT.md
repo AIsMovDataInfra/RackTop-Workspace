@@ -73,4 +73,4 @@
 
 [在线设备工作台](https://136.0.110.161/equipment) 沿用团队账号，普通注册不需要邮箱。网页功能更新不要求每位成员安装客户端。
 
-桌面入口从 Linux `1.28.0-linux.10` 和 Mac `1.28.0` 提供，位于密钥管理与日志之间。对应安装包见 [Linux 下载页](https://github.com/AIsMovDataInfra/RackTop/releases/tag/v1.28.0-linux.10) 和 [Mac 下载页](https://github.com/AIsMovDataInfra/RackTop/releases/tag/v1.28.0)；这些链接说明入口起始版本，本页新功能的实际部署状态以当前交付记录为准。
+当前客户端为 Linux `1.29.0-linux.11` 和 Mac `1.29.0`，下载见 [Linux 安装包](https://github.com/AIsMovDataInfra/RackTop/releases/tag/v1.29.0-linux.11) 与 [Mac 双架构安装包](https://github.com/AIsMovDataInfra/RackTop/releases/tag/v1.29.0)。设备入口从 Linux `1.28.0-linux.10`、Mac `1.28.0` 起已提供，旧客户端刷新在线页面也能使用本页设备功能；新版客户端同步了预约列表的成员登录限制。
