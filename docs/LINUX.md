@@ -34,9 +34,9 @@ linux.1～linux.3 的旧更新模块需要先手动安装一次 linux.4 或更�
 
 ```bash
 # TAURI_SIGNING_PRIVATE_KEY_PATH 指向受保护的私钥文件；不要将内容写进命令或日志。
-python3 scripts/sign-linux-update.py src-tauri/target/release/bundle/deb/RackTop_1.29.0-linux.11_amd64.deb
+python3 scripts/sign-linux-update.py src-tauri/target/release/bundle/deb/RackTop_1.30.0-linux.12_amd64.deb
 cargo build --release --locked --features integration-probe --bin racktop-probe --manifest-path src-tauri/Cargo.toml
-python3 scripts/test-linux-update.py src-tauri/target/release/racktop-probe src-tauri/target/release/bundle/deb/RackTop_1.29.0-linux.11_amd64.deb
+python3 scripts/test-linux-update.py src-tauri/target/release/racktop-probe src-tauri/target/release/bundle/deb/RackTop_1.30.0-linux.12_amd64.deb
 ```
 
 ## 分享 SSH 连接与失败重试
@@ -97,6 +97,8 @@ npm run bundle:linux -- --locked
 桌面侧栏的「设备管理」位于「密钥管理」与「日志」之间，打开 [在线设备工作台](https://136.0.110.161/equipment)。扫码登记、打印标签和字段说明见 [设备管理指南](EQUIPMENT.md)。
 
 ## 验证范围
+
+`1.30.0-linux.12` 的 [标签构建与发布 34250392746](https://github.com/AIsMovDataInfra/RackTop/actions/runs/34250392746) 已完成：桌面 301、Rust 160、中继 27、文件协议 15、更新器 9 项及真实中继重连、15 秒隔离原生启动检查通过。5 个公开附件独立下载核对摘要，Deb 包与全部 389 个源码文件、Linux 更新签名通过；本机用户安装入口已更新，原有数据保留，重启后生效。账号与设备指南见 [团队账号](TEAM_ACCOUNTS.md) 与 [固定资产标签](EQUIPMENT.md)。
 
 `1.29.0-linux.11` 的 [标签构建与发布 34199947421](https://github.com/AIsMovDataInfra/RackTop/actions/runs/34199947421) 已通过桌面测试、生产构建、Rust 测试、真实中继协议检查、Deb 签名、更新下载及隔离原生启动检查。设备网页同源浏览器流程已验收，真实用户桌面打开系统浏览器及实际更新安装仍需单独验证。
 
