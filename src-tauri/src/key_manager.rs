@@ -511,7 +511,9 @@ mod tests {
 
     fn manager() -> (tempfile::TempDir, KeyManager) {
         let directory = tempfile::tempdir().unwrap();
-        let manager = KeyManager::new(directory.path().to_path_buf());
+        // macOS tempdir may use /var -> /private/var. Normalize only this
+        // newly created fixture root; production key paths still reject links.
+        let manager = KeyManager::new(directory.path().canonicalize().unwrap());
         (directory, manager)
     }
 
@@ -590,12 +592,12 @@ mod tests {
 
     #[test]
     fn discovers_private_only_files_and_reports_server_usage_outside_ssh_directory() {
-        let (directory, manager) = manager();
+        let (_directory, manager) = manager();
         let generated = manager.generate("原始", "ed25519", "").unwrap();
         let private_only = manager.ssh.join("my-old-identity");
         fs::copy(generated.private_key_path.as_ref().unwrap(), &private_only).unwrap();
         set_private_permissions(&private_only).unwrap();
-        let external = directory.path().join("external-identity");
+        let external = manager.home.join("external-identity");
         fs::copy(generated.private_key_path.unwrap(), &external).unwrap();
         set_private_permissions(&external).unwrap();
         let server = Server {
@@ -685,14 +687,20 @@ mod tests {
     #[test]
     fn refuses_symlink_keys_and_storage_directories() {
         use std::os::unix::fs::symlink;
-        let (directory, manager) = manager();
+        let (_directory, manager) = manager();
         let generated = manager.generate("real", "ed25519", "").unwrap();
-        let alias = directory.path().join("alias.pub");
+        let alias = manager.home.join("alias.pub");
         symlink(generated.public_key_path.unwrap(), &alias).unwrap();
-        assert!(manager.import(alias.to_str().unwrap(), None, &[]).unwrap_err().contains("符号链接"));
-        let other_home = directory.path().join("other-home");
+        let error = manager.import(alias.to_str().unwrap(), None, &[]).unwrap_err();
+        assert!(error.contains("符号链接") && error.contains(alias.to_str().unwrap()));
+        let other_home = manager.home.join("other-home");
         fs::create_dir(&other_home).unwrap();
         symlink(&manager.ssh, other_home.join(".ssh")).unwrap();
-        assert!(KeyManager::new(other_home).generate("bad", "ed25519", "").unwrap_err().contains("符号链接"));
+        let error = KeyManager::new(other_home.clone()).generate("bad", "ed25519", "").unwrap_err();
+        assert!(error.contains("符号链接") && error.contains(other_home.join(".ssh").to_str().unwrap()));
+        let home_alias = manager.home.join("home-alias");
+        symlink(&manager.home, &home_alias).unwrap();
+        let error = KeyManager::new(home_alias.clone()).generate("bad", "ed25519", "").unwrap_err();
+        assert!(error.contains("符号链接") && error.contains(home_alias.to_str().unwrap()));
     }
 }

@@ -1,8 +1,10 @@
 # RackTop · Maintained by AIsMov
 
-**AIsMov** maintains this project, with source code, feature development and Linux releases hosted at [AIsMovDataInfra/RackTop](https://github.com/AIsMovDataInfra/RackTop). This fork was initially based on official [Tongzh-SEU/RackTop](https://github.com/Tongzh-SEU/RackTop) **v1.25.4**. **Tongzh-SEU** remains the original author. Development and releases continue as an independent community fork, preserving upstream Git history, attribution and the [GPL-3.0 license](LICENSE).
+**AIsMov** maintains this project, with source code, feature development and Linux / macOS releases hosted at [AIsMovDataInfra/RackTop](https://github.com/AIsMovDataInfra/RackTop). This fork was initially based on official [Tongzh-SEU/RackTop](https://github.com/Tongzh-SEU/RackTop) **v1.25.4**. **Tongzh-SEU** remains the original author. Development and releases continue as an independent community fork, preserving upstream Git history, attribution and the [GPL-3.0 license](LICENSE).
 
 This Linux pre-release is **1.26.0-linux.9**, targeting **Ubuntu 22.04 x86_64 / amd64 desktops**. Use the download links below; the corresponding Release assets show build and publication availability. See the [changelog](docs/VERSION_INFOS.md) for changes. The upstream feature guide and screenshots appear below; see [Linux validation and limitations](docs/LINUX.md#验证范围) for the scope tested on Linux.
+
+The maintained macOS **1.27.0** release supports Apple Silicon and Intel. It includes the fork's local SSH key manager, sharing gateway, invitations, guest terminals and file access, and online team reservations. See the [macOS guide](docs/MACOS.md) for download status, first launch and validation scope.
 
 The [team reservation web app](team-web/README.md) supports whole-machine and selected-GPU bookings, conflict checks, renewals, cancellation and an administrator resource catalog. Anyone can browse the public schedule; booking requires a username and password, with no email or Feishu account needed. RackTop’s Team Reservations entry connects to the same central service, and administrators can select desktop servers to synchronize GPU inventories. The web and desktop views share resources and bookings; synchronization does not upload SSH host addresses, login credentials or private keys. Production uses HTTPS. Feishu login and group notifications remain optional, and clearly labeled local demos are not suitable for production. Reservations do not lock GPUs or stop training processes. Run `npm ci` and `npm run team:dev` with Node.js 24+ to try it locally.
 
@@ -46,10 +48,13 @@ Find the right GPU before launching a job, monitor resources and processes while
 | Client platform | Publisher | Installer |
 | --- | --- | --- |
 | **Ubuntu 22.04 x86_64 / amd64** | **AIsMov community pre-release 1.26.0-linux.9** | [Linux .deb](https://github.com/AIsMovDataInfra/RackTop/releases/download/v1.26.0-linux.9/RackTop_1.26.0-linux.9_amd64.deb) · [Release notes, source and checksums](https://github.com/AIsMovDataInfra/RackTop/releases/tag/v1.26.0-linux.9) |
-| macOS Apple Silicon | Tongzh-SEU official v1.25.4 | [Official .dmg](https://github.com/Tongzh-SEU/RackTop/releases/download/v1.25.4/RackTop_1.25.4_macos-arm64.dmg) |
+| macOS Apple Silicon (M series) | AIsMov community pre-release 1.27.0 | [Download arm64 .dmg](https://github.com/AIsMovDataInfra/RackTop/releases/download/v1.27.0/RackTop_1.27.0_macos-arm64-unsigned.dmg) |
+| macOS Intel | AIsMov community pre-release 1.27.0 | [Download x64 .dmg](https://github.com/AIsMovDataInfra/RackTop/releases/download/v1.27.0/RackTop_1.27.0_macos-x64-unsigned.dmg) |
 | Windows x64 | Tongzh-SEU official v1.25.4 | [Official installer](https://github.com/Tongzh-SEU/RackTop/releases/download/v1.25.4/RackTop_1.25.4_x64-setup.exe) |
 
-Windows/macOS downloads are hosted by the original project. Check [upstream Releases](https://github.com/Tongzh-SEU/RackTop/releases) for newer official versions. Linux packages are available from [this repository's Releases](https://github.com/AIsMovDataInfra/RackTop/releases) and require one manual installation when upgrading from linux.1–linux.3. From linux.4 onward, the app can check for and install subsequent signed updates.
+macOS installers and checksums are provided through the [v1.27.0 Release](https://github.com/AIsMovDataInfra/RackTop/releases/tag/v1.27.0). These DMGs use ad-hoc signing and are not notarized by Apple. First launch may require **System Settings → Privacy & Security → Open Anyway**; follow the [installation guide](docs/MACOS.md#安装与首次打开). Windows downloads remain hosted by the original project's [upstream Releases](https://github.com/Tongzh-SEU/RackTop/releases).
+
+Linux packages are available from [this repository's Releases](https://github.com/AIsMovDataInfra/RackTop/releases) and require one manual installation when upgrading from linux.1–linux.3. From linux.4 onward, the app can check for and install subsequent signed updates.
 
 Install the downloaded package from its directory:
 
@@ -64,7 +69,7 @@ Unit tests, frontend builds, Debian package integrity, dynamic libraries, isolat
 
 ## Attribution and Feedback
 
-RackTop was originally created by [Tongzh-SEU](https://github.com/Tongzh-SEU) to help researchers and small teams manage GPU servers from a single desktop workspace. We thank the original author and upstream contributors. **AIsMov** is responsible for ongoing maintenance, feature development, issue handling and Linux distribution of this fork.
+RackTop was originally created by [Tongzh-SEU](https://github.com/Tongzh-SEU) to help researchers and small teams manage GPU servers from a single desktop workspace. We thank the original author and upstream contributors. **AIsMov** is responsible for ongoing maintenance, feature development, issue handling and Linux / macOS distribution of this fork.
 
 This fork adds Linux platform detection, native window integration, Secret Service support, Debian packaging, independent jump-host passwords, signed updates, SSH connection configuration sharing and local SSH key management. See [NOTICE](NOTICE.md) and the [changelog](docs/VERSION_INFOS.md). Send feature requests and issues for this maintained version to [AIsMovDataInfra/RackTop Issues](https://github.com/AIsMovDataInfra/RackTop/issues). For the original project and official Windows/macOS releases, visit [upstream](https://github.com/Tongzh-SEU/RackTop).
 
@@ -109,7 +114,7 @@ Build a local package:
 npm run tauri build
 ```
 
-For Linux, install the [system development dependencies](docs/LINUX.md#从源码构建), then run `npm run bundle:linux -- --locked`. Packages are written to `src-tauri/target/release/bundle/deb/`. This fork builds Linux by default in GitHub Actions; Windows/macOS users should use official upstream releases.
+For Linux, install the [system development dependencies](docs/LINUX.md#从源码构建), then run `npm run bundle:linux -- --locked`. Packages are written to `src-tauri/target/release/bundle/deb/`. See the [macOS build guide](docs/MACOS.md#从源码构建) for both architectures and signing. GitHub Actions builds Linux and macOS packages separately; Windows users should use official upstream releases.
 
 ## Product Guide
 

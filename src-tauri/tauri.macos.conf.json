@@ -1,0 +1,25 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "app": {
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' asset: data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src ipc: http://ipc.localhost https://api.github.com https://raw.githubusercontent.com"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://raw.githubusercontent.com/AIsMovDataInfra/RackTop/updater/macos.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEJENUQwQTJEMDNDQzRDREIKUldUYlRNd0RMUXBkdlo0V1RBM0paMHlNQWVOQy9pdHRQZmV4N2dPN1lOdkoyYkU0ekJ0WkJjaE0K"
+    }
+  },
+  "bundle": {
+    "publisher": "AIsMov",
+    "homepage": "https://github.com/AIsMovDataInfra/RackTop",
+    "createUpdaterArtifacts": false,
+    "resources": {
+      "../LICENSE": "LICENSE",
+      "../NOTICE.md": "NOTICE.md"
+    }
+  }
+}

@@ -772,7 +772,7 @@ impl Database {
         let id = draft.id.clone().unwrap_or_else(|| Uuid::new_v4().to_string());
         let proxy_jump = draft.proxy_jump.clone().filter(|value| !value.trim().is_empty()).map(|value| value.trim().to_owned());
         if draft.proxy_use_password {
-            if !cfg!(target_os = "linux") { return Err("独立跳板机密码目前仅支持 Linux 客户端".into()); }
+            if !cfg!(any(target_os = "linux", target_os = "macos")) { return Err("独立跳板机密码目前仅支持 Linux 和 macOS 客户端".into()); }
             let proxy = proxy_jump.as_deref().ok_or("请填写跳板机地址")?;
             crate::ssh_connection::parse_jump(proxy)?;
             let existing_proxy: Option<String> = self.connection.lock().map_err(|error| error.to_string())?
@@ -1906,6 +1906,34 @@ mod tests {
         let reopened = Database::open(&path).unwrap();
         assert_eq!(reopened.credential_storage_state(&saved.id).unwrap(), "none");
         assert_eq!(reopened.get_password(&saved.id, false).unwrap(), None);
+    }
+
+    #[test]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    fn independent_jump_session_passwords_are_separate_and_do_not_survive_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("jump-session.sqlite");
+        let db = Database::open(&path).unwrap();
+        let saved = db.save_server(ServerDraft {
+            auth_method: "password".into(), password: Some("target-session-only".into()),
+            proxy_jump: Some("jump@jump.example:2222".into()), proxy_use_password: true,
+            proxy_password: Some("jump-session-only".into()),
+            ..draft("Password jump", 30)
+        }).unwrap();
+        let passwords = db.get_ssh_passwords(&saved, false).unwrap().unwrap();
+        assert_eq!(passwords.target.as_deref(), Some("target-session-only"));
+        assert_eq!(passwords.proxy.as_deref(), Some("jump-session-only"));
+        assert_eq!(db.proxy_credential_record(&saved.id).unwrap(), Some(("jump@jump.example:2222".into(), "none".into())));
+        assert_eq!(db.get_proxy_password(&saved.id, "other@other.example:2222", false).unwrap(), None);
+        assert!(!serde_json::to_string(&saved).unwrap().contains("session-only"));
+        drop(db);
+
+        let reopened = Database::open(&path).unwrap();
+        let restored = reopened.get_server(&saved.id).unwrap();
+        assert!(restored.proxy_use_password);
+        let passwords = reopened.get_ssh_passwords(&restored, false).unwrap().unwrap();
+        assert_eq!(passwords.target, None);
+        assert_eq!(passwords.proxy, None);
     }
 
     #[test]
