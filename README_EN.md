@@ -2,7 +2,7 @@
 
 **AIsMov** maintains this project, with source code, feature development and Linux / macOS releases hosted at [AIsMovDataInfra/RackTop](https://github.com/AIsMovDataInfra/RackTop). This fork was initially based on official [Tongzh-SEU/RackTop](https://github.com/Tongzh-SEU/RackTop) **v1.25.4**. **Tongzh-SEU** remains the original author. Development and releases continue as an independent community fork, preserving upstream Git history, attribution and the [GPL-3.0 license](LICENSE).
 
-This Linux pre-release is **1.29.0-linux.11**, targeting **Ubuntu 22.04 x86_64 / amd64 desktops**. Use the download links below; the corresponding Release assets show build and publication availability. See the [changelog](docs/VERSION_INFOS.md) for changes. The upstream feature guide and screenshots appear below; see [Linux validation and limitations](docs/LINUX.md#验证范围) for the scope tested on Linux.
+This Linux pre-release is **1.30.0-linux.12**, targeting **Ubuntu 22.04 x86_64 / amd64 desktops**. Use the download links below; the corresponding Release assets show build and publication availability. See the [changelog](docs/VERSION_INFOS.md) for changes. The upstream feature guide and screenshots appear below; see [Linux validation and limitations](docs/LINUX.md#验证范围) for the scope tested on Linux.
 
 The maintained macOS **1.30.0** release supports Apple Silicon and Intel. It includes the fork's local SSH key manager, sharing gateway, invitations, guest terminals and file access, online team reservations, and a QR equipment inventory entry. See the [macOS guide](docs/MACOS.md) for download status, first launch and validation scope.
 
@@ -47,7 +47,7 @@ Find the right GPU before launching a job, monitor resources and processes while
 
 | Client platform | Publisher | Installer |
 | --- | --- | --- |
-| **Ubuntu 22.04 x86_64 / amd64** | **AIsMov community pre-release 1.29.0-linux.11** | [Linux .deb](https://github.com/AIsMovDataInfra/RackTop/releases/download/v1.29.0-linux.11/RackTop_1.29.0-linux.11_amd64.deb) · [Release notes, source and checksums](https://github.com/AIsMovDataInfra/RackTop/releases/tag/v1.29.0-linux.11) |
+| **Ubuntu 22.04 x86_64 / amd64** | **AIsMov community pre-release 1.30.0-linux.12** | [Linux .deb](https://github.com/AIsMovDataInfra/RackTop/releases/download/v1.30.0-linux.12/RackTop_1.30.0-linux.12_amd64.deb) · [Release notes, source and checksums](https://github.com/AIsMovDataInfra/RackTop/releases/tag/v1.30.0-linux.12) |
 | macOS Apple Silicon (M series) | AIsMov community pre-release 1.30.0 | [Download arm64 .dmg](https://github.com/AIsMovDataInfra/RackTop/releases/download/v1.30.0/RackTop_1.30.0_macos-arm64-unsigned.dmg) |
 | macOS Intel | AIsMov community pre-release 1.30.0 | [Download x64 .dmg](https://github.com/AIsMovDataInfra/RackTop/releases/download/v1.30.0/RackTop_1.30.0_macos-x64-unsigned.dmg) |
 | Windows x64 | Tongzh-SEU official v1.25.4 | [Official installer](https://github.com/Tongzh-SEU/RackTop/releases/download/v1.25.4/RackTop_1.25.4_x64-setup.exe) |
@@ -59,7 +59,7 @@ Linux packages are available from [this repository's Releases](https://github.co
 Install the downloaded package from its directory:
 
 ```bash
-sudo apt install ./RackTop_1.29.0-linux.11_amd64.deb
+sudo apt install ./RackTop_1.30.0-linux.12_amd64.deb
 racktop
 ```
 

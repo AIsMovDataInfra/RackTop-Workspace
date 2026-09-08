@@ -1,13 +1,13 @@
 # Linux 客户端（实验版）
 
-此社区 fork 最初基于上游 RackTop v1.25.4，提供 Ubuntu 22.04 x86_64 的原生 Linux 桌面构建。本次 Linux 测试版为 `1.29.0-linux.11`，下载和发布状态以对应 Release 的实际附件为准。这是由 [AIsMovDataInfra/RackTop](https://github.com/AIsMovDataInfra/RackTop) 分发的社区移植版本，不是上游官方 Linux Release。原作者为 Tongzh-SEU，许可证为 GPL-3.0。
+此社区 fork 最初基于上游 RackTop v1.25.4，提供 Ubuntu 22.04 x86_64 的原生 Linux 桌面构建。本次 Linux 测试版为 `1.30.0-linux.12`，下载和发布状态以对应 Release 的实际附件为准。这是由 [AIsMovDataInfra/RackTop](https://github.com/AIsMovDataInfra/RackTop) 分发的社区移植版本，不是上游官方 Linux Release。原作者为 Tongzh-SEU，许可证为 GPL-3.0。
 
 ## 安装与启动
 
 从 [Linux Release](https://github.com/AIsMovDataInfra/RackTop/releases) 下载 `.deb` 后，在其所在目录执行（将文件名替换为实际下载的文件名）：
 
 ```bash
-sudo apt install ./RackTop_1.29.0-linux.11_amd64.deb
+sudo apt install ./RackTop_1.30.0-linux.12_amd64.deb
 racktop
 ```
 
