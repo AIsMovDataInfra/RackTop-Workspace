@@ -4,7 +4,7 @@ RackTop 的 AIsMov 维护版从 **1.27.0** 提供 Apple Silicon 与 Intel 两种
 
 ## 下载与系统要求
 
-**发布状态：待发布。** 以下为计划上传地址，安装包和 `SHA256SUMS` 校验文件是否已可下载，以 [v1.27.0 Release](https://github.com/AIsMovDataInfra/RackTop/releases/tag/v1.27.0) 的实际附件为准。
+**发布状态：已发布测试版。** 两种 DMG、对应更新归档、源码及 `SHA256SUMS` 已上传至 [v1.27.0 Release](https://github.com/AIsMovDataInfra/RackTop/releases/tag/v1.27.0)。
 
 | Mac 机型 | 安装包 |
 | --- | --- |
@@ -63,13 +63,15 @@ RACKTOP_MACOS_TARGET=x86_64-apple-darwin RACKTOP_REQUIRE_UPDATER=0 npm run bundl
 
 ## 验证范围
 
-GitHub Actions [双架构构建 34179673856](https://github.com/AIsMovDataInfra/RackTop/actions/runs/34179673856) 已在 Apple Silicon **macOS 14.8.9** 与 Intel **macOS 15.7.9** 完成验证：
+GitHub Actions [v1.27.0 标签双架构构建 34180973823](https://github.com/AIsMovDataInfra/RackTop/actions/runs/34180973823) 已在 Apple Silicon **macOS 14.8.9** 与 Intel **macOS 15.7.9** 完成验证：
 
 - 每种架构前端 292 项测试、TypeScript 和 Vite 构建通过。
 - 每种架构 Rust 152 项通过、3 项需外部环境的集成测试默认忽略。
 - 实际挂载 DMG，检查原生架构、版本、许可证、应用代码签名和 Tauri 更新签名。
 - 对比 DMG 与更新归档内全部应用文件、权限及符号链接，内容一致。
 - 在隔离用户目录中启动应用，持续运行至少 8 秒并完成独立数据库初始化；保存并检查了原生窗口截图。
+
+[发布任务 34182220265](https://github.com/AIsMovDataInfra/RackTop/actions/runs/34182220265) 复用标签构建产物，重新验证两种更新签名与 GitHub 附件摘要后，已发布独立 Mac 更新清单；Linux 更新清单保持 `1.26.0-linux.9`。
 
 这些是 CI 中的原生启动与包完整性验证。真实用户设备的钥匙串授权、SSH/共享会话、自动更新替换、Gatekeeper 首次放行和 macOS 11 最低版本兼容性仍需单独验收；未声称已经通过。签名发布后的附件以对应 Release 和标签工作流为准。
 
