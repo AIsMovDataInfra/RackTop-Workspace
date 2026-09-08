@@ -1,13 +1,13 @@
 # Linux 客户端（实验版）
 
-此社区 fork 最初基于上游 RackTop v1.25.4，提供 Ubuntu 22.04 x86_64 的原生 Linux 桌面构建。本次 Linux 测试版为 `1.28.0-linux.10`，下载和发布状态以对应 Release 的实际附件为准。这是由 [AIsMovDataInfra/RackTop](https://github.com/AIsMovDataInfra/RackTop) 分发的社区移植版本，不是上游官方 Linux Release。原作者为 Tongzh-SEU，许可证为 GPL-3.0。
+此社区 fork 最初基于上游 RackTop v1.25.4，提供 Ubuntu 22.04 x86_64 的原生 Linux 桌面构建。本次 Linux 测试版为 `1.29.0-linux.11`，下载和发布状态以对应 Release 的实际附件为准。这是由 [AIsMovDataInfra/RackTop](https://github.com/AIsMovDataInfra/RackTop) 分发的社区移植版本，不是上游官方 Linux Release。原作者为 Tongzh-SEU，许可证为 GPL-3.0。
 
 ## 安装与启动
 
 从 [Linux Release](https://github.com/AIsMovDataInfra/RackTop/releases) 下载 `.deb` 后，在其所在目录执行（将文件名替换为实际下载的文件名）：
 
 ```bash
-sudo apt install ./RackTop_1.28.0-linux.10_amd64.deb
+sudo apt install ./RackTop_1.29.0-linux.11_amd64.deb
 racktop
 ```
 
@@ -34,9 +34,9 @@ linux.1～linux.3 的旧更新模块需要先手动安装一次 linux.4 或更�
 
 ```bash
 # TAURI_SIGNING_PRIVATE_KEY_PATH 指向受保护的私钥文件；不要将内容写进命令或日志。
-python3 scripts/sign-linux-update.py src-tauri/target/release/bundle/deb/RackTop_1.28.0-linux.10_amd64.deb
+python3 scripts/sign-linux-update.py src-tauri/target/release/bundle/deb/RackTop_1.29.0-linux.11_amd64.deb
 cargo build --release --locked --features integration-probe --bin racktop-probe --manifest-path src-tauri/Cargo.toml
-python3 scripts/test-linux-update.py src-tauri/target/release/racktop-probe src-tauri/target/release/bundle/deb/RackTop_1.28.0-linux.10_amd64.deb
+python3 scripts/test-linux-update.py src-tauri/target/release/racktop-probe src-tauri/target/release/bundle/deb/RackTop_1.29.0-linux.11_amd64.deb
 ```
 
 ## 分享 SSH 连接与失败重试
@@ -98,7 +98,7 @@ npm run bundle:linux -- --locked
 
 ## 验证范围
 
-`1.28.0-linux.10` 的 [标签构建与发布 34195392667](https://github.com/AIsMovDataInfra/RackTop/actions/runs/34195392667) 已通过桌面测试、生产构建、Rust 测试、真实中继协议检查、Deb 签名、更新下载及隔离原生启动检查。设备网页同源浏览器流程已验收，真实用户桌面打开系统浏览器及实际更新安装仍需单独验证。
+`1.29.0-linux.11` 的 [标签构建与发布 34199947421](https://github.com/AIsMovDataInfra/RackTop/actions/runs/34199947421) 已通过桌面测试、生产构建、Rust 测试、真实中继协议检查、Deb 签名、更新下载及隔离原生启动检查。设备网页同源浏览器流程已验收，真实用户桌面打开系统浏览器及实际更新安装仍需单独验证。
 
 实际执行的检查及结果记录在 [版本信息](VERSION_INFOS.md) 的 Linux 版本条目：Ubuntu 22.04.5 x86_64 上已检查单元测试、生产构建、软件包完整性、动态库依赖、原生启动与 Secret Service 持久化；此前的 linux.1 包已完成系统安装，linux.2 的逐项结果以该版本记录为准。真实 GPU 服务器的 SSH、资源监控、任务启动和文件同步需要使用自己的测试服务器进一步验证；打包成功不能替代这些功能验证。尚未验证其他发行版、ARM、Wayland 与不同桌面环境的兼容性。
 
