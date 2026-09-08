@@ -4,12 +4,13 @@ import { mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { ApiError } from './store.mjs';
 
-const fields = { name: 120, category: 80, model: 160, responsiblePerson: 80, currentUser: 80, location: 160, notes: 4000 };
+const fields = { name: 120, category: 80, model: 160, company: 80, responsiblePerson: 80, currentUser: 80, location: 160, notes: 4000 };
 const mutable = [...Object.keys(fields), 'status'];
 const statuses = new Set(['available', 'in_use', 'maintenance', 'retired']);
 const categories = new Set(['机械臂', '台式主机', '显示屏', '摄像头模组', '实验物料', '小推车', '夹爪']);
 const locations = new Set(['上海', '太仓']);
-const columns = { name: 'name', category: 'category', model: 'model', responsiblePerson: 'responsible_person', currentUser: 'current_user', location: 'location', notes: 'notes', status: 'status' };
+const companies = new Set(['A公司', 'B公司', 'C公司', '西浦']);
+const columns = { name: 'name', category: 'category', model: 'model', company: 'company', responsiblePerson: 'responsible_person', currentUser: 'current_user', location: 'location', notes: 'notes', status: 'status' };
 const maxPhotoBytes = 512 * 1024;
 // Metadata queries deliberately exclude the image BLOB. Only getPhoto reads it.
 const equipmentSelect = `SELECT e.*,p.width AS photo_width,p.height AS photo_height,
@@ -55,7 +56,7 @@ function input(value, patch) {
   return result;
 }
 function view(row) {
-  return { id: row.id, code: row.code, name: row.name, category: row.category, model: row.model,
+  return { id: row.id, code: row.code, name: row.name, category: row.category, model: row.model, company: row.company,
     serialNumber: row.serial_number, legacySerialNumber: row.legacy_serial_number,
     responsiblePerson: row.responsible_person, currentUser: row.current_user, location: row.location,
     notes: row.notes, status: row.status, version: row.version,
@@ -120,6 +121,7 @@ export function createEquipmentStore({ dbPath = ':memory:', now = Date.now } = {
     const equipmentColumns = new Set(db.prepare('PRAGMA table_info(equipment)').all().map(column => column.name));
     if (!equipmentColumns.has('legacy_serial_number')) db.exec("ALTER TABLE equipment ADD COLUMN legacy_serial_number TEXT NOT NULL DEFAULT ''");
     if (!equipmentColumns.has('current_user')) db.exec("ALTER TABLE equipment ADD COLUMN current_user TEXT NOT NULL DEFAULT ''");
+    if (!equipmentColumns.has('company')) db.exec("ALTER TABLE equipment ADD COLUMN company TEXT NOT NULL DEFAULT ''");
     if (!db.prepare("SELECT 1 FROM equipment_migrations WHERE name='immutable-serial-v1'").get()) {
       const existing = db.prepare('SELECT id,serial_number FROM equipment ORDER BY created_at,rowid').all();
       for (const row of existing) {
@@ -183,6 +185,13 @@ export function createEquipmentStore({ dbPath = ':memory:', now = Date.now } = {
   }
   function create(value, user) {
     const editor = actor(user), data = input(value, false);
+    if (user.isSuperAdmin === true) {
+      if (!companies.has(data.company)) invalid('请选择设备所属公司');
+    } else {
+      if (!companies.has(user.company)) throw new ApiError(403, 'COMPANY_REQUIRED', '请联系超级管理员分配公司后新增设备');
+      if (own(value, 'company') && data.company !== user.company) throw new ApiError(403, 'FORBIDDEN', '只有超级管理员可以选择其他设备公司');
+      data.company = user.company;
+    }
     return transaction(() => {
       if (db.prepare('SELECT COUNT(*) AS count FROM equipment').get().count >= 5000) throw new ApiError(409, 'EQUIPMENT_LIMIT', '设备台账已达到 5000 条上限');
       const id = randomUUID(), timestamp = now();
@@ -207,6 +216,10 @@ export function createEquipmentStore({ dbPath = ':memory:', now = Date.now } = {
     return transaction(() => {
       const previous = view(rowFor(id));
       checkVersion(previous, value.version);
+      if (own(data, 'company') && data.company !== previous.company) {
+        if (user.isSuperAdmin !== true) throw new ApiError(403, 'FORBIDDEN', '只有超级管理员可以修改设备所属公司');
+        if (!companies.has(data.company)) invalid('请选择设备所属公司');
+      }
       validClassification({ ...previous, ...data });
       const changes = mutable.filter(field => own(data, field) && data[field] !== previous[field])
         .map(field => ({ field, oldValue: previous[field], newValue: data[field] }));

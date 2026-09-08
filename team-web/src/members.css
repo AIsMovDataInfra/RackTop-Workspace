@@ -1,0 +1,24 @@
+.member-filters { display: flex; align-items: end; flex-wrap: wrap; gap: 16px; }
+.member-filters > label:first-child { flex: 1 1 240px; }
+.member-filters > label:nth-child(2) { flex: 0 1 180px; }
+.member-filters .checkbox-label { min-height: 40px; }
+.member-directory { min-width: 0; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); overflow: hidden; }
+.member-directory-heading { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 10px; padding: 18px 20px; border-bottom: 1px solid var(--border); }
+.member-directory-heading > span { color: var(--muted); font-size: .8rem; }
+.member-table-scroll { max-width: 100%; overflow-x: auto; }
+.member-table { width: 100%; min-width: 850px; border-collapse: collapse; table-layout: auto; text-align: left; font-size: .85rem; }
+.member-table th { background: var(--canvas); color: var(--muted); font-weight: 500; }
+.member-table th, .member-table td { padding: 15px 16px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.member-table tr:last-child td { border-bottom: 0; }
+.member-table td:first-child { min-width: 130px; max-width: 230px; overflow-wrap: anywhere; }
+.member-table td:nth-child(2) { min-width: 100px; }
+.member-table td:nth-child(4), .member-table td:nth-child(5) { min-width: 130px; }
+.member-table td strong { font-weight: 600; }
+.member-username { display: block; margin-top: 4px; color: var(--muted); font-size: .8rem; }
+.member-pending { color: var(--orange); }
+.member-pending time { display: block; margin-top: 4px; color: var(--muted); font-size: .78rem; }
+.member-actions { display: flex; gap: 6px; flex-wrap: wrap; min-width: 165px; }
+.member-actions button { padding: 6px 8px; min-height: 32px; font-size: .78rem; white-space: nowrap; }
+.member-empty { margin: 0; padding: 32px 20px; color: var(--muted); }
+.member-form { display: grid; gap: 16px; }
+@media (max-width: 640px) { .member-filters { align-items: stretch; gap: 12px; } .member-filters > label:nth-child(2) { flex: 1 1 160px; } .member-directory-heading { padding: 14px; } }

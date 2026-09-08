@@ -4,7 +4,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, extname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { createStore, ApiError } from './store.mjs';
 import { createAuth } from './auth.mjs';
-import { createAccountAuth } from './account-auth.mjs';
+import { ACCOUNT_COMPANIES, createAccountAuth } from './account-auth.mjs';
 import { createNotifier } from './notifier.mjs';
 import { createEquipmentStore } from './equipment-store.mjs';
 import { compressEquipmentPhoto, validatePhotoBody } from './equipment-photo.mjs';
@@ -104,6 +104,16 @@ export function createTeamServer(overrides = {}) {
     if (['POST', 'PATCH', 'PUT', 'DELETE'].includes(req.method) && origin !== publicUrl.origin) throw new ApiError(403, 'INVALID_ORIGIN', '写入请求需要同源 Origin');
   }
 
+  function requireBusinessMember(session) {
+    if (!session?.user) throw new ApiError(401, 'UNAUTHENTICATED', '请先登录');
+    const user = session.user;
+    if (!['member', 'admin'].includes(user.role)) throw new ApiError(403, 'FORBIDDEN', '仅团队成员可以使用此服务');
+    if (config.mode === 'account' && !user.isSuperAdmin && !ACCOUNT_COMPANIES.includes(user.company)) {
+      throw new ApiError(403, 'COMPANY_REQUIRED', '请联系超级管理员分配公司后再使用预约和设备管理');
+    }
+    return user;
+  }
+
   async function serveStatic(req, res, url) {
     if (!['GET', 'HEAD'].includes(req.method)) throw new ApiError(405, 'METHOD_NOT_ALLOWED', '不支持的请求方法');
     let pathname;
@@ -144,8 +154,7 @@ export function createTeamServer(overrides = {}) {
       // Reject unauthenticated uploads before buffering image data.
       if (photoMatch && ['POST', 'DELETE'].includes(req.method)) {
         const candidate = auth.resolve(req);
-        if (!candidate?.user) throw new ApiError(401, 'UNAUTHENTICATED', '请先登录');
-        if (!['member', 'admin'].includes(candidate.user.role)) throw new ApiError(403, 'FORBIDDEN', '仅团队成员可以使用此服务');
+        requireBusinessMember(candidate);
         auth.verifyWrite(req, candidate);
       }
       const body = await readBody(req, photoMatch && req.method === 'POST' ? 2 * 1024 * 1024 : 64 * 1024);
@@ -153,9 +162,7 @@ export function createTeamServer(overrides = {}) {
       if (!url.pathname.startsWith('/api/')) { await serveStatic(req, res, url); return; }
       const session = auth.resolve(req);
       // Every business route, including equipment and photos, requires membership.
-      if (!session?.user) throw new ApiError(401, 'UNAUTHENTICATED', '请先登录');
-      const user = session.user;
-      if (!['member', 'admin'].includes(user.role)) throw new ApiError(403, 'FORBIDDEN', '仅团队成员可以使用此服务');
+      const user = requireBusinessMember(session);
       if (['POST', 'PATCH', 'PUT', 'DELETE'].includes(req.method)) auth.verifyWrite(req, session);
       if (photoMatch) {
         for (const key of url.searchParams.keys()) {
@@ -185,7 +192,7 @@ export function createTeamServer(overrides = {}) {
           // Compression yields to other requests; recheck both the grant and CAS.
           const active = auth.resolve(req);
           if (!active?.user || active.user.id !== user.id) throw new ApiError(401, 'UNAUTHENTICATED', '登录已失效，请重新登录');
-          if (!['member', 'admin'].includes(active.user.role)) throw new ApiError(403, 'FORBIDDEN', '仅团队成员可以使用此服务');
+          requireBusinessMember(active);
           auth.verifyWrite(req, active);
           json(res, 200, { equipment: equipmentStore.setPhoto(id, { version: body.version, ...photo }, active.user) }); return;
         }

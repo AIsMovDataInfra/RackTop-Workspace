@@ -7,7 +7,7 @@ import { compressEquipmentPhoto } from './equipment-photo'
 import type { Equipment } from './types'
 vi.mock('./equipment-photo', () => ({ compressEquipmentPhoto: vi.fn() }))
 ;(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true
-const equipment: Equipment = { id: 'device', code: 'EQ-1', serialNumber: '00000001', name: '机械臂', model: '', category: '机械臂', responsiblePerson: '负责人', currentUser: '', location: '上海', notes: '', status: 'available', photo: null, version: 1, createdAt: '', updatedAt: '' }
+const equipment: Equipment = { company: '', id: 'device', code: 'EQ-1', serialNumber: '00000001', name: '机械臂', model: '', category: '机械臂', responsiblePerson: '负责人', currentUser: '', location: '上海', notes: '', status: 'available', photo: null, version: 1, createdAt: '', updatedAt: '' }
 const compressed = { dataUrl: 'data:image/jpeg;base64,cGhvdG8=', width: 1000, height: 750, bytes: 100_000 }
 let root: ReturnType<typeof createRoot>, container: HTMLDivElement
 async function click(text: string) { const button = [...container.querySelectorAll('button')].find((value) => value.textContent === text)!; expect(button).toBeDefined(); await act(async () => button.click()) }

@@ -60,7 +60,7 @@ test('registration yields a stable member UUID, normalized unique identity and n
   const { payload, res } = await client.register({ username: ' Member ', name: '  小林  ' });
   assert.equal(res.statusCode, 201);
   assert.match(payload.user.id, /^[0-9a-f-]{36}$/);
-  assert.deepEqual({ ...payload.user, id: undefined }, { id: undefined, name: '小林', username: 'member', role: 'member' });
+  assert.deepEqual({ ...payload.user, id: undefined }, { id: undefined, name: '小林', username: 'member', role: 'member', isSuperAdmin: false, company: null, version: 1 });
   assert.equal(payload.authMode, 'account');
   assert.equal(Object.hasOwn(payload.user, 'email'), false);
   assert.equal(payload.accountRegistration, true);

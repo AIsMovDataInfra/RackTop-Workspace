@@ -1,3 +1,4 @@
+import { assignFixtureCompany } from './helpers/account-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { request } from 'node:http';
@@ -47,7 +48,7 @@ async function fixture(t, extra = {}) {
   async function anonymous() { const response = await call('/api/session'); assert.equal(response.status, 200); return sessionOf(response); }
   async function register(local = 'member', extraBody = {}) {
     const response = await call('/api/auth/register', { method: 'POST', session: await anonymous(), body: { username: `${local}`, name: local, password: PASSWORD, ...(local === 'owner' ? { bootstrapToken } : {}), ...extraBody } });
-    assert.equal(response.status, 201, response.text); return sessionOf(response);
+    assert.equal(response.status, 201, response.text); response.body.user = assignFixtureCompany(app.config.dbPath, response.body.user); return sessionOf(response);
   }
   async function device(local = 'owner') {
     const response = await call('/api/auth/device-login', { method: 'POST', body: { username: `${local}`, password: PASSWORD, deviceName: 'HTTP 集成测试设备' } });

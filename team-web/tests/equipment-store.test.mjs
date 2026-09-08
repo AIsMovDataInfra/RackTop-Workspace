@@ -11,8 +11,8 @@ import { createEquipmentStore } from '../server/equipment-store.mjs';
 import { createStore } from '../server/store.mjs';
 import { backupTeamDatabase } from '../../scripts/team-backup.mjs';
 
-const member = { id: 'real-member-id', name: '登记人', role: 'member' };
-const other = { id: 'real-editor-id', name: '另一位成员', role: 'member' };
+const member = { id: 'real-member-id', name: '登记人', role: 'member', company: 'A公司' };
+const other = { id: 'real-editor-id', name: '另一位成员', role: 'member', company: 'B公司' };
 const draft = value => ({ category: '台式主机', location: '上海', ...value });
 const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 2, 0xff, 0xd9]);
 const BASE = Date.parse('2026-09-08T04:00:00Z');
@@ -33,7 +33,7 @@ test('equipment starts empty, persists in the booking database, and projects onl
   assert.match(created.id, /^[0-9a-f-]{36}$/); assert.match(created.code, /^RT-[0-9A-F]{8}$/);
   assert.equal(created.name, 'A100 工作站'); assert.equal(created.status, 'available'); assert.equal(created.model, '');
   assert.equal(created.serialNumber, '00000001'); assert.equal(created.legacySerialNumber, '');
-  assert.equal(created.currentUser, ''); assert.equal(created.photo, null);
+  assert.equal(created.company, 'A公司'); assert.equal(created.currentUser, ''); assert.equal(created.photo, null);
   assert.equal(created.version, 1); assert.equal(created.createdAt, new Date(BASE).toISOString());
   const reopened = createEquipmentStore({ dbPath }); t.after(() => reopened.close());
   assert.deepEqual(reopened.list(), [created]);
@@ -194,7 +194,7 @@ test('legacy rows migrate in creation order once, retaining old free serials, ID
     const equipment = store.get(ids[index]).equipment;
     assert.equal(equipment.id, ids[index]); assert.equal(equipment.code, `OLD-${index}`);
     assert.equal(equipment.serialNumber, expected[index]); assert.equal(equipment.legacySerialNumber, serials[index]);
-    assert.equal(equipment.category, '旧类别'); assert.equal(equipment.location, '301 室');
+    assert.equal(equipment.company, ''); assert.equal(equipment.category, '旧类别'); assert.equal(equipment.location, '301 室');
     assert.equal(equipment.notes, '原备注'); assert.equal(equipment.version, 3);
   }
   assert.equal(store.get(ids[0]).history[0].changes[0].newValue, '原备注');
@@ -202,7 +202,7 @@ test('legacy rows migrate in creation order once, retaining old free serials, ID
   const photographed = store.setPhoto(ids[0], { version: 3, bytes: jpeg, width: 1, height: 1 }, member);
   assert.equal(photographed.category, '旧类别'); assert.equal(photographed.version, 4);
   const corrected = store.update(ids[0], { version: 4, category: '实验物料', location: '太仓' }, member);
-  assert.equal(corrected.legacySerialNumber, serials[0]); assert.equal(corrected.version, 5);
+  assert.equal(corrected.company, ''); assert.equal(corrected.legacySerialNumber, serials[0]); assert.equal(corrected.version, 5);
   const before = store.list(); store.close(); store = createEquipmentStore({ dbPath });
   assert.deepEqual(store.list(), before);
   assert.equal(store.create(draft({ name: '迁移后新设备' }), member).serialNumber, '00000004');
@@ -339,4 +339,50 @@ test('a concurrent image replacement and ordinary edit share one device CAS and 
   } else {
     assert.equal(detail.equipment.currentUser, '正在使用'); assert.equal(store.getPhoto(created.id), null);
   }
+});
+
+
+test('equipment company is assigned from the member and only super administrators can choose or change it', t => {
+  const { store } = fixture(t);
+  const superAdmin = { id: 'super', name: '超级管理员', role: 'admin', isSuperAdmin: true, company: null };
+  const ordinaryAdmin = { ...member, role: 'admin' };
+  const created = store.create(draft({ name: '所属公司设备' }), member);
+  assert.equal(created.company, member.company);
+  assert.throws(() => store.create(draft({ name: '伪造公司', company: 'B公司' }), member), { status: 403 });
+  assert.throws(() => store.create(draft({ name: '未分配成员' }), { ...member, company: null }), { status: 403, code: 'COMPANY_REQUIRED' });
+  assert.throws(() => store.create(draft({ name: '角色不能提升权限', company: 'C公司' }), ordinaryAdmin), { status: 403 });
+  assert.throws(() => store.create(draft({ name: '缺少公司' }), superAdmin), { status: 422 });
+  assert.throws(() => store.create(draft({ name: '无效公司', company: '任意公司' }), superAdmin), { status: 422 });
+  assert.equal(store.create(draft({ name: '超管设备', company: '西浦' }), superAdmin).company, '西浦');
+  for (const user of [member, other, ordinaryAdmin]) assert.throws(() => store.update(created.id, { version: 1, company: 'B公司' }, user), { status: 403 });
+  assert.deepEqual(store.update(created.id, { version: 1, company: 'A公司' }, member), created);
+  assert.throws(() => store.update(created.id, { version: 1, company: '' }, superAdmin), { status: 422 });
+  const moved = store.update(created.id, { version: 1, company: 'C公司' }, superAdmin);
+  assert.equal(moved.company, 'C公司'); assert.equal(moved.version, 2);
+  assert.equal(moved.id, created.id); assert.equal(moved.serialNumber, created.serialNumber); assert.equal(moved.code, created.code);
+  assert.deepEqual(store.get(created.id).history[0].changes, [{ field: 'company', oldValue: 'A公司', newValue: 'C公司' }]);
+  assert.throws(() => store.update(created.id, { version: 1, company: 'B公司' }, superAdmin), { status: 409, code: 'VERSION_CONFLICT' });
+  const edited = store.update(created.id, { version: 2, currentUser: '使用人', location: '太仓' }, member);
+  assert.equal(edited.company, 'C公司'); assert.equal(edited.version, 3);
+});
+
+test('company migration preserves old assigned numbers and empty companies until a super administrator assigns one', t => {
+  const { store, dbPath } = fixture(t);
+  const created = store.create(draft({ name: '上一版设备', currentUser: '使用人', responsiblePerson: '责任人' }), member);
+  const db = new DatabaseSync(dbPath); t.after(() => db.close());
+  db.exec('ALTER TABLE equipment DROP COLUMN company');
+  const reopened = createEquipmentStore({ dbPath }); t.after(() => reopened.close());
+  const legacy = reopened.get(created.id).equipment;
+  assert.deepEqual(legacy, { ...created, company: '' });
+  const returned = reopened.update(created.id, { version: 1, currentUser: '' }, member);
+  assert.equal(returned.company, ''); assert.equal(returned.responsiblePerson, '责任人');
+  const photo = reopened.setPhoto(created.id, { version: 2, bytes: jpeg, width: 1, height: 1 }, member);
+  assert.equal(photo.company, '');
+  const superAdmin = { ...member, role: 'admin', isSuperAdmin: true };
+  const assigned = reopened.update(created.id, { version: 3, company: 'B公司' }, superAdmin);
+  assert.equal(assigned.company, 'B公司'); assert.deepEqual(assigned.photo, { ...photo.photo, url: `/api/equipment/${created.id}/photo?v=4` });
+  assert.throws(() => reopened.setPhoto(created.id, { version: 3, bytes: jpeg, width: 1, height: 1 }, member), { status: 409 });
+  db.exec("CREATE TRIGGER company_history_failure BEFORE INSERT ON equipment_changes BEGIN SELECT RAISE(ABORT, 'simulated audit failure'); END");
+  assert.throws(() => reopened.update(created.id, { version: 4, company: 'C公司' }, superAdmin));
+  assert.deepEqual(reopened.get(created.id).equipment, assigned);
 });
