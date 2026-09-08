@@ -1,8 +1,8 @@
-# RackTop Linux 社区移植版
+# RackTop · AIsMov 维护版
 
-基于 [Tongzh-SEU/RackTop](https://github.com/Tongzh-SEU/RackTop) 官方 **v1.25.4**，由 **AIsMovDataInfra** 提供 Ubuntu Linux 客户端适配。原作者为 **Tongzh-SEU**；本仓库保留上游 Git 历史、作者信息和 [GPL-3.0 许可证](LICENSE)。这是独立的社区 fork，Linux 安装包并非上游官方发布。
+本项目由 **AIsMov** 持续维护，代码、功能改进与 Linux 发布托管于 [AIsMovDataInfra/RackTop](https://github.com/AIsMovDataInfra/RackTop)。本 fork 最初基于 [Tongzh-SEU/RackTop](https://github.com/Tongzh-SEU/RackTop) 官方 **v1.25.4**；原作者为 **Tongzh-SEU**。本仓库保留上游 Git 历史、作者信息和 [GPL-3.0 许可证](LICENSE)，作为独立社区 fork 开发和发布。
 
-Linux 当前源码版本：**1.26.0-linux.4**；下方下载表对应本次测试版，目标为 **Ubuntu 22.04 x86_64 / amd64 图形桌面**。上游功能说明与截图保留在下方；Linux 的实际验证范围见 [安装与构建说明](docs/LINUX.md#验证范围)。
+本次 Linux 测试版：**1.26.0-linux.9**，目标为 **Ubuntu 22.04 x86_64 / amd64 图形桌面**。下载入口见下表，构建和发布状态以对应 Release 的实际附件为准。新增功能与版本记录见 [更新说明](docs/VERSION_INFOS.md)。上游功能说明与截图保留在下方；Linux 的实际验证范围见 [安装与构建说明](docs/LINUX.md#验证范围)。
 
 <div align="right">
   🌐 Language:
@@ -26,11 +26,11 @@ RackTop 是面向个人研究者和小型团队的 GPU 服务器桌面工作台�
 </p>
 
 <p align="center">
-  <a href="https://github.com/Tongzh-SEU/RackTop/releases/latest"><img src="https://img.shields.io/github/v/release/Tongzh-SEU/RackTop?style=flat-square&logo=github&label=release" alt="Release"></a>
-  <a href="https://github.com/Tongzh-SEU/RackTop/stargazers"><img src="https://img.shields.io/github/stars/Tongzh-SEU/RackTop?style=flat-square&logo=github&label=stars" alt="GitHub Stars"></a>
+  <a href="https://github.com/AIsMovDataInfra/RackTop/releases"><img src="https://img.shields.io/github/v/release/AIsMovDataInfra/RackTop?include_prereleases&style=flat-square&logo=github&label=release" alt="Release"></a>
+  <a href="https://github.com/AIsMovDataInfra/RackTop/stargazers"><img src="https://img.shields.io/github/stars/AIsMovDataInfra/RackTop?style=flat-square&logo=github&label=stars" alt="GitHub Stars"></a>
   <img src="https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-1687b8?style=flat-square" alt="Platform">
-  <a href="https://github.com/Tongzh-SEU/RackTop/releases"><img src="https://img.shields.io/github/downloads/Tongzh-SEU/RackTop/total?style=flat-square&logo=github&label=downloads" alt="Downloads"></a>
-  <a href="https://github.com/Tongzh-SEU/RackTop/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-green?style=flat-square" alt="GPL-3.0 License"></a>
+  <a href="https://github.com/AIsMovDataInfra/RackTop/releases"><img src="https://img.shields.io/github/downloads/AIsMovDataInfra/RackTop/total?style=flat-square&logo=github&label=downloads" alt="Downloads"></a>
+  <a href="https://github.com/AIsMovDataInfra/RackTop/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-green?style=flat-square" alt="GPL-3.0 License"></a>
 </p>
 
 
@@ -46,7 +46,7 @@ RackTop 是面向个人研究者和小型团队的 GPU 服务器桌面工作台�
 
 | 客户端平台 | 提供方 | 安装包与下载 |
 | --- | --- | --- |
-| **Ubuntu 22.04 x86_64 / amd64** | **AIsMovDataInfra 社区测试版 1.26.0-linux.4** | [下载 Linux .deb](https://github.com/AIsMovDataInfra/RackTop/releases/download/v1.26.0-linux.4/RackTop_1.26.0-linux.4_amd64.deb) · [版本说明、源码与校验文件](https://github.com/AIsMovDataInfra/RackTop/releases/tag/v1.26.0-linux.4) |
+| **Ubuntu 22.04 x86_64 / amd64** | **AIsMov 社区测试版 1.26.0-linux.9** | [下载 Linux .deb](https://github.com/AIsMovDataInfra/RackTop/releases/download/v1.26.0-linux.9/RackTop_1.26.0-linux.9_amd64.deb) · [版本说明、源码与校验文件](https://github.com/AIsMovDataInfra/RackTop/releases/tag/v1.26.0-linux.9) |
 | macOS Apple Silicon | Tongzh-SEU 官方 v1.25.4 | [下载官方 .dmg](https://github.com/Tongzh-SEU/RackTop/releases/download/v1.25.4/RackTop_1.25.4_macos-arm64.dmg) |
 | Windows x64 | Tongzh-SEU 官方 v1.25.4 | [下载官方安装程序](https://github.com/Tongzh-SEU/RackTop/releases/download/v1.25.4/RackTop_1.25.4_x64-setup.exe) |
 
@@ -55,17 +55,23 @@ Windows/macOS 安装包由官方仓库提供；后续版本请查看 [上游 Rel
 下载 `.deb` 后，在下载目录运行：
 
 ```bash
-sudo apt install ./RackTop_1.26.0-linux.4_amd64.deb
+sudo apt install ./RackTop_1.26.0-linux.9_amd64.deb
 racktop
 ```
 
 也可以从应用菜单启动。更多依赖、密码存储、源码构建和已知限制见 [Linux 使用说明](docs/LINUX.md)。如需校验，下载同一 Release 的 `SHA256SUMS` 后运行 `sha256sum --check --ignore-missing SHA256SUMS`。
 
+## 团队预约 Web
+
+[团队资源预约网页](team-web/README.md) 提供整机和指定 GPU 排期、冲突检查、续约、取消和管理员资源目录。成员可以免登录浏览公开排期，用用户名和密码注册后预约，不需要邮箱或飞书账号。RackTop 的「团队预约」入口连接同一中央服务，管理员可选择桌面服务器同步 GPU 硬件清单，网页与桌面共用资源和预约数据；SSH 主机地址、登录凭据和私钥不会随同步上传。正式服务使用 HTTPS，飞书登录和群通知保留为可选配置；本机 demo 明确标识，不能用于生产。预约不锁定 GPU，也不终止训练进程。
+
+本机体验（Node.js 24+）：`npm ci` 后执行 `npm run team:dev`，打开 `http://127.0.0.1:1421/`。
+
 ## 项目来源与反馈
 
-RackTop 由 [Tongzh-SEU](https://github.com/Tongzh-SEU) 开发，面向研究者和小团队集中管理 GPU 服务器，减少反复 SSH 检查与重复说明环境的工作。感谢原作者及上游贡献者提供完整的桌面应用基础。
+RackTop 最初由 [Tongzh-SEU](https://github.com/Tongzh-SEU) 开发，面向研究者和小团队集中管理 GPU 服务器。感谢原作者及上游贡献者提供完整的桌面应用基础。**AIsMov** 负责本 fork 的持续维护、功能改进、问题处理和 Linux 发行。
 
-本 fork 增加 Linux 平台识别、系统钥匙串接入、原生窗口适配、Debian 打包和 Ubuntu 构建验证。详细变更见 [版本记录](docs/VERSION_INFOS.md) 与 [来源说明](NOTICE.md)。Linux 安装和适配问题请提交到 [本仓库 Issues](https://github.com/AIsMovDataInfra/RackTop/issues)；官方版本与原项目介绍见 [上游仓库](https://github.com/Tongzh-SEU/RackTop)。
+本 fork 增加 Linux 平台识别、系统钥匙串接入、原生窗口适配、Debian 打包、独立跳板机密码、签名更新、SSH 连接配置分享和本机 SSH 密钥管理。详细变更见 [版本记录](docs/VERSION_INFOS.md) 与 [来源说明](NOTICE.md)。本维护版的功能建议与问题请提交到 [AIsMovDataInfra/RackTop Issues](https://github.com/AIsMovDataInfra/RackTop/issues)；原项目与官方 Windows/macOS 版本见 [上游仓库](https://github.com/Tongzh-SEU/RackTop)。
 
 ## 主要功能
 
@@ -76,6 +82,7 @@ RackTop 由 [Tongzh-SEU](https://github.com/Tongzh-SEU) 开发，面向研究者
 - **启动配置与任务管理**：保存项目级启动配置，在不同服务器和 GPU 上切换工作目录、GPU 卡号、Shell 命令、超参数和日志路径，再统一启动和监测任务。
 - **运行状态与历史**：查看 RackTop 任务和外部进程、日志、资源监测、历史热力图，以及离线、高温、空闲和进程退出通知。
 - **安全连接**：支持 SSH Agent、密钥、密码、`~/.ssh/config`、ProxyJump 和 Host Key 指纹核验，不自动接受未知主机。
+- **本机 SSH 密钥管理**：从左下角“日志”上方的“密钥管理”入口发现已有密钥、手动生成 Ed25519 或 RSA 4096 密钥对、导入引用、重命名和复制公钥；在服务器设置中选择对应私钥。移出列表会保留原文件。
 
 
 ## 安全与数据

@@ -1,0 +1,11 @@
+{
+  "formatVersion": 1,
+  "serviceVersion": "0.1.0",
+  "apiBaseUrl": "https://136.0.110.161",
+  "websocketBaseUrl": "wss://136.0.110.161",
+  "healthUrl": "https://136.0.110.161/healthz",
+  "ipv6ApiBaseUrl": "https://[2400:8d60:3::1:fb1c:d642]",
+  "createRoomPath": "/v1/rooms",
+  "authentication": "Authorization: Bearer <role-specific-token>",
+  "note": "Public integration reference only; not an import format supported by the current RackTop desktop app. No credentials included."
+}

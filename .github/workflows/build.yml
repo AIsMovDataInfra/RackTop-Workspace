@@ -44,6 +44,12 @@ jobs:
       - run: npm run test
       - run: npm run build
       - run: cargo test --release --locked --lib --manifest-path src-tauri/Cargo.toml
+      - name: Check sharing relay and file protocol
+        run: |
+          npm ci --prefix relay --ignore-scripts
+          npm test --prefix relay
+          python3 -m unittest discover -s src-tauri/src/sharing -p 'test_remote_files.py'
+          RACKTOP_RELAY_DIR="$PWD/relay" cargo test --release --locked --lib --manifest-path src-tauri/Cargo.toml sharing::transport::tests::real_node_relay_reconnects_and_carries_tls_frames -- --ignored
       - run: npm run bundle:linux -- --locked
       - name: Sign Linux updater package
         if: startsWith(github.ref, 'refs/tags/v')

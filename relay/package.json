@@ -1,0 +1,17 @@
+{
+  "name": "racktop-relay",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "Authenticated bounded binary room relay for RackTop",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/relay.mjs",
+    "test": "node --test test/relay.test.mjs"
+  },
+  "dependencies": {
+    "ws": "8.21.3"
+  }
+}

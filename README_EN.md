@@ -1,8 +1,10 @@
-# RackTop Linux Community Port
+# RackTop · Maintained by AIsMov
 
-Based on official [Tongzh-SEU/RackTop](https://github.com/Tongzh-SEU/RackTop) **v1.25.4**, with Ubuntu Linux support provided by **AIsMovDataInfra**. **Tongzh-SEU** is the original author. This independent community fork preserves upstream Git history, attribution and the [GPL-3.0 license](LICENSE). Linux packages are not official upstream releases.
+**AIsMov** maintains this project, with source code, feature development and Linux releases hosted at [AIsMovDataInfra/RackTop](https://github.com/AIsMovDataInfra/RackTop). This fork was initially based on official [Tongzh-SEU/RackTop](https://github.com/Tongzh-SEU/RackTop) **v1.25.4**. **Tongzh-SEU** remains the original author. Development and releases continue as an independent community fork, preserving upstream Git history, attribution and the [GPL-3.0 license](LICENSE).
 
-Current Linux source version: **1.26.0-linux.4**; the download table points to this pre-release for **Ubuntu 22.04 x86_64 / amd64 desktops**. The upstream feature guide and screenshots appear below; see [Linux validation and limitations](docs/LINUX.md#验证范围) for the scope tested on Linux.
+This Linux pre-release is **1.26.0-linux.9**, targeting **Ubuntu 22.04 x86_64 / amd64 desktops**. Use the download links below; the corresponding Release assets show build and publication availability. See the [changelog](docs/VERSION_INFOS.md) for changes. The upstream feature guide and screenshots appear below; see [Linux validation and limitations](docs/LINUX.md#验证范围) for the scope tested on Linux.
+
+The [team reservation web app](team-web/README.md) supports whole-machine and selected-GPU bookings, conflict checks, renewals, cancellation and an administrator resource catalog. Anyone can browse the public schedule; booking requires a username and password, with no email or Feishu account needed. RackTop’s Team Reservations entry connects to the same central service, and administrators can select desktop servers to synchronize GPU inventories. The web and desktop views share resources and bookings; synchronization does not upload SSH host addresses, login credentials or private keys. Production uses HTTPS. Feishu login and group notifications remain optional, and clearly labeled local demos are not suitable for production. Reservations do not lock GPUs or stop training processes. Run `npm ci` and `npm run team:dev` with Node.js 24+ to try it locally.
 
 <div align="right">
   🌐 Language:
@@ -26,11 +28,11 @@ Find the right GPU before launching a job, monitor resources and processes while
 </p>
 
 <p align="center">
-  <a href="https://github.com/Tongzh-SEU/RackTop/releases/latest"><img src="https://img.shields.io/github/v/release/Tongzh-SEU/RackTop?style=flat-square&logo=github&label=release" alt="Release"></a>
-  <a href="https://github.com/Tongzh-SEU/RackTop/stargazers"><img src="https://img.shields.io/github/stars/Tongzh-SEU/RackTop?style=flat-square&logo=github&label=stars" alt="GitHub Stars"></a>
+  <a href="https://github.com/AIsMovDataInfra/RackTop/releases"><img src="https://img.shields.io/github/v/release/AIsMovDataInfra/RackTop?include_prereleases&style=flat-square&logo=github&label=release" alt="Release"></a>
+  <a href="https://github.com/AIsMovDataInfra/RackTop/stargazers"><img src="https://img.shields.io/github/stars/AIsMovDataInfra/RackTop?style=flat-square&logo=github&label=stars" alt="GitHub Stars"></a>
   <img src="https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-1687b8?style=flat-square" alt="Platform">
-  <a href="https://github.com/Tongzh-SEU/RackTop/releases"><img src="https://img.shields.io/github/downloads/Tongzh-SEU/RackTop/total?style=flat-square&logo=github&label=downloads" alt="Downloads"></a>
-  <a href="https://github.com/Tongzh-SEU/RackTop/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-green?style=flat-square" alt="GPL-3.0 License"></a>
+  <a href="https://github.com/AIsMovDataInfra/RackTop/releases"><img src="https://img.shields.io/github/downloads/AIsMovDataInfra/RackTop/total?style=flat-square&logo=github&label=downloads" alt="Downloads"></a>
+  <a href="https://github.com/AIsMovDataInfra/RackTop/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-green?style=flat-square" alt="GPL-3.0 License"></a>
 </p>
 
 <p align="center">
@@ -43,7 +45,7 @@ Find the right GPU before launching a job, monitor resources and processes while
 
 | Client platform | Publisher | Installer |
 | --- | --- | --- |
-| **Ubuntu 22.04 x86_64 / amd64** | **AIsMovDataInfra community pre-release 1.26.0-linux.4** | [Linux .deb](https://github.com/AIsMovDataInfra/RackTop/releases/download/v1.26.0-linux.4/RackTop_1.26.0-linux.4_amd64.deb) · [Release notes, source and checksums](https://github.com/AIsMovDataInfra/RackTop/releases/tag/v1.26.0-linux.4) |
+| **Ubuntu 22.04 x86_64 / amd64** | **AIsMov community pre-release 1.26.0-linux.9** | [Linux .deb](https://github.com/AIsMovDataInfra/RackTop/releases/download/v1.26.0-linux.9/RackTop_1.26.0-linux.9_amd64.deb) · [Release notes, source and checksums](https://github.com/AIsMovDataInfra/RackTop/releases/tag/v1.26.0-linux.9) |
 | macOS Apple Silicon | Tongzh-SEU official v1.25.4 | [Official .dmg](https://github.com/Tongzh-SEU/RackTop/releases/download/v1.25.4/RackTop_1.25.4_macos-arm64.dmg) |
 | Windows x64 | Tongzh-SEU official v1.25.4 | [Official installer](https://github.com/Tongzh-SEU/RackTop/releases/download/v1.25.4/RackTop_1.25.4_x64-setup.exe) |
 
@@ -52,7 +54,7 @@ Windows/macOS downloads are hosted by the original project. Check [upstream Rele
 Install the downloaded package from its directory:
 
 ```bash
-sudo apt install ./RackTop_1.26.0-linux.4_amd64.deb
+sudo apt install ./RackTop_1.26.0-linux.9_amd64.deb
 racktop
 ```
 
@@ -62,9 +64,9 @@ Unit tests, frontend builds, Debian package integrity, dynamic libraries, isolat
 
 ## Attribution and Feedback
 
-RackTop was created by [Tongzh-SEU](https://github.com/Tongzh-SEU) to help researchers and small teams manage GPU servers from a single desktop workspace. We thank the original author and upstream contributors.
+RackTop was originally created by [Tongzh-SEU](https://github.com/Tongzh-SEU) to help researchers and small teams manage GPU servers from a single desktop workspace. We thank the original author and upstream contributors. **AIsMov** is responsible for ongoing maintenance, feature development, issue handling and Linux distribution of this fork.
 
-This fork adds Linux platform detection, native window integration, Secret Service support, Debian packaging and Ubuntu build checks. See [NOTICE](NOTICE.md) and the [changelog](docs/VERSION_INFOS.md). Report Linux packaging and compatibility issues to [this repository](https://github.com/AIsMovDataInfra/RackTop/issues). For the original application and official releases, visit [upstream](https://github.com/Tongzh-SEU/RackTop).
+This fork adds Linux platform detection, native window integration, Secret Service support, Debian packaging, independent jump-host passwords, signed updates, SSH connection configuration sharing and local SSH key management. See [NOTICE](NOTICE.md) and the [changelog](docs/VERSION_INFOS.md). Send feature requests and issues for this maintained version to [AIsMovDataInfra/RackTop Issues](https://github.com/AIsMovDataInfra/RackTop/issues). For the original project and official Windows/macOS releases, visit [upstream](https://github.com/Tongzh-SEU/RackTop).
 
 ## Key Features
 
@@ -75,6 +77,7 @@ This fork adds Linux platform detection, native window integration, Secret Servi
 - **Launch profiles and job management**: Save project-level launch profiles and switch working directories, GPU IDs, shell commands, hyperparameters, and log paths across servers and GPUs before launching and monitoring jobs from one place.
 - **Runtime status and history**: Inspect RackTop jobs and external processes, logs, resource monitoring, history heatmaps, and notifications for offline servers, high temperatures, idle resources, and process exits.
 - **Secure connections**: Supports SSH Agent, keys, passwords, `~/.ssh/config`, ProxyJump, and host key fingerprint verification. Unknown hosts are never accepted automatically.
+- **Local SSH key management**: Open **公钥管理** (Public Key Management) above **日志** (Logs) in the lower-left sidebar to discover keys, manually generate Ed25519 or RSA 4096 key pairs, import references, rename entries and copy public keys. Select the corresponding private key in server settings. Removing an entry preserves its files.
 
 ## Security and Data
 

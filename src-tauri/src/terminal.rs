@@ -6,7 +6,7 @@ use serde::Serialize;
 use std::{
     collections::HashMap,
     io::{Read, Write},
-    sync::Mutex,
+    sync::{Arc, Mutex, mpsc},
     thread,
 };
 use tauri::{AppHandle, Emitter};
@@ -118,15 +118,26 @@ impl TerminalManager {
 }
 
 fn configured_ssh_command(server: &Server, password: Option<&crate::ssh_connection::SshPasswords>) -> Result<CommandBuilder, String> {
+    configured_ssh_command_mode(server, password, false)
+}
+
+fn configured_ssh_command_mode(server: &Server, password: Option<&crate::ssh_connection::SshPasswords>, shared: bool) -> Result<CommandBuilder, String> {
     let mut command = CommandBuilder::new("ssh");
+    if shared { command.args(shared_ssh_restrictions()); }
     command.arg("-tt");
     let options = crate::ssh_connection::options(server, password, None)?;
     command.args(options.args);
     for (key, value) in options.env { command.env(key, value); }
     if let Some(identity) = explicit_identity_file(server) {
+        let identity = expand_identity_path(identity);
+        // OpenSSH's explicit -i missing-file warning bypasses -E/LogLevel and
+        // would reveal the owner's local path on a PTY. Fail without that path.
+        if shared && (!identity.is_file() || std::fs::File::open(&identity).is_err()) {
+            return Err("共享方配置的 SSH 私钥文件不存在或不可读，请让共享方检查服务器认证设置".into());
+        }
         command.args(["-o", "IdentitiesOnly=yes"]);
         command.arg("-i");
-        command.arg(expand_identity_path(identity));
+        command.arg(identity);
     }
     if let Some(alias) = server.ssh_alias.as_deref().filter(|value| !value.is_empty()) {
         command.arg(alias);
@@ -136,12 +147,232 @@ fn configured_ssh_command(server: &Server, password: Option<&crate::ssh_connecti
     Ok(command)
 }
 
+/// These options precede user SSH configuration: OpenSSH keeps the first value.
+/// In particular, a guest must never reach the owner's agent or local commands
+/// through the interactive SSH escape menu.
+pub(crate) fn shared_ssh_restrictions() -> Vec<&'static str> {
+    #[cfg(windows)]
+    let diagnostic_sink = "NUL";
+    #[cfg(not(windows))]
+    let diagnostic_sink = "/dev/null";
+    vec!["-e", "none", "-o", "ForwardAgent=no", "-o", "ForwardX11=no",
+        "-o", "ClearAllForwardings=yes", "-o", "PermitLocalCommand=no",
+        "-o", "LocalCommand=none", "-o", "RemoteCommand=none",
+        "-o", "ControlMaster=no", "-o", "ControlPath=none",
+        "-E", diagnostic_sink, "-o", "LogLevel=QUIET"]
+}
+
+pub(crate) fn quote_remote_path(value: &str) -> Result<String, String> {
+    if value.is_empty() || value.len() > 4096 || value.chars().any(|c| c == '\0' || c == '\r' || c == '\n') {
+        return Err("共享默认目录无效".into());
+    }
+    if value == "~" { return Ok("\"$HOME\"".into()); }
+    if let Some(suffix) = value.strip_prefix("~/") {
+        return Ok(format!("\"$HOME\"/'{}'", suffix.replace('\'', "'\\''")));
+    }
+    Ok(format!("'{}'", value.replace('\'', "'\\''")))
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SharedTerminalScope {
+    pub peer_id: String,
+    pub share_id: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum SharedTerminalEvent {
+    Data { #[serde(rename = "sessionId")] session_id: String, #[serde(rename = "dataBase64")] data_base64: String },
+    Exit { #[serde(rename = "sessionId")] session_id: String },
+}
+
+struct SharedSession {
+    scope: SharedTerminalScope,
+    input: mpsc::SyncSender<Vec<u8>>,
+    killer: Box<dyn portable_pty::ChildKiller + Send + Sync>,
+    master: Box<dyn MasterPty + Send>,
+}
+
+/// Shared terminals have their own bounded output sink. They never emit Tauri
+/// events, even when the owner has another local terminal open.
+#[derive(Default)]
+pub struct SharedTerminalManager {
+    sessions: Arc<Mutex<HashMap<String, SharedSession>>>,
+}
+
+impl SharedTerminalManager {
+    pub fn start(&self, server: &Server, password: Option<&crate::ssh_connection::SshPasswords>, scope: &SharedTerminalScope,
+        columns: u16, rows: u16, default_path: &str, events: tokio::sync::mpsc::Sender<SharedTerminalEvent>) -> Result<String, String> {
+        let directory = quote_remote_path(default_path)?;
+        let mut sessions = self.sessions.lock().map_err(|_| "共享终端不可用")?;
+        if sessions.len() >= 4 { return Err("每个共享连接最多打开 4 个终端".into()); }
+        let pair = native_pty_system().openpty(PtySize { rows: rows.clamp(2, 500), cols: columns.clamp(2, 500), pixel_width: 0, pixel_height: 0 })
+            .map_err(|error| format!("无法创建共享终端：{error}"))?;
+        let mut command = configured_ssh_command_mode(server, password, true)?;
+        command.arg(format!("cd -- {directory} && exec \"${{SHELL:-/bin/sh}}\" -l"));
+        let mut reader = pair.master.try_clone_reader().map_err(|error| error.to_string())?;
+        let mut writer = pair.master.take_writer().map_err(|error| error.to_string())?;
+        let mut child = pair.slave.spawn_command(command).map_err(|_| "无法启动共享 SSH，请让共享方检查本机 SSH 环境")?;
+        drop(pair.slave);
+        let killer = child.clone_killer();
+        let mut output_killer = child.clone_killer();
+        let mut input_killer = child.clone_killer();
+        let (input, receiver) = mpsc::sync_channel::<Vec<u8>>(16);
+        let id = Uuid::new_v4().to_string();
+        sessions.insert(id.clone(), SharedSession { scope: scope.clone(), input, killer, master: pair.master });
+        drop(sessions);
+        thread::spawn(move || {
+            while let Ok(data) = receiver.recv() {
+                if writer.write_all(&data).and_then(|_| writer.flush()).is_err() { break; }
+            }
+            let _ = input_killer.kill();
+        });
+        let sessions = self.sessions.clone();
+        let output_id = id.clone();
+        thread::spawn(move || {
+            let mut buffer = [0u8; 8192];
+            loop {
+                match reader.read(&mut buffer) {
+                    Ok(0) | Err(_) => break,
+                    Ok(length) => {
+                        if events.try_send(SharedTerminalEvent::Data { session_id: output_id.clone(), data_base64: STANDARD.encode(&buffer[..length]) }).is_err() {
+                            // A slow/disconnected guest may not grow owner memory.
+                            let _ = output_killer.kill();
+                            break;
+                        }
+                    }
+                }
+            }
+            let _ = output_killer.kill();
+            let _ = child.wait();
+            if let Ok(mut sessions) = sessions.lock() { sessions.remove(&output_id); }
+            let _ = events.try_send(SharedTerminalEvent::Exit { session_id: output_id });
+        });
+        Ok(id)
+    }
+
+    pub fn write(&self, scope: &SharedTerminalScope, id: &str, data: &[u8]) -> Result<(), String> {
+        if data.len() > 48 * 1024 { return Err("单次终端输入超过 48 KiB".into()); }
+        let mut sessions = self.sessions.lock().map_err(|_| "共享终端不可用")?;
+        let session = sessions.get_mut(id).ok_or("共享终端已关闭")?;
+        if &session.scope != scope { return Err("终端不属于当前共享连接".into()); }
+        if session.input.try_send(data.to_vec()).is_err() {
+            let _ = session.killer.kill();
+            sessions.remove(id);
+            return Err("共享终端输入队列已满或已关闭".into());
+        }
+        Ok(())
+    }
+
+    pub fn resize(&self, scope: &SharedTerminalScope, id: &str, columns: u16, rows: u16) -> Result<(), String> {
+        let sessions = self.sessions.lock().map_err(|_| "共享终端不可用")?;
+        let session = sessions.get(id).ok_or("共享终端已关闭")?;
+        if &session.scope != scope { return Err("终端不属于当前共享连接".into()); }
+        session.master.resize(PtySize { rows: rows.clamp(2, 500), cols: columns.clamp(2, 500), pixel_width: 0, pixel_height: 0 }).map_err(|error| error.to_string())
+    }
+
+    pub fn close(&self, scope: &SharedTerminalScope, id: &str) -> Result<(), String> {
+        let mut sessions = self.sessions.lock().map_err(|_| "共享终端不可用")?;
+        if let Some(session) = sessions.get(id) {
+            if &session.scope != scope { return Err("终端不属于当前共享连接".into()); }
+        }
+        if let Some(mut session) = sessions.remove(id) { let _ = session.killer.kill(); }
+        Ok(())
+    }
+
+    pub fn cleanup_scope(&self, scope: &SharedTerminalScope) {
+        if let Ok(mut sessions) = self.sessions.lock() {
+            sessions.retain(|_, session| {
+                if &session.scope != scope { return true; }
+                let _ = session.killer.kill();
+                false
+            });
+        }
+    }
+}
+
+impl Drop for SharedTerminalManager {
+    fn drop(&mut self) {
+        if let Ok(mut sessions) = self.sessions.lock() {
+            for (_, mut session) in sessions.drain() { let _ = session.killer.kill(); }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use super::*;
     #[test]
     fn gpu_terminal_starts_with_a_fixed_export() {
         let command = format!("export CUDA_VISIBLE_DEVICES={}; exec \"${{SHELL:-/bin/sh}}\" -l", 3);
         assert_eq!(command, "export CUDA_VISIBLE_DEVICES=3; exec \"${SHELL:-/bin/sh}\" -l");
+    }
+
+    #[test]
+    fn shared_terminal_disables_owner_side_ssh_features_before_saved_options() {
+        let mut server: Server = serde_json::from_value(serde_json::json!({"id":"fixture","name":"fixture",
+            "host":"example.invalid","port":22,"username":"worker","tags":[],"samplingIntervalSeconds":2,
+            "historyRetentionDays":90,"authMethod":"sshAgent","status":"unknown"})).unwrap();
+        let command = configured_ssh_command_mode(&server, None, true).unwrap();
+        let args: Vec<_> = command.get_argv().iter().map(|arg| arg.to_string_lossy().to_string()).collect();
+        assert_eq!(&args[..5], ["ssh", "-e", "none", "-o", "ForwardAgent=no"]);
+        for option in ["ForwardX11=no", "ClearAllForwardings=yes", "PermitLocalCommand=no", "LocalCommand=none", "RemoteCommand=none", "StrictHostKeyChecking=yes", "LogLevel=QUIET"] {
+            assert!(args.iter().any(|arg| arg == option));
+        }
+        let sink = if cfg!(windows) { "NUL" } else { "/dev/null" };
+        assert!(args.windows(2).any(|pair| pair == ["-E", sink]));
+        let directory = tempfile::tempdir().unwrap();
+        let missing = directory.path().join("missing-owner-identity");
+        server.auth_method = "privateKey".into();
+        server.identity_file = Some(missing.to_string_lossy().to_string());
+        let error = configured_ssh_command_mode(&server, None, true).unwrap_err();
+        assert!(!error.contains("missing-owner-identity"));
+        assert!(!error.contains(&directory.path().to_string_lossy().to_string()));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn remote_directory_quoting_preserves_shell_metacharacters_as_literal_bytes() {
+        let path = "/tmp/a'b $HOME $(printf injected); *";
+        let output = std::process::Command::new("/bin/sh").args(["-c", &format!("printf '%s' {}", quote_remote_path(path).unwrap())]).output().unwrap();
+        assert!(output.status.success());
+        assert_eq!(output.stdout, path.as_bytes());
+        assert!(quote_remote_path("bad\npath").is_err());
+    }
+
+    #[derive(Clone, Debug)]
+    struct TestKiller(Arc<std::sync::atomic::AtomicBool>);
+    impl portable_pty::ChildKiller for TestKiller {
+        fn kill(&mut self) -> std::io::Result<()> { self.0.store(true, std::sync::atomic::Ordering::SeqCst); Ok(()) }
+        fn clone_killer(&self) -> Box<dyn portable_pty::ChildKiller + Send + Sync> { Box::new(self.clone()) }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn shared_scope_cannot_write_resize_close_or_clean_another_terminal_and_input_is_bounded() {
+        let manager = SharedTerminalManager::default();
+        let scope = SharedTerminalScope { peer_id: "peer-a".into(), share_id: "share-a".into() };
+        let other_peer = SharedTerminalScope { peer_id: "peer-b".into(), share_id: "share-a".into() };
+        let other_share = SharedTerminalScope { peer_id: "peer-a".into(), share_id: "share-b".into() };
+        let pair = native_pty_system().openpty(PtySize { rows: 24, cols: 80, pixel_width: 0, pixel_height: 0 }).unwrap();
+        let killed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (input, receiver) = mpsc::sync_channel(2);
+        manager.sessions.lock().unwrap().insert("session".into(), SharedSession {
+            scope: scope.clone(), input, killer: Box::new(TestKiller(killed.clone())), master: pair.master,
+        });
+        for foreign in [&other_peer, &other_share] {
+            assert!(manager.write(foreign, "session", b"forbidden").is_err());
+            assert!(manager.resize(foreign, "session", 80, 24).is_err());
+            assert!(manager.close(foreign, "session").is_err());
+            manager.cleanup_scope(foreign);
+        }
+        assert!(receiver.try_recv().is_err());
+        assert!(!killed.load(std::sync::atomic::Ordering::SeqCst));
+        manager.write(&scope, "session", b"one").unwrap();
+        manager.write(&scope, "session", b"two").unwrap();
+        assert!(manager.write(&scope, "session", b"over capacity").is_err());
+        assert!(killed.load(std::sync::atomic::Ordering::SeqCst));
+        assert!(manager.sessions.lock().unwrap().is_empty());
     }
 }
 

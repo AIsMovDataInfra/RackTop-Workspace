@@ -5,6 +5,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import {
   Activity,
+  CalendarDays,
   AlertCircle,
   ArrowDownUp,
   Bell,
@@ -47,6 +48,7 @@ import {
   RefreshCw,
   RotateCcw,
   Search,
+  Share2,
   Server as ServerIcon,
   Settings,
   ShieldAlert,
@@ -81,6 +83,11 @@ import { isRemoteSyncFresh, RemoteSyncCoordinator, RemoteSyncStatus, REMOTE_SYNC
 import { ResourceTrend } from './components/ResourceTrend'
 import { ServerForm } from './components/ServerForm'
 import { SshTerminal } from './components/SshTerminal'
+import { TeamWorkspace } from './components/TeamWorkspace'
+import './components/team.css'
+import { SharingWorkspace } from './components/SharingWorkspace'
+import './components/sharing.css'
+import { SshKeyManager } from './components/SshKeyManager'
 import { StatusPill } from './components/StatusPill'
 import { TrendChart } from './components/TrendChart'
 import { UsageDistribution } from './components/UsageDistribution'
@@ -295,6 +302,7 @@ function App() {
   const [editingServer, setEditingServer] = useState<Server | null>(null)
   const [showSettings, setShowSettings] = useState(false)
   const [showActivityLog, setShowActivityLog] = useState(false)
+  const [showKeyManager, setShowKeyManager] = useState(false)
   const [showAbout, setShowAbout] = useState(browserPreviewState === 'about')
   const [latestRelease, setLatestRelease] = useState<ReleaseInfo | undefined>(() => {
     if (browserPreviewState === 'update' || browserPreviewState === 'update-error') return { version: '1.25.4', url: releaseUrl('1.25.4') }
@@ -315,7 +323,7 @@ function App() {
   const [showSshExport, setShowSshExport] = useState(false)
   const [showImportSource, setShowImportSource] = useState(false)
   const [importDrafts, setImportDrafts] = useState<ServerDraft[] | null>(null)
-  const [mainView, setMainView] = useState<'server' | 'fleet' | 'idle' | 'mine' | 'projects'>(() => browserPreviewState === 'reconnecting' || browserPreviewState === 'notifications' ? 'server' : 'fleet')
+  const [mainView, setMainView] = useState<'server' | 'fleet' | 'idle' | 'mine' | 'projects' | 'sharing' | 'team'>(() => browserPreviewState === 'team' ? 'team' : browserPreviewState === 'sharing' ? 'sharing' : browserPreviewState === 'reconnecting' || browserPreviewState === 'notifications' ? 'server' : 'fleet')
   const [projects, setProjects] = useState<Project[]>([])
   const [projectEditor, setProjectEditor] = useState<Project | null | 'new'>(null)
   const [projectPendingDelete, setProjectPendingDelete] = useState<Project | null>(null)
@@ -874,8 +882,8 @@ function App() {
       else if (payload === 'menu-view-idle') setMainView('idle')
       else if (payload === 'menu-view-mine') setMainView('mine')
       else if (payload === 'menu-view-logs') setShowActivityLog(true)
-      else if (payload === 'menu-help-guide') void openExternalUrl('https://github.com/Tongzh-SEU/RackTop/blob/main/README.md')
-      else if (payload === 'menu-help-project') void openExternalUrl('https://github.com/Tongzh-SEU/RackTop')
+      else if (payload === 'menu-help-guide') void openExternalUrl('https://github.com/AIsMovDataInfra/RackTop/blob/main/README.md')
+      else if (payload === 'menu-help-project') void openExternalUrl('https://github.com/AIsMovDataInfra/RackTop')
     })
     return () => {
       void unlistenTray.then((dispose) => dispose())
@@ -1603,6 +1611,8 @@ function App() {
           <button className={mainView === 'idle' ? 'is-active' : ''} onClick={() => setMainView('idle')}><Zap size={17} />空闲算力 <span className="nav-count">{totals.idle}</span></button>
           <button className={mainView === 'mine' ? 'is-active' : ''} onClick={() => setMainView('mine')}><UserRound size={17} />我的进程 <span className="nav-count">{servers.reduce((sum, server) => sum + (snapshots[server.id] ? currentUserProcessCount(snapshots[server.id]) : 0), 0)}</span></button>
           <button className={mainView === 'projects' ? 'is-active' : ''} onClick={() => setMainView('projects')}><FolderGit2 size={17} />我的项目 <span className="nav-count">{projects.length}</span></button>
+          <button className={mainView === 'team' ? 'is-active' : ''} onClick={() => setMainView('team')}><CalendarDays size={17} />团队预约</button>
+          <button className={mainView === 'sharing' ? 'is-active' : ''} onClick={() => setMainView('sharing')}><Share2 size={17} />资源共享</button>
         </nav>
         <div className="sidebar__section-header"><span>服务器</span><span>{totals.online}/{servers.length}</span></div>
         <div className="search-field"><Search size={14} /><input aria-label="搜索服务器" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索" />{search && <button onClick={() => setSearch('')} aria-label="清除搜索"><X size={13} /></button>}</div>
@@ -1634,6 +1644,7 @@ function App() {
           <button onClick={() => { setEditingServer(null); setShowServerForm(true) }}><Plus size={16} />添加服务器</button>
           <button onClick={importConfig} disabled={importingConfig}><Download size={16} />{importingConfig ? '正在读取 SSH Config…' : '导入 SSH Config'}</button>
           <button onClick={() => setShowSshExport(true)} disabled={servers.length === 0}><Upload size={16} />导出 SSH Config</button>
+          <button onClick={() => setShowKeyManager(true)}><KeyRound size={16} />密钥管理</button>
           <button onClick={() => setShowActivityLog(true)}><ScrollText size={16} />日志</button>
           <button onClick={() => setShowSettings(true)}><Settings size={16} />设置</button>
         </div>
@@ -1642,10 +1653,11 @@ function App() {
       <main className="workspace">
         <header className="topbar" onMouseDown={startWindowDrag} onDoubleClick={(event) => void toggleWindowMaximize(event)}>
           <div className="topbar__title">
-            <p className="eyebrow">{mainView === 'projects' ? '跨服务器文件同步' : mainView === 'idle' ? '资源发现' : mainView === 'mine' ? '当前用户任务' : mainView === 'fleet' ? `${totals.online} / ${servers.length} 台在线` : selectedServer ? selectedServer.host : '所有服务器'}</p>
-            <h1>{mainView === 'projects' ? '我的项目' : mainView === 'idle' ? '寻找空闲算力' : mainView === 'mine' ? '我的进程' : mainView === 'fleet' ? '算力总览' : selectedServer ? serverDisplayName(selectedServer.name) : 'RackTop 总览'}</h1>
+            <p className="eyebrow">{mainView === 'team' ? '团队排期与服务器资源' : mainView === 'sharing' ? '与你信任的人协作' : mainView === 'projects' ? '跨服务器文件同步' : mainView === 'idle' ? '资源发现' : mainView === 'mine' ? '当前用户任务' : mainView === 'fleet' ? `${totals.online} / ${servers.length} 台在线` : selectedServer ? selectedServer.host : '所有服务器'}</p>
+            <h1>{mainView === 'team' ? '团队预约' : mainView === 'sharing' ? '资源共享' : mainView === 'projects' ? '我的项目' : mainView === 'idle' ? '寻找空闲算力' : mainView === 'mine' ? '我的进程' : mainView === 'fleet' ? '算力总览' : selectedServer ? serverDisplayName(selectedServer.name) : 'RackTop 总览'}</h1>
           </div>
           <div className="topbar__actions">
+            {mainView !== 'sharing' && mainView !== 'team' && <>
             {(manualRefreshProgress || (remoteHistoryServerKey && remoteSyncStatus)) && <span className="remote-sync-slot">{manualRefreshProgress ? <span className="remote-sync-status remote-sync-status--syncing" role="status" aria-live="polite"><RefreshCw className={manualRefreshingAll ? 'spin' : ''} size={13} />正在重新连接 · {manualRefreshProgress.completed}/{manualRefreshProgress.total} 台</span> : remoteSyncStatus && <RemoteSyncStatus status={remoteSyncStatus} onOpenFailure={() => {
               const serverId = remoteSyncStatus.failedServerIds[0]
               if (!serverId) return
@@ -1657,12 +1669,17 @@ function App() {
             <span className={`refresh-label ${paused ? 'is-paused' : ''}`}><Clock3 size={14} />{paused ? '采集已暂停' : mainView === 'server' && selectedServer ? relativeTime(selectedServer.lastSeenAt) : totals.latestRefresh ? relativeTime(totals.latestRefresh) : `${settings?.defaultSamplingIntervalSeconds ?? 2} 秒采样`}</span>
             <button className="button button--secondary" onClick={() => void runManualRefreshAll()} disabled={manualRefreshingAll}><RefreshCw size={16} className={manualRefreshingAll ? 'spin' : ''} />刷新全部</button>
             <button className="icon-button" aria-label="预约与通知" onClick={() => setShowReservationCenter(true)}><Bell size={18} />{(totals.hot > 0 || activeIdleReservationCount > 0 || gpuMemoryStallWarnings.length > 0 || mineProcessWarnings.length > 0) && <span className="notification-dot" />}</button>
+            </>}
             <WindowsWindowControls />
           </div>
         </header>
 
         <div className="workspace__scroll">
-          {shouldShowGuidedEmptyState(mainView, servers.length) ? (
+          {mainView === 'team' ? (
+            <TeamWorkspace servers={servers} snapshots={snapshots} />
+          ) : mainView === 'sharing' ? (
+            <SharingWorkspace servers={servers} currentServerId={selectedServerId} />
+          ) : shouldShowGuidedEmptyState(mainView, servers.length) ? (
             <EmptyState onboarding={<OnboardingChecklist steps={onboardingSteps} previewStep={onboardingPreviewStep} collapsed={onboardingCollapsed} dismissed={onboardingDismissed} useActualState={onboardingUseActualState} showPreviewControls={!api.isDesktop} onPreviewStepChange={setOnboardingPreviewStep} onCollapsedChange={setOnboardingCollapsed} onDismiss={() => { localStorage.setItem(ONBOARDING_DISMISSED_KEY, 'true'); setOnboardingDismissed(true); setToast('已隐藏新手引导，可在“设置 → 通用”中重新显示') }} onUseActualStateChange={setOnboardingUseActualState} />} onAdd={() => { setEditingServer(null); setShowServerForm(true) }} onImport={importConfig} />
           ) : servers.length === 0 ? (
             <EmptyState onAdd={() => { setEditingServer(null); setShowServerForm(true) }} onImport={importConfig} />
@@ -1714,6 +1731,7 @@ function App() {
       {projectConflictTarget && <ProjectConflictDialog project={projectConflictTarget.project} server={servers.find((item) => item.id === projectConflictTarget.targetServerId)} onClose={() => setProjectConflictTarget(null)} onConfirm={() => { const pending = projectConflictTarget; setProjectConflictTarget(null); void syncProjectTarget(pending.project, pending.targetServerId, true, true) }} />}
       {showSettings && settings && <SettingsSheet settings={settings} onboardingVisible={!onboardingDismissed} onClose={() => setShowSettings(false)} onSave={async (value, showOnboarding) => { setSettings(await api.saveSettings(value)); if (showOnboarding) { localStorage.removeItem(ONBOARDING_DISMISSED_KEY); setOnboardingDismissed(false); setOnboardingUseActualState(true); setOnboardingCollapsed(false); if (onboardingDismissed) setMainView('fleet') } else { localStorage.setItem(ONBOARDING_DISMISSED_KEY, 'true'); setOnboardingDismissed(true) } setShowSettings(false); setToast('设置已保存') }} />}
       {showActivityLog && <ActivityLogSheet servers={servers} snapshots={snapshots} onClose={() => setShowActivityLog(false)} />}
+      {showKeyManager && <SshKeyManager onClose={() => setShowKeyManager(false)} />}
       {showSshExport && <SshExportSheet servers={servers} onClose={() => setShowSshExport(false)} />}
       {showImportSource && <SshImportSourceSheet onClose={() => setShowImportSource(false)} onReadLocal={readLocalConfig} onParsed={(drafts) => { setImportDrafts(drafts); setShowImportSource(false) }} />}
       {showAbout && <AboutSheet latestRelease={latestRelease} onInstallUpdate={() => { setShowAbout(false); void startAppUpdate() }} checkingUpdate={checkingUpdate} updateError={updateCheckError} ignoredVersion={ignoredUpdateVersion} onIgnoreUpdate={(version) => { saveIgnoredUpdateVersion(version); setIgnoredUpdateVersion(version); setToast(`已忽略 v${version} 的更新提示`) }} onCheckUpdate={() => void checkForUpdates(true)} onClose={() => setShowAbout(false)} onNotice={setToast} />}
@@ -2612,7 +2630,7 @@ function AboutSheet({ latestRelease, onInstallUpdate, checkingUpdate, updateErro
   }
   const ignored = Boolean(latestRelease && latestRelease.version === ignoredVersion)
   const updateStatus = checkingUpdate ? '正在检查 GitHub Releases…' : updateError ? `检查失败：${updateError}` : latestRelease ? `发现新版本 v${latestRelease.version}${ignored ? ' · 已忽略此版本提醒' : ''}` : '当前已是最新版本'
-  return <div className="scrim" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="sheet about-sheet" role="dialog" aria-modal="true" aria-labelledby="about-title"><header className="sheet__header"><div><p className="eyebrow">About</p><h2 id="about-title">RackTop</h2></div><button className="icon-button" onClick={onClose} aria-label="关闭"><X size={18} /></button></header><div className="about-body"><div className="about-product"><span className="about-product__mark"><Activity size={28} /></span><div><strong>当前版本：v{packageInfo.version}</strong><p>{packageInfo.version.includes('-linux.') ? 'Linux 社区版 · AIsMovDataInfra/RackTop' : '面向共享算力服务器的资源监控与 SSH 工作台'}</p></div></div><div className="about-update" role="status"><span className={latestRelease && !ignored ? 'is-new' : ''}>{checkingUpdate ? <RefreshCw className="spin" size={17} /> : <CircleArrowUp size={17} />}</span><div><strong>版本更新</strong><small>{updateStatus}</small></div><div className="about-update__actions">{latestRelease && !checkingUpdate ? <><button className="button button--primary button--small" onClick={onInstallUpdate}>更新到 v{latestRelease.version}</button><button className="button button--secondary button--small" onClick={() => openExternal(latestRelease.url)}>查看版本<ExternalLink size={11} /></button>{!ignored && <button className="button button--quiet button--small" onClick={() => onIgnoreUpdate(latestRelease.version)}>忽略此版本</button>}</> : <><button className="button button--secondary button--small" onClick={() => openExternal(releaseUrl(packageInfo.version))}>版本说明</button><button className="button button--secondary button--small" disabled={checkingUpdate} onClick={onCheckUpdate}>{checkingUpdate ? '检查中…' : '重新检查'}</button></>}</div></div><div className="about-author"><img src={authorAvatar} alt="Tongzh-SEU 头像" /><div><strong>Tongzh-SEU</strong><small>作者与维护者</small><div className="about-author__links"><button className="about-external-link" onClick={() => openExternal('https://github.com/Tongzh-SEU')}><Github size={13} />GitHub @Tongzh-SEU<ExternalLink size={11} /></button><button className="about-external-link" onClick={() => openExternal('https://xhslink.cn/o/AsgFqJMZfR5')}>小红书 @tooongtooong<ExternalLink size={11} /></button></div></div></div><div className="about-links"><button onClick={() => openExternal('https://github.com/Tongzh-SEU/RackTop')}><Github size={15} /><span><strong>GitHub 仓库</strong><small>Tongzh-SEU/RackTop</small></span><ExternalLink size={13} /></button><button aria-expanded={licenses} aria-controls="about-licenses" onClick={() => setLicenses((value) => !value)}><Database size={15} /><span><strong>第三方许可</strong><small>{licenses ? '收起开源组件' : '查看主要运行时依赖'}</small></span><ChevronRight className={`disclosure-icon${licenses ? ' disclosure-icon--expanded' : ''}`} size={13} /></button></div>{licenses && <div className="about-licenses" id="about-licenses"><p><strong>React、Tauri、xterm.js、ECharts、Lucide</strong></p><p>各组件版权归其贡献者所有，并按各自开源许可证分发。完整版本与传递依赖记录见应用包内的 npm 与 Cargo 锁文件。</p></div>}<small className="about-contact">联系：通过 GitHub Issues 或作者主页发起讨论</small></div><footer className="sheet__footer"><button className="button button--primary" onClick={onClose}>完成</button></footer></section></div>
+  return <div className="scrim" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="sheet about-sheet" role="dialog" aria-modal="true" aria-labelledby="about-title"><header className="sheet__header"><div><p className="eyebrow">About</p><h2 id="about-title">RackTop</h2></div><button className="icon-button" onClick={onClose} aria-label="关闭"><X size={18} /></button></header><div className="about-body"><div className="about-product"><span className="about-product__mark"><Activity size={28} /></span><div><strong>当前版本：v{packageInfo.version}</strong><p>{packageInfo.version.includes('-linux.') ? 'Linux 社区版 · AIsMovDataInfra/RackTop' : '面向共享算力服务器的资源监控与 SSH 工作台'}</p></div></div><div className="about-update" role="status"><span className={latestRelease && !ignored ? 'is-new' : ''}>{checkingUpdate ? <RefreshCw className="spin" size={17} /> : <CircleArrowUp size={17} />}</span><div><strong>版本更新</strong><small>{updateStatus}</small></div><div className="about-update__actions">{latestRelease && !checkingUpdate ? <><button className="button button--primary button--small" onClick={onInstallUpdate}>更新到 v{latestRelease.version}</button><button className="button button--secondary button--small" onClick={() => openExternal(latestRelease.url)}>查看版本<ExternalLink size={11} /></button>{!ignored && <button className="button button--quiet button--small" onClick={() => onIgnoreUpdate(latestRelease.version)}>忽略此版本</button>}</> : <><button className="button button--secondary button--small" onClick={() => openExternal(releaseUrl(packageInfo.version))}>版本说明</button><button className="button button--secondary button--small" disabled={checkingUpdate} onClick={onCheckUpdate}>{checkingUpdate ? '检查中…' : '重新检查'}</button></>}</div></div><section className="about-author about-maintainer" aria-label="当前维护者"><span className="about-maintainer__mark"><UserRound size={23} /></span><div><strong>AIsMov</strong><small>当前维护者 · AIsMovDataInfra</small><div className="about-author__links"><button className="about-external-link" onClick={() => openExternal('https://github.com/AIsMovDataInfra')}><Github size={13} />GitHub @AIsMovDataInfra<ExternalLink size={11} /></button></div></div></section><section className="about-author" aria-label="原作者"><img src={authorAvatar} alt="原作者 Tongzh-SEU 头像" /><div><strong>Tongzh-SEU</strong><small>原作者 · 上游项目</small><div className="about-author__links"><button className="about-external-link" onClick={() => openExternal('https://github.com/Tongzh-SEU')}><Github size={13} />GitHub @Tongzh-SEU<ExternalLink size={11} /></button><button className="about-external-link" onClick={() => openExternal('https://xhslink.cn/o/AsgFqJMZfR5')}>小红书 @tooongtooong<ExternalLink size={11} /></button><button className="about-external-link" onClick={() => openExternal('https://github.com/Tongzh-SEU/RackTop')}>上游项目<ExternalLink size={11} /></button></div></div></section><div className="about-links"><button onClick={() => openExternal('https://github.com/AIsMovDataInfra/RackTop')}><Github size={15} /><span><strong>GitHub 仓库</strong><small>AIsMovDataInfra/RackTop</small></span><ExternalLink size={13} /></button><button onClick={() => openExternal('https://github.com/AIsMovDataInfra/RackTop/blob/main/README.md')}><ScrollText size={15} /><span><strong>使用说明</strong><small>查看当前社区版文档</small></span><ExternalLink size={13} /></button><button onClick={() => openExternal('https://github.com/AIsMovDataInfra/RackTop/issues')}><AlertCircle size={15} /><span><strong>问题反馈</strong><small>向当前维护仓库提交问题和建议</small></span><ExternalLink size={13} /></button><button aria-expanded={licenses} aria-controls="about-licenses" onClick={() => setLicenses((value) => !value)}><Database size={15} /><span><strong>第三方许可</strong><small>{licenses ? '收起开源组件' : '查看主要运行时依赖'}</small></span><ChevronRight className={`disclosure-icon${licenses ? ' disclosure-icon--expanded' : ''}`} size={13} /></button></div>{licenses && <div className="about-licenses" id="about-licenses"><p><strong>React、Tauri、xterm.js、ECharts、Lucide</strong></p><p>各组件版权归其贡献者所有，并按各自开源许可证分发。完整版本与传递依赖记录见应用包内的 npm 与 Cargo 锁文件。</p></div>}<small className="about-contact">RackTop 采用 GPL-3.0 许可证，保留原作者及贡献者署名。本社区版本由 AIsMov 维护。</small></div><footer className="sheet__footer"><button className="button button--primary" onClick={onClose}>完成</button></footer></section></div>
 }
 
 function SshImportSheet({ drafts, servers, onClose, onImport }: { drafts: ServerDraft[]; servers: Server[]; onClose: () => void; onImport: (drafts: ServerDraft[]) => Promise<void> }) {

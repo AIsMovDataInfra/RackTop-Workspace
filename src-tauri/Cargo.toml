@@ -1,8 +1,9 @@
 [package]
 name = "racktop"
-version = "1.26.0-linux.4"
+version = "1.26.0-linux.9"
 description = "Live GPU & CPU monitoring for every server"
-authors = ["RackTop"]
+# Original author: Tongzh-SEU and upstream contributors; see ../NOTICE.md.
+# Linux bundle.publisher supplies the Debian maintainer separately.
 edition = "2024"
 default-run = "racktop"
 autobins = false
@@ -24,6 +25,16 @@ name = "racktop-probe"
 path = "src/bin/racktop-probe.rs"
 required-features = ["integration-probe"]
 
+[[bin]]
+name = "sharing-probe"
+path = "src/bin/sharing-probe.rs"
+required-features = ["integration-probe"]
+
+[[bin]]
+name = "team-setup"
+path = "src/bin/team-setup.rs"
+required-features = ["integration-probe"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
@@ -33,7 +44,15 @@ tauri-plugin-notification = "2"
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1", features = ["process", "time", "rt-multi-thread", "macros", "io-util"] }
+tokio = { version = "1", features = ["process", "time", "rt-multi-thread", "macros", "io-util", "net", "sync", "fs"] }
+reqwest = { version = "0.13.4", default-features = false, features = ["rustls", "json"] }
+tokio-tungstenite = { version = "0.30.0", features = ["rustls-tls-webpki-roots"] }
+tokio-rustls = { version = "0.26.4", default-features = false, features = ["ring", "tls12"] }
+rcgen = "0.14.10"
+ed25519-dalek = "2.2.0"
+rand = "0.8.8"
+futures-util = { version = "0.3.33", features = ["sink"] }
+rfd = "0.17"
 rusqlite = { version = "0.37", features = ["bundled"] }
 uuid = { version = "1", features = ["v4"] }
 dirs = "6"

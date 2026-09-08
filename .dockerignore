@@ -1,0 +1,14 @@
+.git
+node_modules
+**/node_modules
+**/dist
+src-tauri
+output
+**/*.log
+team-web/data
+team-web/backups
+**/.env
+**/.env.*
+!team-web/.env.example
+.codex
+.agents
