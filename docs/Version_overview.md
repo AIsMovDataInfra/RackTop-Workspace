@@ -4,6 +4,7 @@
 
 ## 1.27.0
 
+- 明确区分 GitHub 下载页的 Mac 与 Linux 发布标题及架构。
 - 新增 Apple Silicon Mac 的 DMG 安装包。
 - 新增 Intel Mac 的 DMG 安装包。
 - 支持 Mac 用户通过邀请码使用共享监控、终端和文件传输。
