@@ -2,6 +2,8 @@
 
 本仓库为 `AIsMovDataInfra/RackTop`，Linux 社区移植基于 `Tongzh-SEU/RackTop`。用户已指定在组织内公开分发 Linux；发布操作必须以本 fork 为目标，未经明确授权不得推送到上游。保留原作者信息、Git 历史、GPL-3.0 许可证与上游下载链接。
 
+自 1.27.0 起，按用户明确要求，本 fork 同时分发保留共享与预约功能的 macOS Apple Silicon 和 Intel 安装包。Mac 使用中性的 `x.y.z` 版本、独立 `updater/macos.json` 和双架构构建；Linux 修订及 `linux-amd64.json` 通道保持独立。未配置 Apple Developer ID 时，Mac 测试包须明确标注 ad-hoc 签名、未公证及首次启动限制。下文原“macOS 引用上游”与每次必须构建 Windows 的规则不适用于此 Mac 专项发布。
+
 以下上游工作规范保留用于参考，其中固定 macOS 本机路径不适用于 Linux 维护者：使用实际检出的仓库路径与当前可用 GitHub CLI。Linux 版本使用 `x.y.z-linux.N`，每次 Linux 修订增加 N；版本记录只追加。Linux 标签仅默认构建 Ubuntu `.deb`，Windows/macOS 安装包引用上游官方 Releases，覆盖下文要求每次同时发布 macOS/Windows 的上游流程。Linux 真实硬件验证尚未完成的范围必须明确标注。
 
 分配 Linux 修订号前，必须获取远程最新引用，同时核对用户已安装版本、所有功能分支、标签和 Releases；取已使用的最高修订号之后的新编号。未合并分支已经使用的编号也不得复用。实现基线须包含用户当前安装版本的已有功能；若 `main` 落后，应先整合对应桌面分支并验证，不能只提高版本字段却丢失现有功能。

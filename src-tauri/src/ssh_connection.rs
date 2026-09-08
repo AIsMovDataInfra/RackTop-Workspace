@@ -72,7 +72,7 @@ pub fn options(server: &Server, passwords: Option<&SshPasswords>, probe_keys: Op
         }
     }
     if server.proxy_use_password {
-        if !cfg!(target_os = "linux") { return Err("独立跳板机密码目前仅支持 Linux 客户端".into()); }
+        if !cfg!(any(target_os = "linux", target_os = "macos")) { return Err("独立跳板机密码目前仅支持 Linux 和 macOS 客户端".into()); }
         let proxy = server.proxy_jump.as_deref().ok_or("请填写跳板机地址")?;
         parse_jump(proxy)?;
         if server.ssh_alias.as_deref().is_some_and(|value| !value.is_empty()) {
@@ -114,13 +114,13 @@ pub fn run_proxy(args: &[String]) -> Result<(), String> {
     if let Some(path) = std::env::var_os("RACKTOP_TEST_KNOWN_HOSTS") { command.args(["-o", &format!("UserKnownHostsFile={}", Path::new(&path).display())]); }
     command.args(["-p", &jump.port.to_string(), "-l", &jump.username, "-W", &format!("[{target_host}]:{target_port}"), &jump.host]);
     command.env("RACKTOP_ASKPASS_PASSWORD", password).env_remove("RACKTOP_PROXY_PASSWORD");
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     {
         use std::os::unix::process::CommandExt;
         Err(format!("无法启动跳板机 SSH：{}", command.exec()))
     }
-    #[cfg(not(target_os = "linux"))]
-    { Err("独立跳板机密码目前仅支持 Linux 客户端".into()) }
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    { Err("独立跳板机密码目前仅支持 Linux 和 macOS 客户端".into()) }
 }
 
 #[cfg(test)]
@@ -136,6 +136,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     fn credentials_are_not_in_arguments_and_probe_has_no_target_secret() {
         let server = password_server();
         let passwords = SshPasswords { target: Some("target-only".into()), proxy: Some("jump-only".into()) };
@@ -150,6 +151,29 @@ mod tests {
         assert!(probe.args.iter().any(|arg| arg == "PreferredAuthentications=none"));
         let absent = SshPasswords { target: Some("target-only".into()), proxy: None };
         assert!(options(&server, Some(&absent), None).err().unwrap().contains("跳板机密码"));
+    }
+
+    #[test]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    fn jump_and_askpass_helpers_use_the_running_app_and_separate_passwords() {
+        let server = password_server();
+        let passwords = SshPasswords { target: Some("target-only".into()), proxy: Some("jump-only".into()) };
+        let options = options(&server, Some(&passwords), None).unwrap();
+        let env: std::collections::HashMap<_, _> = options.env.into_iter().collect();
+        let executable = std::env::current_exe().unwrap();
+        assert_eq!(env.get(std::ffi::OsStr::new("SSH_ASKPASS")), Some(&executable.clone().into_os_string()));
+        assert_eq!(env.get(std::ffi::OsStr::new("SSH_ASKPASS_REQUIRE")), Some(&OsString::from("force")));
+        assert_eq!(env.get(std::ffi::OsStr::new("RACKTOP_ASKPASS_PASSWORD")), Some(&OsString::from("target-only")));
+        assert_eq!(env.get(std::ffi::OsStr::new("RACKTOP_PROXY_PASSWORD")), Some(&OsString::from("jump-only")));
+        assert!(options.args.iter().any(|arg| arg == &format!("ProxyCommand={} --racktop-ssh-proxy 'jump@jump.example:21022' 'target.example' 22", quote(executable.to_str().unwrap()))));
+        assert_eq!(quote("/Applications/RackTop Preview.app/Contents/MacOS/racktop"), "'/Applications/RackTop Preview.app/Contents/MacOS/racktop'");
+    }
+
+    #[test]
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    fn unsupported_platform_rejects_independent_jump_password_without_starting_ssh() {
+        let passwords = SshPasswords { target: Some("target-only".into()), proxy: Some("jump-only".into()) };
+        assert!(options(&password_server(), Some(&passwords), None).err().unwrap().contains("仅支持 Linux 和 macOS"));
     }
 
     #[test]

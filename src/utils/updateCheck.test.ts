@@ -1,11 +1,41 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { isNewerVersion, releaseUrl, shouldShowUpdateBadge } from './updateCheck'
+
+afterEach(() => vi.unstubAllGlobals())
 
 describe('update checks', () => {
   it('opens community release notes for Linux versions and upstream notes for official versions', () => {
     expect(releaseUrl('1.26.0-linux.2')).toBe('https://github.com/AIsMovDataInfra/RackTop/releases/tag/v1.26.0-linux.2')
     expect(releaseUrl('v1.26.0-linux.2')).toBe('https://github.com/AIsMovDataInfra/RackTop/releases/tag/v1.26.0-linux.2')
     expect(releaseUrl('v1.25.4')).toBe('https://github.com/Tongzh-SEU/RackTop/releases/tag/v1.25.4')
+  })
+
+  it('opens fork release notes for a native Mac build without a Linux suffix', () => {
+    vi.stubGlobal('window', { __TAURI_INTERNALS__: {} })
+    vi.stubGlobal('navigator', { userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)' })
+    expect(releaseUrl('1.27.0')).toBe('https://github.com/AIsMovDataInfra/RackTop/releases/tag/v1.27.0')
+    expect(releaseUrl('v1.27.0')).toBe('https://github.com/AIsMovDataInfra/RackTop/releases/tag/v1.27.0')
+  })
+
+  it('keeps native Windows release notes on the upstream repository', () => {
+    vi.stubGlobal('window', { __TAURI_INTERNALS__: {} })
+    vi.stubGlobal('navigator', { userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' })
+    expect(releaseUrl('1.27.0')).toBe('https://github.com/Tongzh-SEU/RackTop/releases/tag/v1.27.0')
+    expect(releaseUrl('1.26.0-linux.9')).toBe('https://github.com/AIsMovDataInfra/RackTop/releases/tag/v1.26.0-linux.9')
+  })
+
+  it('does not mistake an ordinary Mac browser for the native community app', () => {
+    vi.stubGlobal('window', {})
+    vi.stubGlobal('navigator', { userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)' })
+    expect(releaseUrl('1.27.0')).toBe('https://github.com/Tongzh-SEU/RackTop/releases/tag/v1.27.0')
+    expect(releaseUrl('1.26.0-linux.9')).toBe('https://github.com/AIsMovDataInfra/RackTop/releases/tag/v1.26.0-linux.9')
+  })
+
+  it('retains the explicit Linux release channel without inferring Mac from a server render', () => {
+    vi.stubGlobal('window', undefined)
+    vi.stubGlobal('navigator', undefined)
+    expect(releaseUrl('1.26.0-linux.9')).toBe('https://github.com/AIsMovDataInfra/RackTop/releases/tag/v1.26.0-linux.9')
+    expect(releaseUrl('1.27.0')).toBe('https://github.com/Tongzh-SEU/RackTop/releases/tag/v1.27.0')
   })
 
   it('compares semantic versions numerically', () => {

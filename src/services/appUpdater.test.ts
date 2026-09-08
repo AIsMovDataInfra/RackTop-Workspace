@@ -1,16 +1,21 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { check } from '@tauri-apps/plugin-updater'
-import { checkDesktopAppUpdate } from './appUpdater'
+import { checkDesktopAppUpdate, relaunchUpdatedApp } from './appUpdater'
 import { invoke } from '@tauri-apps/api/core'
+import { relaunch } from '@tauri-apps/plugin-process'
 
 vi.mock('@tauri-apps/plugin-updater', () => ({ check: vi.fn().mockResolvedValue(null) }))
 vi.mock('@tauri-apps/plugin-process', () => ({ relaunch: vi.fn() }))
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(), Channel: class { onmessage: unknown } }))
 
-beforeEach(() => vi.mocked(check).mockResolvedValue(null))
+beforeEach(() => {
+  Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: {} })
+  vi.mocked(check).mockResolvedValue(null)
+})
 
 afterEach(() => {
+  Reflect.deleteProperty(window, '__TAURI_INTERNALS__')
   vi.restoreAllMocks()
   vi.clearAllMocks()
 })
@@ -38,9 +43,29 @@ describe('desktop update platform support', () => {
     await expect(checkDesktopAppUpdate()).rejects.toThrow('network unavailable')
   })
 
-  it.each(['Windows NT 10.0', 'Macintosh; Intel Mac OS X 10_15_7'])('preserves updates on %s', async (platform) => {
+  it.each(['Windows NT 10.0', 'Macintosh; Intel Mac OS X 10_15_7'])('uses the platform-configured native updater on %s', async (platform) => {
     vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue(`Mozilla/5.0 (${platform})`)
     await expect(checkDesktopAppUpdate()).resolves.toBeNull()
     expect(check).toHaveBeenCalledWith({ timeout: 30_000 })
+    expect(invoke).not.toHaveBeenCalled()
+    await relaunchUpdatedApp()
+    expect(relaunch).toHaveBeenCalledOnce()
+  })
+
+  it('relaunches Linux through its package installer integration', async () => {
+    vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (X11; Linux x86_64)')
+    await relaunchUpdatedApp()
+    expect(invoke).toHaveBeenCalledWith('relaunch_linux_app')
+    expect(relaunch).not.toHaveBeenCalled()
+  })
+
+  it.each(['Macintosh; Intel Mac OS X 10_15_7', 'X11; Linux x86_64', 'Windows NT 10.0'])('does not call native update APIs from a browser with %s', async (platform) => {
+    Reflect.deleteProperty(window, '__TAURI_INTERNALS__')
+    vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue(`Mozilla/5.0 (${platform})`)
+    await expect(checkDesktopAppUpdate()).resolves.toBeNull()
+    await expect(relaunchUpdatedApp()).rejects.toThrow('仅在 RackTop 桌面端')
+    expect(check).not.toHaveBeenCalled()
+    expect(invoke).not.toHaveBeenCalled()
+    expect(relaunch).not.toHaveBeenCalled()
   })
 })

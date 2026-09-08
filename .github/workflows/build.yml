@@ -1,10 +1,10 @@
-name: Build RackTop Linux
+name: Build RackTop
 
 on:
   workflow_dispatch:
     inputs:
       build_macos:
-        description: Build macOS Apple Silicon packages
+        description: Build macOS Apple Silicon and Intel packages
         required: true
         type: boolean
         default: false
@@ -20,14 +20,14 @@ on:
         default: true
   push:
     tags:
-      - "v*-linux.*"
+      - "v*"
 
 permissions:
   contents: read
 
 jobs:
   linux:
-    if: github.event_name != 'workflow_dispatch' || inputs.build_linux
+    if: (github.event_name == 'workflow_dispatch' && inputs.build_linux) || (github.event_name == 'push' && contains(github.ref, '-linux.'))
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -88,7 +88,7 @@ jobs:
             src-tauri/target/release/bundle/deb/linux-amd64.json
 
   publish-linux:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') && contains(github.ref, '-linux.')
     needs: linux
     runs-on: ubuntu-22.04
     permissions:
@@ -111,8 +111,18 @@ jobs:
         run: python3 scripts/publish-linux-update.py release-assets
 
   macos:
-    if: github.event_name == 'workflow_dispatch' && inputs.build_macos
-    runs-on: macos-14
+    if: (github.event_name == 'workflow_dispatch' && inputs.build_macos) || (github.event_name == 'push' && !contains(github.ref, '-linux.'))
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14
+            target: aarch64-apple-darwin
+            arch: arm64
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+            arch: x64
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -121,7 +131,8 @@ jobs:
           cache: npm
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-apple-darwin
+          targets: ${{ matrix.target }}
+      - run: brew install minisign
       - run: npm ci
       - name: Read package version
         shell: bash
@@ -129,7 +140,7 @@ jobs:
           RACKTOP_VERSION="$(node -p "require('./package.json').version")"
           echo "RACKTOP_VERSION=$RACKTOP_VERSION" >> "$GITHUB_ENV"
       - run: npm run test
-      - run: cargo test --manifest-path src-tauri/Cargo.toml
+      - run: cargo test --manifest-path src-tauri/Cargo.toml --locked --release --lib --target ${{ matrix.target }}
 
       - name: Import Apple Developer ID certificate
         shell: bash
@@ -188,29 +199,84 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          RACKTOP_MACOS_TARGET: aarch64-apple-darwin
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          RACKTOP_MACOS_TARGET: ${{ matrix.target }}
+          RACKTOP_DMG_FINDER_LAYOUT: "0"
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.LINUX_UPDATER_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         run: npm run bundle:macos
+
+      - name: Verify both package forms and launch installed application
+        shell: bash
+        run: |
+          set -euo pipefail
+          BUNDLE="src-tauri/target/${{ matrix.target }}/release/bundle"
+          DMG="$(find "$BUNDLE/dmg" -maxdepth 1 -name '*.dmg' -print)"
+          UPDATER="$(find "$BUNDLE/macos" -maxdepth 1 -name '*.app.tar.gz' -print)"
+          MODE=ad-hoc
+          NOTARY_ARGS=()
+          if [ "${RACKTOP_MARK_UNSIGNED:-1}" = "0" ]; then
+            MODE=developer-id
+            NOTARY_ARGS=(--notarized)
+          fi
+          python3 scripts/test-macos-package.py \
+            --target "${{ matrix.target }}" --dmg "$DMG" --updater "$UPDATER" \
+            --public-key src-tauri/linux-updater.pub --version "$RACKTOP_VERSION" \
+            --signing-mode "$MODE" "${NOTARY_ARGS[@]}" --smoke \
+            --report "$RUNNER_TEMP/macos-${{ matrix.arch }}-verification.json" \
+            --screenshot "$RUNNER_TEMP/macos-${{ matrix.arch }}.png"
+      - name: Upload Mac verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-${{ matrix.arch }}-verification
+          if-no-files-found: warn
+          path: |
+            ${{ runner.temp }}/macos-${{ matrix.arch }}-verification.json
+            ${{ runner.temp }}/macos-${{ matrix.arch }}.png
 
       - name: Upload verified macOS DMG
         uses: actions/upload-artifact@v4
         with:
-          name: RackTop_${{ env.RACKTOP_VERSION }}_macos-arm64-dmg
+          name: RackTop_${{ env.RACKTOP_VERSION }}_macos-${{ matrix.arch }}-dmg
           if-no-files-found: error
           path: |
-            src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
-            src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.sha256
-            src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.signing.txt
+            src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+            src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.sha256
+            src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.signing.txt
 
       - name: Upload verified macOS updater package
         uses: actions/upload-artifact@v4
         with:
-          name: RackTop_${{ env.RACKTOP_VERSION }}_macos-arm64-updater
+          name: RackTop_${{ env.RACKTOP_VERSION }}_macos-${{ matrix.arch }}-updater
           if-no-files-found: error
           path: |
-            src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app.tar.gz
-            src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app.tar.gz.sig
+            src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz
+            src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz.sig
+
+  publish-macos:
+    if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-linux.')
+    needs: macos
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    concurrency:
+      group: macos-release-feed
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: RackTop_*_macos-*
+          path: release-assets
+          merge-multiple: true
+      - run: sudo apt-get update && sudo apt-get install -y minisign
+      - run: python3 scripts/test-publish-macos-update.py
+      - name: Publish verified release, then update Mac feed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/publish-macos-update.py release-assets
 
   windows:
     if: github.event_name == 'workflow_dispatch' && inputs.build_windows

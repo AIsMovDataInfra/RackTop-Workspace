@@ -3,12 +3,14 @@
 import { StrictMode, act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { openUrl } from '@tauri-apps/plugin-opener'
 import App from '../App'
 import { api } from '../services/api'
 import { loadCachedUpdate, saveCachedUpdate, UPDATE_CHECK_INTERVAL_MS } from '../utils/updateCheck'
 import packageInfo from '../../package.json'
 
 vi.mock('./SshTerminal', () => ({ SshTerminal: () => null }))
+vi.mock('@tauri-apps/plugin-opener', () => ({ openUrl: vi.fn().mockResolvedValue(undefined) }))
 
 ;(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -32,7 +34,9 @@ afterEach(() => {
   root = null
   document.body.innerHTML = ''
   localStorage.clear()
+  Reflect.deleteProperty(window, '__TAURI_INTERNALS__')
   vi.restoreAllMocks()
+  vi.clearAllMocks()
 })
 
 describe('App startup update check', () => {
@@ -69,7 +73,13 @@ describe('App startup update check', () => {
     expect(loadCachedUpdate().lastScheduledCheckAt).toBe(now)
   })
 
-  it('opens the current release notes from the About update row', async () => {
+  it.each([
+    { platform: 'native Mac', desktop: true },
+    { platform: 'Mac browser preview', desktop: false },
+  ])('opens the current release notes from the About row in $platform', async ({ desktop }) => {
+    vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)')
+    // Keep the existing API data fixture; exercise the real platform routing and URL opener.
+    if (desktop) Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: {} })
     vi.spyOn(api, 'getLatestRelease').mockResolvedValue({
       version: '1.25.4',
       url: 'https://github.com/Tongzh-SEU/RackTop/releases/tag/v1.25.4',
@@ -90,20 +100,21 @@ describe('App startup update check', () => {
       .find((button) => button.textContent === '版本说明')
     expect(releaseNotes).toBeDefined()
     await act(async () => releaseNotes?.click())
-    expect(open).toHaveBeenCalledWith(
-      `https://github.com/AIsMovDataInfra/RackTop/releases/tag/v${packageInfo.version}`,
-      '_blank',
-      'noopener,noreferrer',
-    )
+    const repository = desktop || packageInfo.version.includes('-linux.') ? 'AIsMovDataInfra/RackTop' : 'Tongzh-SEU/RackTop'
+    const release = `https://github.com/${repository}/releases/tag/v${packageInfo.version}`
+    if (desktop) {
+      expect(openUrl).toHaveBeenCalledWith(release)
+      expect(open).not.toHaveBeenCalled()
+    } else {
+      expect(open).toHaveBeenCalledWith(release, '_blank', 'noopener,noreferrer')
+      expect(openUrl).not.toHaveBeenCalled()
+    }
     const xiaohongshu = [...container.querySelectorAll<HTMLButtonElement>('button')]
       .find((button) => button.textContent?.includes('小红书'))
     expect(xiaohongshu).toBeDefined()
     await act(async () => xiaohongshu?.click())
-    expect(open).toHaveBeenLastCalledWith(
-      'https://xhslink.cn/o/AsgFqJMZfR5',
-      '_blank',
-      'noopener,noreferrer',
-    )
+    if (desktop) expect(openUrl).toHaveBeenLastCalledWith('https://xhslink.cn/o/AsgFqJMZfR5')
+    else expect(open).toHaveBeenLastCalledWith('https://xhslink.cn/o/AsgFqJMZfR5', '_blank', 'noopener,noreferrer')
   })
 
   it('identifies the current maintainer separately from the original author and opens fork help links', async () => {

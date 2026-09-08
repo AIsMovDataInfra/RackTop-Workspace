@@ -1,3 +1,5 @@
+import { detectAppPlatform } from './platform'
+
 export interface ReleaseInfo {
   version: string
   url: string
@@ -6,7 +8,9 @@ export interface ReleaseInfo {
 
 export function releaseUrl(version: string) {
   const tag = version.replace(/^v/i, '')
-  const repository = tag.includes('-linux.') ? 'AIsMovDataInfra/RackTop' : 'Tongzh-SEU/RackTop'
+  const isDesktop = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
+  const platform = detectAppPlatform(isDesktop, typeof navigator === 'undefined' ? '' : navigator.userAgent)
+  const repository = tag.includes('-linux.') || platform === 'macos' ? 'AIsMovDataInfra/RackTop' : 'Tongzh-SEU/RackTop'
   return `https://github.com/${repository}/releases/tag/v${tag}`
 }
 
