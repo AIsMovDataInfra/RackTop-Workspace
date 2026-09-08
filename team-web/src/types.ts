@@ -16,11 +16,12 @@ export interface BookingDraft { resourceId: string; scope: 'machine' | 'gpus'; g
 export interface ResourceDraft { cluster: string; name: string; gpuModel: string; gpuCount: number; notes: string; enabled?: boolean }
 export type EquipmentStatus = 'available' | 'in_use' | 'maintenance' | 'retired'
 export interface EquipmentDraft {
-  name: string; category: string; model: string; serialNumber: string
-  responsiblePerson: string; location: string; notes: string; status: EquipmentStatus
+  name: string; category: string; model: string
+  responsiblePerson: string; currentUser: string; location: string; notes: string; status: EquipmentStatus
 }
-export interface Equipment extends EquipmentDraft { id: string; code: string; version: number; createdAt: string; updatedAt: string }
+export interface EquipmentPhoto { url: string; width: number; height: number; bytes: number; updatedAt: string }
+export interface Equipment extends EquipmentDraft { id: string; code: string; serialNumber: string; legacySerialNumber?: string | null; photo: EquipmentPhoto | null; version: number; createdAt: string; updatedAt: string }
 export interface EquipmentHistory {
   actorName: string; action: 'created' | 'updated'; at: string
-  changes: { field: string; oldValue: string | null; newValue: string }[]
+  changes: { field: string; oldValue: string | null; newValue: string | null }[]
 }

@@ -4,7 +4,7 @@
 
 ## 构建与安装
 
-在仓库根目录运行 `npm ci`、`npm run team:test`、`npm run team:build`。正式服务使用 `team-web/dist` 的预构建静态网页与 `team-web/server`，不运行 Vite。GitHub 工作流 [team-web.yml](../../.github/workflows/team-web.yml) 的部署归档还包含文档、配置模板和两个运维脚本：
+在仓库根目录运行 `npm ci`、`npm run team:test`、`npm run team:build`。正式服务使用 `team-web/dist` 的预构建静态网页与 `team-web/server`，不运行 Vite。1.29.0 起照片处理使用 sharp，部署时同时复制 `package.json`、`package-lock.json`，在目标架构上执行 `npm ci --omit=dev` 安装运行依赖；不要仅复制服务器脚本。GitHub 工作流 [team-web.yml](../../.github/workflows/team-web.yml) 的部署归档还包含文档、配置模板和两个运维脚本：
 
 - `scripts/team-backup.mjs`：对运行中的 SQLite 做一致性备份。
 - `scripts/team-import-inventory.mjs`：有数据库文件权限的运维人员可做一次性资源清单初始化；普通用户不需要它。
@@ -24,7 +24,7 @@
 
 把 [racktop-team.service](racktop-team.service) 放入 systemd 目录并创建对应低权限用户、持久目录。模板从环境文件读取秘密，仅允许写入持久目录；修改路径时也要同步 `WorkingDirectory`、`ExecStart` 和 `ReadWritePaths`。首次安装或更新服务文件后执行 `systemctl daemon-reload`，随后 `systemctl enable --now racktop-team.service`；只更换构建或环境配置时使用 `systemctl restart racktop-team.service`。
 
-Nginx 的 `/` 与 `/api/` 转发到预约服务；`Host` 与公开站点一致，保留请求路径并覆写 `X-Real-IP` 为真实来源地址。仅在可信本地反向代理下设置 `TEAM_TRUST_PROXY=true`。既有共享中继的 `/v1/…`、`/healthz`、WebSocket 升级以及 ACME / HTTPS 证书续期路由必须保留。预约健康检查是 `/api/health`，不要把共享中继健康检查成功当作预约网页已可用。
+Nginx 的 `/` 与 `/api/` 转发到预约服务；`Host` 与公开站点一致，保留请求路径并覆写 `X-Real-IP` 为真实来源地址。仅在可信本地反向代理下设置 `TEAM_TRUST_PROXY=true`。既有共享中继的 `/v1/…`、`/healthz`、WebSocket 升级以及 ACME / HTTPS 证书续期路由必须保留。预约健康检查是 `/api/health`，不要把共享中继健康检查成功当作预约网页已可用。照片经客户端压缩后以 JSON 上传，预约反代 `location /` 的 `client_max_body_size` 设为 `2m`；普通业务请求仍由 Node 限制为 64 KiB，只有照片 POST 允许 2 MiB。设备照片 GET 也需要成员登录，不得配置 Nginx 公开缓存。
 
 ## 一次性管理员初始化
 
@@ -93,4 +93,10 @@ Nginx 的 `/` 与 `/api/` 转发到预约服务；`Host` 与公开站点一致�
 
 备份脚本检查完整性，包含已提交的 WAL，不覆盖已有文件。恢复时先停服务，恢复一致性快照并核对权限，再启动；单独复制运行中的 `.sqlite` 主文件不可靠。
 
-完成后检查 HTTPS 和 `/api/health`、匿名资源列表、普通账号注册与所有权、管理员资源同步、GPU 冲突和旧版本保护、重启后的记录、备份恢复，以及原共享中继。未经实际执行的检查应记为未验证。日志不要输出环境秘密、请求密码或 Bearer 令牌；访问日志不应记录请求体。
+完成后检查 HTTPS 和 `/api/health`、匿名业务接口拒绝访问与成员资源列表、普通账号注册与所有权、管理员资源同步、GPU 冲突和旧版本保护、重启后的记录、备份恢复，以及原共享中继。未经实际执行的检查应记为未验证。日志不要输出环境秘密、请求密码或 Bearer 令牌；访问日志不应记录请求体。
+
+## 设备照片与迁移
+
+照片在服务器经 [sharp](https://sharp.pixelplumbing.com/api-output/) 解码、按方向旋转和压缩为 JPEG，最长边不超过 1600 像素、每张不超过 512 KiB；原图与 EXIF 元数据不存储。每设备一张，SQLite 的 `equipment_photos` 表保存压缩图片，与现有一致性备份一起保存恢复，无须单独拷贝图片目录。
+
+升级前应备份 `team.sqlite`。旧设备 UUID/二维码不变，按创建顺序补齐不可修改的 8 位序列号，旧自由序列号保留在 `legacySerialNumber`；旧类别和位置不猜测映射，成员下次编辑时须选择支持的枚举。新建或编辑、照片上传与归还都使用相同设备版本，冲突须读取最新版后重试。预约、设备、照片接口均仅向已登录团队成员提供内容；静态登录壳与注册接口仍可公开访问。

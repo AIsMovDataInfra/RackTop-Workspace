@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { api, ApiError } from './api'
+import { api, ApiError, SESSION_EXPIRED_EVENT } from './api'
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -32,4 +32,24 @@ describe('authenticated reservation API', () => {
       headers: expect.objectContaining({ 'Content-Type': 'application/json', 'X-CSRF-Token': 'logout-token' }),
     }))
   })
+  it('expires protected sessions on 401 but keeps credential errors in the sign-in form', async () => {
+    const expired = vi.fn(); window.addEventListener(SESSION_EXPIRED_EVENT, expired)
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => new Response(JSON.stringify({ error: { code: 'INVALID_CREDENTIALS', message: 'Invalid credentials' } }), { status: 401 })))
+    try {
+      await expect(api.login({ username: 'member', password: 'wrong' })).rejects.toBeInstanceOf(ApiError)
+      await expect(api.changePassword({ oldPassword: 'wrong', newPassword: 'new' })).rejects.toBeInstanceOf(ApiError)
+      expect(expired).not.toHaveBeenCalled()
+      await expect(api.equipment()).rejects.toBeInstanceOf(ApiError)
+      expect(expired).toHaveBeenCalledOnce()
+    } finally { window.removeEventListener(SESSION_EXPIRED_EVENT, expired) }
+  })
+  it('sends the current version and CSRF when saving or deleting a photo and bypasses read caches', async () => {
+    const fetch = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ user: { id: 'member' }, csrfToken: 'photo-csrf' }))).mockResolvedValueOnce(new Response(JSON.stringify({ equipment: { id: 'photo-device' } }))).mockResolvedValueOnce(new Response(JSON.stringify({ equipment: { id: 'photo-device' } }))).mockResolvedValueOnce(new Response('jpeg', { headers: { 'Content-Type': 'image/jpeg' } }))
+    vi.stubGlobal('fetch', fetch)
+    await api.session(); await api.setEquipmentPhoto('photo-device', 4, 'data:image/jpeg;base64,cGhvdG8='); await api.deleteEquipmentPhoto('photo-device', 5); await api.equipmentPhoto('photo-device', 6)
+    expect(fetch.mock.calls[1]).toEqual(['/api/equipment/photo-device/photo', expect.objectContaining({ method: 'POST', body: JSON.stringify({ version: 4, dataUrl: 'data:image/jpeg;base64,cGhvdG8=' }), headers: expect.objectContaining({ 'X-CSRF-Token': 'photo-csrf' }) })])
+    expect(fetch.mock.calls[2]).toEqual(['/api/equipment/photo-device/photo', expect.objectContaining({ method: 'DELETE', body: '{"version":5}', headers: expect.objectContaining({ 'X-CSRF-Token': 'photo-csrf' }) })])
+    expect(fetch).toHaveBeenLastCalledWith('/api/equipment/photo-device/photo?v=6', { credentials: 'same-origin', cache: 'no-store' })
+  })
+
 })

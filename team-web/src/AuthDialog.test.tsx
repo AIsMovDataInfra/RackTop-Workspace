@@ -25,18 +25,15 @@ async function submit() { await act(async () => container.querySelector('form')!
 function mockCatalog() { vi.spyOn(api, 'resources').mockResolvedValue({ resources: [resource] }); return vi.spyOn(api, 'reservations').mockResolvedValue({ reservations: [] }) }
 
 describe('username accounts and public browsing', () => {
-  it('allows anonymous schedules without a mine request and requires sign-in for booking', async () => {
+  it('shows the login gate without fetching resources or schedules for anonymous visitors', async () => {
     const reservations = mockCatalog()
-    await act(async () => root.render(<Workspace session={anonymous} state={state} onSessionExpired={vi.fn()} onLogout={vi.fn()} />))
-    expect(container.textContent).toContain('同步 A100')
-    expect(container.textContent).toContain('状态未知')
-    expect(container.textContent).toContain('80 GiB')
-    expect(reservations.mock.calls.every(([options]) => !options?.mine)).toBe(true)
-    expect(container.querySelector('nav')?.textContent).not.toContain('资源管理')
-    await click('预约')
-    expect(container.querySelector('[role="dialog"] h2')?.textContent).toBe('登录')
-    expect(document.activeElement).toBe(container.querySelector('input[name="username"]'))
-    expect(container.querySelector('textarea')).toBeNull()
+    vi.spyOn(api, 'session').mockResolvedValue(anonymous)
+    await act(async () => root.render(<App />))
+    expect(container.textContent).not.toContain('同步 A100')
+    expect(reservations).not.toHaveBeenCalled()
+    expect(api.resources).not.toHaveBeenCalled()
+    expect(container.querySelector('input[name="username"]')).not.toBeNull()
+    expect(container.querySelector('nav')).toBeNull()
   })
 
   it('registers the fixed name and username or storing a password', async () => {
@@ -101,9 +98,9 @@ describe('username accounts and public browsing', () => {
   it('resumes the same GPU reservation after username login', async () => {
     mockCatalog(); vi.spyOn(api, 'session').mockResolvedValue(anonymous); vi.spyOn(api, 'login').mockResolvedValue(member)
     await act(async () => root.render(<App />))
-    await act(async () => container.querySelector<HTMLButtonElement>('.gpu-tile')!.click())
     enter('username', 'test-member'); enter('password', 'safe-password-test')
     await act(async () => container.querySelector('.dialog form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })))
+    await act(async () => container.querySelector<HTMLButtonElement>('.gpu-tile')!.click())
     expect(container.querySelector('[role="dialog"] h2')?.textContent).toBe('新建预约')
     expect(container.querySelector('[role="dialog"]')?.textContent).toContain('同步 A100')
     expect(container.querySelector<HTMLInputElement>('.gpu-picker input:checked')?.parentElement?.textContent).toContain('GPU 2')
@@ -116,7 +113,7 @@ describe('username accounts and public browsing', () => {
     const register = vi.spyOn(api, 'register').mockResolvedValue(member)
     await act(async () => root.render(<App />))
     expect(window.location.hash).toBe('')
-    expect(container.querySelector('[role="dialog"] h2')?.textContent).toBe('创建管理员账号')
+    expect(container.querySelector('.login-auth h2')?.textContent).toBe('创建管理员账号')
     expect(container.textContent).not.toContain('test-bootstrap-secret')
     enter('username', 'test-admin'); enter('name', '管理员'); enter('password', 'safe-password-test')
     await act(async () => container.querySelector('.dialog form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })))

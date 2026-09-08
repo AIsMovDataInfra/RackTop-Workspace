@@ -2,9 +2,9 @@
 
 **AIsMov** maintains this project, with source code, feature development and Linux / macOS releases hosted at [AIsMovDataInfra/RackTop](https://github.com/AIsMovDataInfra/RackTop). This fork was initially based on official [Tongzh-SEU/RackTop](https://github.com/Tongzh-SEU/RackTop) **v1.25.4**. **Tongzh-SEU** remains the original author. Development and releases continue as an independent community fork, preserving upstream Git history, attribution and the [GPL-3.0 license](LICENSE).
 
-This Linux pre-release is **1.28.0-linux.10**, targeting **Ubuntu 22.04 x86_64 / amd64 desktops**. Use the download links below; the corresponding Release assets show build and publication availability. See the [changelog](docs/VERSION_INFOS.md) for changes. The upstream feature guide and screenshots appear below; see [Linux validation and limitations](docs/LINUX.md#验证范围) for the scope tested on Linux.
+This Linux pre-release is **1.29.0-linux.11**, targeting **Ubuntu 22.04 x86_64 / amd64 desktops**. Use the download links below; the corresponding Release assets show build and publication availability. See the [changelog](docs/VERSION_INFOS.md) for changes. The upstream feature guide and screenshots appear below; see [Linux validation and limitations](docs/LINUX.md#验证范围) for the scope tested on Linux.
 
-The maintained macOS **1.28.0** release supports Apple Silicon and Intel. It includes the fork's local SSH key manager, sharing gateway, invitations, guest terminals and file access, online team reservations, and a QR equipment inventory entry. See the [macOS guide](docs/MACOS.md) for download status, first launch and validation scope.
+The maintained macOS **1.29.0** release supports Apple Silicon and Intel. It includes the fork's local SSH key manager, sharing gateway, invitations, guest terminals and file access, online team reservations, and a QR equipment inventory entry. See the [macOS guide](docs/MACOS.md) for download status, first launch and validation scope.
 
 The [team reservation web app](team-web/README.md) supports whole-machine and selected-GPU bookings, conflict checks, renewals, cancellation and an administrator resource catalog. Anyone can browse the public schedule; booking requires a username and password, with no email or Feishu account needed. RackTop’s Team Reservations entry connects to the same central service, and administrators can select desktop servers to synchronize GPU inventories. The web and desktop views share resources and bookings; synchronization does not upload SSH host addresses, login credentials or private keys. Production uses HTTPS. Feishu login and group notifications remain optional, and clearly labeled local demos are not suitable for production. Reservations do not lock GPUs or stop training processes. Run `npm ci` and `npm run team:dev` with Node.js 24+ to try it locally.
 
@@ -47,19 +47,19 @@ Find the right GPU before launching a job, monitor resources and processes while
 
 | Client platform | Publisher | Installer |
 | --- | --- | --- |
-| **Ubuntu 22.04 x86_64 / amd64** | **AIsMov community pre-release 1.28.0-linux.10** | [Linux .deb](https://github.com/AIsMovDataInfra/RackTop/releases/download/v1.28.0-linux.10/RackTop_1.28.0-linux.10_amd64.deb) · [Release notes, source and checksums](https://github.com/AIsMovDataInfra/RackTop/releases/tag/v1.28.0-linux.10) |
-| macOS Apple Silicon (M series) | AIsMov community pre-release 1.28.0 | [Download arm64 .dmg](https://github.com/AIsMovDataInfra/RackTop/releases/download/v1.28.0/RackTop_1.28.0_macos-arm64-unsigned.dmg) |
-| macOS Intel | AIsMov community pre-release 1.28.0 | [Download x64 .dmg](https://github.com/AIsMovDataInfra/RackTop/releases/download/v1.28.0/RackTop_1.28.0_macos-x64-unsigned.dmg) |
+| **Ubuntu 22.04 x86_64 / amd64** | **AIsMov community pre-release 1.29.0-linux.11** | [Linux .deb](https://github.com/AIsMovDataInfra/RackTop/releases/download/v1.29.0-linux.11/RackTop_1.29.0-linux.11_amd64.deb) · [Release notes, source and checksums](https://github.com/AIsMovDataInfra/RackTop/releases/tag/v1.29.0-linux.11) |
+| macOS Apple Silicon (M series) | AIsMov community pre-release 1.29.0 | [Download arm64 .dmg](https://github.com/AIsMovDataInfra/RackTop/releases/download/v1.29.0/RackTop_1.29.0_macos-arm64-unsigned.dmg) |
+| macOS Intel | AIsMov community pre-release 1.29.0 | [Download x64 .dmg](https://github.com/AIsMovDataInfra/RackTop/releases/download/v1.29.0/RackTop_1.29.0_macos-x64-unsigned.dmg) |
 | Windows x64 | Tongzh-SEU official v1.25.4 | [Official installer](https://github.com/Tongzh-SEU/RackTop/releases/download/v1.25.4/RackTop_1.25.4_x64-setup.exe) |
 
-macOS installers and checksums are provided through the [v1.28.0 Release](https://github.com/AIsMovDataInfra/RackTop/releases/tag/v1.28.0). These DMGs use ad-hoc signing and are not notarized by Apple. First launch may require **System Settings → Privacy & Security → Open Anyway**; follow the [installation guide](docs/MACOS.md#安装与首次打开). Windows downloads remain hosted by the original project's [upstream Releases](https://github.com/Tongzh-SEU/RackTop/releases).
+macOS installers and checksums are provided through the [v1.29.0 Release](https://github.com/AIsMovDataInfra/RackTop/releases/tag/v1.29.0). These DMGs use ad-hoc signing and are not notarized by Apple. First launch may require **System Settings → Privacy & Security → Open Anyway**; follow the [installation guide](docs/MACOS.md#安装与首次打开). Windows downloads remain hosted by the original project's [upstream Releases](https://github.com/Tongzh-SEU/RackTop/releases).
 
 Linux packages are available from [this repository's Releases](https://github.com/AIsMovDataInfra/RackTop/releases) and require one manual installation when upgrading from linux.1–linux.3. From linux.4 onward, the app can check for and install subsequent signed updates.
 
 Install the downloaded package from its directory:
 
 ```bash
-sudo apt install ./RackTop_1.28.0-linux.10_amd64.deb
+sudo apt install ./RackTop_1.29.0-linux.11_amd64.deb
 racktop
 ```
 

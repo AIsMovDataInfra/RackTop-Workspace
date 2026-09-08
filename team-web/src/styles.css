@@ -420,3 +420,23 @@ legend { margin-bottom: 10px; color: var(--muted); font-size: .88rem; }
   body.equipment-label-open .equipment-print-label { width: 70mm; max-width: none; padding: 5mm; margin: 0; break-inside: avoid; }
   body.equipment-label-open .equipment-print-label img { width: 50mm; height: 50mm; }
 }
+
+.member-login { display: grid; gap: 24px; width: min(500px, 100%); }
+.member-login > .brand { justify-content: center; }
+.login-auth { width: 100%; max-height: none; box-shadow: 0 12px 40px rgba(28,32,40,.06); }
+.login-auth .dialog-body { overflow: visible; }
+.equipment-legacy { display: block; margin-top: 5px; color: var(--orange); font-size: .8rem; }
+.equipment-photo { display: grid; gap: 14px; padding: 20px 0; margin: 20px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+.equipment-photo h3 { margin: 0; font-size: 1rem; }
+.equipment-photo-image { display: block; width: 100%; max-width: 560px; max-height: 380px; object-fit: contain; object-position: left center; border-radius: 8px; background: var(--canvas); }
+.equipment-photo-empty { display: flex; align-items: center; gap: 12px; min-height: 92px; padding: 18px; border: 1px dashed var(--border); border-radius: 8px; color: var(--muted); background: var(--canvas); font-size: .86rem; }
+.equipment-photo-actions, .equipment-photo-confirm { display: flex; flex-wrap: wrap; gap: 9px; }
+.equipment-photo-confirm { align-items: center; }
+.equipment-photo-confirm > span { flex-basis: 100%; }
+.equipment-file-input { display: none; }
+@media (max-width: 700px) {
+  .member-login-shell { padding: 76px 16px 24px; align-items: start; }
+  .equipment-photo-image { max-height: 280px; }
+  .equipment-photo-actions button { min-height: 42px; }
+  .equipment-photo-empty { flex-wrap: wrap; }
+}

@@ -11,7 +11,8 @@ ENV NODE_ENV=production TEAM_AUTH_MODE=feishu TEAM_HOST=0.0.0.0 TEAM_PORT=4318 T
 WORKDIR /app
 COPY --from=build /app/team-web/dist ./team-web/dist
 COPY team-web/server ./team-web/server
-COPY package.json LICENSE NOTICE.md ./
+COPY package.json package-lock.json LICENSE NOTICE.md ./
+RUN npm ci --omit=dev && npm cache clean --force
 COPY scripts/team-backup.mjs ./scripts/team-backup.mjs
 RUN mkdir /data && chown node:node /data
 USER node

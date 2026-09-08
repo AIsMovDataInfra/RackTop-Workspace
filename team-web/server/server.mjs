@@ -7,6 +7,7 @@ import { createAuth } from './auth.mjs';
 import { createAccountAuth } from './account-auth.mjs';
 import { createNotifier } from './notifier.mjs';
 import { createEquipmentStore } from './equipment-store.mjs';
+import { compressEquipmentPhoto, validatePhotoBody } from './equipment-photo.mjs';
 
 const directory = dirname(fileURLToPath(import.meta.url));
 const mimeTypes = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.ico': 'image/x-icon', '.woff': 'font/woff', '.woff2': 'font/woff2' };
@@ -45,25 +46,12 @@ function validateConfig(config) {
   return publicUrl;
 }
 
-// Explicit public projections prevent future store fields from accidentally becoming public.
-function publicResource(value) {
-  const { id, cluster, name, gpuModel, gpuCount, enabled, inventoryVersion, inventoryState, lastSeenAt, observedAt, status } = value;
-  return { id, cluster, name, gpuModel, gpuCount, enabled, notes: '', inventoryVersion, inventoryState, lastSeenAt, observedAt, status,
-    gpus: (value.gpus ?? []).map(({ id: gpuId, uuid, index, model, memoryTotalMb }) => ({ id: gpuId, uuid, index, model, memoryTotalMb })) };
-}
-function publicReservation(value) {
-  const { id, resourceId, resourceName, cluster, ownerName, scope, gpuIndices, gpuIds, inventoryVersion,
-    startAt, endAt, status, createdAt, updatedAt, version, plannedEndAt } = value;
-  return { id, resourceId, resourceName, cluster, ownerName, ownerId: '', scope, gpuIndices, gpuIds, inventoryVersion,
-    startAt, endAt, purpose: '', status, createdAt, updatedAt, version, plannedEndAt };
-}
-
 function securityHeaders(res) {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('Referrer-Policy', 'same-origin');
-  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
-  res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'");
+  res.setHeader('Permissions-Policy', 'camera=(self), microphone=(), geolocation=()');
+  res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'");
 }
 function json(res, status, body) {
   res.statusCode = status;
@@ -77,15 +65,15 @@ function errorResponse(res, error) {
   const safe = status < 500;
   json(res, status, { error: { code: safe ? (error.code || 'REQUEST_FAILED') : (status === 503 ? 'SERVICE_UNAVAILABLE' : 'INTERNAL_ERROR'), message: safe ? error.message : (status === 503 ? '服务暂时繁忙，请稍后重试' : '服务暂时无法完成请求，请稍后重试'), ...(safe && error.conflicts ? { conflicts: error.conflicts } : {}) } });
 }
-async function readBody(req) {
+async function readBody(req, limit = 64 * 1024) {
   if (!['POST', 'PATCH', 'PUT', 'DELETE'].includes(req.method)) return undefined;
   const declared = Number(req.headers['content-length'] || 0);
-  if (!Number.isFinite(declared) || declared > 64 * 1024) throw new ApiError(413, 'BODY_TOO_LARGE', '请求内容超过 64 KB');
+  if (!Number.isFinite(declared) || declared > limit) throw new ApiError(413, 'BODY_TOO_LARGE', `请求内容超过 ${limit / 1024} KB`);
   if (!/^application\/json(?:\s*;|$)/i.test(req.headers['content-type'] || '')) throw new ApiError(415, 'UNSUPPORTED_MEDIA_TYPE', '请使用 application/json 请求格式');
   const chunks = []; let size = 0;
   for await (const chunk of req) {
     size += chunk.length;
-    if (size > 64 * 1024) throw new ApiError(413, 'BODY_TOO_LARGE', '请求内容超过 64 KB');
+    if (size > limit) throw new ApiError(413, 'BODY_TOO_LARGE', `请求内容超过 ${limit / 1024} KB`);
     chunks.push(chunk);
   }
   let body;
@@ -103,7 +91,8 @@ export function createTeamServer(overrides = {}) {
   const store = config.store || createStore({ dbPath: config.dbPath, now: config.now, notificationsConfigured: config.notificationsConfigured });
   const equipmentStore = createEquipmentStore({ dbPath: config.dbPath, now: config.now });
   if (config.mode === 'demo' && config.seedDemo !== false) store.seedDemo();
-  let timer, closing = false, notificationRun = null;
+  let timer, closing = false, notificationRun = null, closeRun = null;
+  const handlers = new Set();
   let listenAuthority;
 
   function checkOriginAndHost(req) {
@@ -151,47 +140,71 @@ export function createTeamServer(overrides = {}) {
       if (rawPath.includes('\0') || rawPath.includes('\\') || rawPath.split('/').includes('..')) throw new ApiError(400, 'INVALID_PATH', '请求路径无效');
       const url = new URL(req.url, publicUrl);
       if (url.pathname === '/api/health' && req.method === 'GET') { json(res, 200, { ok: true }); return; }
-      const body = await readBody(req);
+      const photoMatch = /^\/api\/equipment\/([^/]+)\/photo$/.exec(url.pathname);
+      // Reject unauthenticated uploads before buffering image data.
+      if (photoMatch && ['POST', 'DELETE'].includes(req.method)) {
+        const candidate = auth.resolve(req);
+        if (!candidate?.user) throw new ApiError(401, 'UNAUTHENTICATED', '请先登录');
+        if (!['member', 'admin'].includes(candidate.user.role)) throw new ApiError(403, 'FORBIDDEN', '仅团队成员可以使用此服务');
+        auth.verifyWrite(req, candidate);
+      }
+      const body = await readBody(req, photoMatch && req.method === 'POST' ? 2 * 1024 * 1024 : 64 * 1024);
       if (await auth.handle(req, res, url, body)) return;
       if (!url.pathname.startsWith('/api/')) { await serveStatic(req, res, url); return; }
       const session = auth.resolve(req);
-      // A rejected device credential must not silently become a public visitor.
-      if (req.headers.authorization !== undefined && !session?.user) throw new ApiError(401, 'UNAUTHENTICATED', '设备登录已过期，请重新登录');
+      // Every business route, including equipment and photos, requires membership.
+      if (!session?.user) throw new ApiError(401, 'UNAUTHENTICATED', '请先登录');
+      const user = session.user;
+      if (!['member', 'admin'].includes(user.role)) throw new ApiError(403, 'FORBIDDEN', '仅团队成员可以使用此服务');
+      if (['POST', 'PATCH', 'PUT', 'DELETE'].includes(req.method)) auth.verifyWrite(req, session);
+      if (photoMatch) {
+        for (const key of url.searchParams.keys()) {
+          if (key !== 'v' || url.searchParams.getAll(key).length !== 1 || !/^[1-9][0-9]{0,15}$/.test(url.searchParams.get(key))) throw new ApiError(422, 'INVALID_INPUT', '照片查询参数无效');
+        }
+        const id = photoMatch[1];
+        if (req.method === 'GET') {
+          const photo = equipmentStore.getPhoto(id);
+          if (!photo) throw new ApiError(404, 'PHOTO_NOT_FOUND', '设备尚未上传照片');
+          res.statusCode = 200;
+          res.setHeader('Content-Type', 'image/jpeg');
+          res.setHeader('Cache-Control', 'no-store');
+          res.setHeader('Content-Length', photo.bytes.length);
+          res.end(photo.bytes); return;
+        }
+        if (req.method === 'POST') {
+          validatePhotoBody(body);
+          const current = equipmentStore.get(id).equipment;
+          if (current.version !== body.version) throw new ApiError(409, 'VERSION_CONFLICT', '设备已被其他人修改，请刷新后重新编辑');
+          const photo = await compressEquipmentPhoto(body.dataUrl);
+          if (closing || res.destroyed) {
+            // An open response must end so server.close can finish draining its
+            // socket; disconnected requests simply stop before touching state.
+            if (!res.destroyed) errorResponse(res, new ApiError(503, 'SERVER_CLOSING', '服务正在关闭，请稍后重试'));
+            return;
+          }
+          // Compression yields to other requests; recheck both the grant and CAS.
+          const active = auth.resolve(req);
+          if (!active?.user || active.user.id !== user.id) throw new ApiError(401, 'UNAUTHENTICATED', '登录已失效，请重新登录');
+          if (!['member', 'admin'].includes(active.user.role)) throw new ApiError(403, 'FORBIDDEN', '仅团队成员可以使用此服务');
+          auth.verifyWrite(req, active);
+          json(res, 200, { equipment: equipmentStore.setPhoto(id, { version: body.version, ...photo }, active.user) }); return;
+        }
+        if (req.method === 'DELETE') {
+          validatePhotoBody(body, false);
+          json(res, 200, { equipment: equipmentStore.removePhoto(id, body, user) }); return;
+        }
+        throw new ApiError(405, 'METHOD_NOT_ALLOWED', '照片仅支持查看、上传和移除');
+      }
       const equipmentMatch = /^\/api\/equipment\/([^/]+)$/.exec(url.pathname);
       if (url.pathname === '/api/equipment' || equipmentMatch) {
         if ([...url.searchParams].length) throw new ApiError(422, 'INVALID_INPUT', '设备接口不支持查询参数');
         if (req.method === 'GET') {
           json(res, 200, equipmentMatch ? equipmentStore.get(equipmentMatch[1]) : { equipment: equipmentStore.list() }); return;
         }
-        if (!session?.user) throw new ApiError(401, 'UNAUTHENTICATED', '请先登录');
-        if (['POST', 'PATCH', 'PUT', 'DELETE'].includes(req.method)) auth.verifyWrite(req, session);
         if (!equipmentMatch && req.method === 'POST') { json(res, 201, { equipment: equipmentStore.create(body, session.user) }); return; }
         if (equipmentMatch && req.method === 'PATCH') { json(res, 200, { equipment: equipmentStore.update(equipmentMatch[1], body, session.user) }); return; }
         throw new ApiError(405, 'METHOD_NOT_ALLOWED', '设备仅支持查看、新建和修改，请将停用设备标为已退役');
       }
-      // Account mode has an intentionally public, read-only team schedule. No member
-      // credentials, reservation purposes or resource notes leave this projection.
-      if (!session?.user && config.mode === 'account' && req.method === 'GET') {
-        if (url.pathname === '/api/resources') {
-          json(res, 200, { resources: store.listResources().filter(r => r.enabled).map(publicResource) }); return;
-        }
-        if (url.pathname === '/api/reservations') {
-          for (const key of url.searchParams.keys()) if (!['from', 'to', 'mine'].includes(key) || url.searchParams.getAll(key).length > 1) throw new ApiError(422, 'INVALID_INPUT', '查询参数无效');
-          if (url.searchParams.get('mine') === 'true') throw new ApiError(401, 'UNAUTHENTICATED', '请先登录');
-          const visible = new Set(store.listResources().filter(r => r.enabled).map(r => r.id));
-          const list = store.listReservations(Object.fromEntries(url.searchParams), {id:'public-view',name:'访客',role:'member'}).filter(r => visible.has(r.resourceId));
-          json(res, 200, { reservations: list.map(publicReservation) }); return;
-        }
-        const detail = /^\/api\/reservations\/([a-zA-Z0-9_-]{1,100})$/.exec(url.pathname);
-        if (detail) {
-          const value = store.getReservation(detail[1]);
-          if (!store.getResource(value.resourceId).enabled) throw new ApiError(404, 'NOT_FOUND', '找不到预约');
-          json(res, 200, { reservation: publicReservation(value) }); return;
-        }
-      }
-      if (!session?.user) throw new ApiError(401, 'UNAUTHENTICATED', '请先登录');
-      if (['POST', 'PATCH', 'PUT', 'DELETE'].includes(req.method)) auth.verifyWrite(req, session);
-      const user = session.user;
       if (url.pathname === '/api/resources/sync' && req.method === 'POST') {
         json(res, 200, { resource: store.syncResource(body, user) }); return;
       }
@@ -222,7 +235,13 @@ export function createTeamServer(overrides = {}) {
     } catch (error) { errorResponse(res, error); }
   }
 
-  const server = createServer((req, res) => { void handle(req, res); });
+  const server = createServer((req, res) => {
+    const handler = handle(req, res);
+    handlers.add(handler);
+    // Both branches consume settlement; unlike an ignored .finally(), this
+    // does not create an unhandled rejected promise if response writing fails.
+    void handler.then(() => handlers.delete(handler), () => handlers.delete(handler));
+  });
   server.requestTimeout = 15_000;
   server.headersTimeout = 10_000;
   server.keepAliveTimeout = 5000;
@@ -259,13 +278,19 @@ export function createTeamServer(overrides = {}) {
     void processNotifications().catch(() => {});
     return { host: config.host, port: address.port, publicUrl: publicUrl.origin };
   }
-  async function close() {
-    if (closing) return;
+  function close() {
+    if (closeRun) return closeRun;
     closing = true;
     clearInterval(timer);
-    await new Promise(resolveClose => { server.close(() => resolveClose()); server.closeIdleConnections(); });
-    if (notificationRun) await notificationRun.catch(() => {});
-    auth.close(); equipmentStore.close(); store.close();
+    closeRun = (async () => {
+      await new Promise(resolveClose => { server.close(() => resolveClose()); server.closeIdleConnections(); });
+      // Closing sockets does not await asynchronous work from clients that
+      // disconnected. Keep auth and SQLite alive until those handlers settle.
+      while (handlers.size) await Promise.allSettled([...handlers]);
+      if (notificationRun) await notificationRun.catch(() => {});
+      auth.close(); equipmentStore.close(); store.close();
+    })();
+    return closeRun;
   }
   return { config, server, store, auth, start, close, processNotifications };
 }
