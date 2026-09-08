@@ -1,13 +1,13 @@
 # Linux 客户端（实验版）
 
-此社区 fork 最初基于上游 RackTop v1.25.4，提供 Ubuntu 22.04 x86_64 的原生 Linux 桌面构建。本次 Linux 测试版为 `1.26.0-linux.9`，下载和发布状态以对应 Release 的实际附件为准。这是由 [AIsMovDataInfra/RackTop](https://github.com/AIsMovDataInfra/RackTop) 分发的社区移植版本，不是上游官方 Linux Release。原作者为 Tongzh-SEU，许可证为 GPL-3.0。
+此社区 fork 最初基于上游 RackTop v1.25.4，提供 Ubuntu 22.04 x86_64 的原生 Linux 桌面构建。本次 Linux 测试版为 `1.28.0-linux.10`，下载和发布状态以对应 Release 的实际附件为准。这是由 [AIsMovDataInfra/RackTop](https://github.com/AIsMovDataInfra/RackTop) 分发的社区移植版本，不是上游官方 Linux Release。原作者为 Tongzh-SEU，许可证为 GPL-3.0。
 
 ## 安装与启动
 
 从 [Linux Release](https://github.com/AIsMovDataInfra/RackTop/releases) 下载 `.deb` 后，在其所在目录执行（将文件名替换为实际下载的文件名）：
 
 ```bash
-sudo apt install ./RackTop_1.26.0-linux.9_amd64.deb
+sudo apt install ./RackTop_1.28.0-linux.10_amd64.deb
 racktop
 ```
 
@@ -34,9 +34,9 @@ linux.1～linux.3 的旧更新模块需要先手动安装一次 linux.4 或更�
 
 ```bash
 # TAURI_SIGNING_PRIVATE_KEY_PATH 指向受保护的私钥文件；不要将内容写进命令或日志。
-python3 scripts/sign-linux-update.py src-tauri/target/release/bundle/deb/RackTop_1.26.0-linux.9_amd64.deb
+python3 scripts/sign-linux-update.py src-tauri/target/release/bundle/deb/RackTop_1.28.0-linux.10_amd64.deb
 cargo build --release --locked --features integration-probe --bin racktop-probe --manifest-path src-tauri/Cargo.toml
-python3 scripts/test-linux-update.py src-tauri/target/release/racktop-probe src-tauri/target/release/bundle/deb/RackTop_1.26.0-linux.9_amd64.deb
+python3 scripts/test-linux-update.py src-tauri/target/release/racktop-probe src-tauri/target/release/bundle/deb/RackTop_1.28.0-linux.10_amd64.deb
 ```
 
 ## 分享 SSH 连接与失败重试
@@ -90,7 +90,11 @@ npm run bundle:linux -- --locked
 
 产物位于 `src-tauri/target/release/bundle/deb/`，并附 SHA-256 文件。Tauri 会自动合并 `src-tauri/tauri.linux.conf.json`。普通本地构建不需要私钥；发布流程另外为 `.deb` 签名，签名不使用上游密钥。
 
-`.github/workflows/build.yml` 同时提供 Ubuntu 22.04 构建、测试和启动烟雾检查。推送已合并到 `main` 的 `v*-linux.*` 标签时自动构建、签名并发布 Linux；手动运行默认只构建 Linux，不推进更新通道。Windows/macOS 用户使用上游官方安装包。
+`.github/workflows/build.yml` 同时提供 Ubuntu 22.04 构建、测试和启动烟雾检查。推送已合并到 `main` 的 `v*-linux.*` 标签时自动构建、签名并发布 Linux；手动运行默认只构建 Linux，不推进更新通道。Mac 用户使用本 fork 的双架构安装包，Windows 使用上游官方安装包。
+
+## 设备管理
+
+桌面侧栏的「设备管理」位于「密钥管理」与「日志」之间，打开 [在线设备工作台](https://136.0.110.161/equipment)。扫码登记、打印标签和字段说明见 [设备管理指南](EQUIPMENT.md)。
 
 ## 验证范围
 
