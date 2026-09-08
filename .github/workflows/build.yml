@@ -140,6 +140,7 @@ jobs:
           RACKTOP_VERSION="$(node -p "require('./package.json').version")"
           echo "RACKTOP_VERSION=$RACKTOP_VERSION" >> "$GITHUB_ENV"
       - run: npm run test
+      - run: npm run build
       - run: cargo test --manifest-path src-tauri/Cargo.toml --locked --release --lib --target ${{ matrix.target }}
 
       - name: Import Apple Developer ID certificate
