@@ -1,0 +1,105 @@
+name: Recover verified Mac release publication
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag (for example v1.27.0)
+        required: true
+        type: string
+      build_run_id:
+        description: Existing Build RackTop tag run with both Mac jobs successful
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: macos-release-feed
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.repository == 'AIsMovDataInfra/RackTop'
+    runs-on: ubuntu-24.04
+    env:
+      RELEASE_TAG: ${{ inputs.tag }}
+      BUILD_RUN_ID: ${{ inputs.build_run_id }}
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_REPOSITORY: ${{ github.repository }}
+      RECOVERY_WORKFLOW_REF: ${{ github.workflow_ref }}
+      RECOVERY_WORKFLOW_SHA: ${{ github.workflow_sha }}
+    steps:
+      - name: Validate recovery inputs before checkout
+        run: |
+          python3 - <<'PY'
+          import os, re
+          if not re.fullmatch(r'v[0-9]+\.[0-9]+\.[0-9]+', os.environ['RELEASE_TAG']):
+              raise SystemExit('Expected a neutral version tag: vX.Y.Z')
+          if not re.fullmatch(r'[0-9]+', os.environ['BUILD_RUN_ID']):
+              raise SystemExit('Expected a numeric build run ID')
+          print('Recovery workflow:', os.environ['RECOVERY_WORKFLOW_REF'])
+          print('Recovery workflow commit:', os.environ['RECOVERY_WORKFLOW_SHA'])
+          PY
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ inputs.tag }}
+          fetch-depth: 0
+      - name: Verify original tag build and both Mac architectures
+        run: |
+          python3 - <<'PY'
+          import json, os, re, subprocess
+          repository = os.environ['RELEASE_REPOSITORY']
+          tag = os.environ['RELEASE_TAG']
+          run_id = os.environ['BUILD_RUN_ID']
+          def api(path):
+              return json.loads(subprocess.check_output(['gh', 'api', f'repos/{repository}/{path}'], text=True))
+          def require(condition, message):
+              if not condition:
+                  raise SystemExit(message)
+          commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          tag_commit = subprocess.check_output(['git', 'rev-parse', f'refs/tags/{tag}^{{commit}}'], text=True).strip()
+          require(commit == tag_commit, 'Checkout does not match the requested tag')
+          build = api(f'actions/runs/{run_id}')
+          require(build['repository']['full_name'] == repository, 'Build belongs to a different repository')
+          require(build['path'] == '.github/workflows/build.yml', 'Build did not use the release build workflow')
+          require(build['event'] == 'push' and build['head_branch'] == tag, 'Build was not a push of this version tag')
+          require(build['head_sha'] == commit, 'Build commit does not match the immutable version tag')
+          require(build['status'] == 'completed', 'Build run is still in progress')
+          jobs = []
+          page = 1
+          while True:
+              batch = api(f'actions/runs/{run_id}/jobs?filter=latest&per_page=100&page={page}')['jobs']
+              jobs.extend(batch)
+              if len(batch) < 100:
+                  break
+              page += 1
+          for target, arch in [('aarch64-apple-darwin', 'arm64'), ('x86_64-apple-darwin', 'x64')]:
+              pattern = rf'macos \([^,]+, {re.escape(target)}, {arch}\)'
+              matches = [job for job in jobs if re.fullmatch(pattern, job['name'])]
+              require(len(matches) == 1, f'Expected exactly one Mac {arch} build job')
+              require(matches[0]['status'] == 'completed' and matches[0]['conclusion'] == 'success',
+                      f'Mac {arch} build did not succeed')
+          print(f'Verified {repository} tag {tag} at {commit}; both Mac jobs succeeded in run {run_id}')
+          PY
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.build_run_id }}
+          pattern: RackTop_*_macos-*
+          path: release-assets
+          merge-multiple: true
+      - name: Install release signature verifier
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y minisign
+      - run: python3 scripts/test-publish-macos-update.py
+      - name: Publish the verified existing tag artifacts
+        run: |
+          # This is recovery of the verified tag, not a new push or a moved tag.
+          # The original workflow_dispatch ref/SHA remains in the audit log above;
+          # only the existing tag publisher receives its validated release ref.
+          GITHUB_REF="refs/tags/$RELEASE_TAG" python3 scripts/publish-macos-update.py release-assets
