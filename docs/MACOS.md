@@ -1,6 +1,6 @@
 # macOS 安装与构建说明
 
-RackTop 的 AIsMov 维护版计划从 **1.27.0** 提供 Apple Silicon 与 Intel 两种 macOS 安装包。代码沿用维护版的 SSH 连接、本机密钥管理、共享网关与邀请码、访客监控/终端/文件传输，以及在线团队预约功能；原作者为 [Tongzh-SEU](https://github.com/Tongzh-SEU/RackTop)，本 fork 保留 [GPL-3.0 许可证](../LICENSE) 与 [来源说明](../NOTICE.md)。
+RackTop 的 AIsMov 维护版从 **1.27.0** 提供 Apple Silicon 与 Intel 两种 macOS 安装包。代码沿用维护版的 SSH 连接、本机密钥管理、共享网关与邀请码、访客监控/终端/文件传输，以及在线团队预约功能；原作者为 [Tongzh-SEU](https://github.com/Tongzh-SEU/RackTop)，本 fork 保留 [GPL-3.0 许可证](../LICENSE) 与 [来源说明](../NOTICE.md)。
 
 ## 下载与系统要求
 
@@ -46,13 +46,13 @@ rustup target add aarch64-apple-darwin x86_64-apple-darwin
 构建 Apple Silicon 包：
 
 ```bash
-RACKTOP_MACOS_TARGET=aarch64-apple-darwin RACKTOP_MARK_UNSIGNED=1 RACKTOP_REQUIRE_UPDATER=0 npm run bundle:macos
+RACKTOP_MACOS_TARGET=aarch64-apple-darwin RACKTOP_REQUIRE_UPDATER=0 npm run bundle:macos
 ```
 
 构建 Intel 包：
 
 ```bash
-RACKTOP_MACOS_TARGET=x86_64-apple-darwin RACKTOP_MARK_UNSIGNED=1 RACKTOP_REQUIRE_UPDATER=0 npm run bundle:macos
+RACKTOP_MACOS_TARGET=x86_64-apple-darwin RACKTOP_REQUIRE_UPDATER=0 npm run bundle:macos
 ```
 
 构建脚本为 [scripts/package-macos.sh](../scripts/package-macos.sh)，产物默认位于 `src-tauri/target/<target>/release/bundle/`：`dmg/` 包含 DMG、本地校验文件和签名状态说明，`macos/` 包含应用。Release 统一提供 `SHA256SUMS`，不单独上传本地的 `.dmg.sha256` 或 `.signing.txt`。脚本会验证应用签名和 DMG 完整性。
@@ -63,6 +63,12 @@ RACKTOP_MACOS_TARGET=x86_64-apple-darwin RACKTOP_MARK_UNSIGNED=1 RACKTOP_REQUIRE
 
 ## 验证范围
 
-当前文档随 macOS 发布准备更新。**两种架构的最终 DMG 构建、安装、原生启动、钥匙串访问、真实 SSH/共享会话和自动更新，尚未在本文中记为通过。** Release 发布前需根据实际 CI 报告与设备测试结果补充记录；现有 Linux 验证不能替代 Mac 实机验证，macOS 11.0 的最低版本兼容性也需要单独确认。
+GitHub Actions [双架构构建 34179673856](https://github.com/AIsMovDataInfra/RackTop/actions/runs/34179673856) 已在 Apple Silicon **macOS 14.8.9** 与 Intel **macOS 15.7.9** 完成验证：
 
-已加入前端回归测试，检查原生 Mac 的版本说明链接指向维护仓库，并保证 Windows 与普通浏览器不被误判为原生 Mac。该测试仅覆盖更新入口选择，不能证明 DMG 可安装或 Gatekeeper 已放行。
+- 每种架构前端 292 项测试、TypeScript 和 Vite 构建通过。
+- 每种架构 Rust 152 项通过、3 项需外部环境的集成测试默认忽略。
+- 实际挂载 DMG，检查原生架构、版本、许可证、应用代码签名和 Tauri 更新签名。
+- 对比 DMG 与更新归档内全部应用文件、权限及符号链接，内容一致。
+- 在隔离用户目录中启动应用，持续运行至少 8 秒并完成独立数据库初始化；保存并检查了原生窗口截图。
+
+这些是 CI 中的原生启动与包完整性验证。真实用户设备的钥匙串授权、SSH/共享会话、自动更新替换、Gatekeeper 首次放行和 macOS 11 最低版本兼容性仍需单独验收；未声称已经通过。签名发布后的附件以对应 Release 和标签工作流为准。

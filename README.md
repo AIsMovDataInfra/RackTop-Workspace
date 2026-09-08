@@ -4,7 +4,7 @@
 
 本次 Linux 测试版：**1.26.0-linux.9**，目标为 **Ubuntu 22.04 x86_64 / amd64 图形桌面**。下载入口见下表，构建和发布状态以对应 Release 的实际附件为准。新增功能与版本记录见 [更新说明](docs/VERSION_INFOS.md)。上游功能说明与截图保留在下方；Linux 的实际验证范围见 [安装与构建说明](docs/LINUX.md#验证范围)。
 
-macOS 维护版 **1.27.0** 正在准备发布，分别提供 Apple Silicon 和 Intel 安装包，沿用维护版的本机 SSH 密钥管理、共享网关、邀请码与访客终端/文件访问、在线团队预约等功能。下载状态、首次打开和验证范围见 [macOS 使用说明](docs/MACOS.md)。
+macOS 维护版 **1.27.0** 分别提供 Apple Silicon 和 Intel 安装包，沿用维护版的本机 SSH 密钥管理、共享网关、邀请码与访客终端/文件访问、在线团队预约等功能。下载状态、首次打开和验证范围见 [macOS 使用说明](docs/MACOS.md)。
 
 <div align="right">
   🌐 Language:
@@ -49,11 +49,11 @@ RackTop 是面向个人研究者和小型团队的 GPU 服务器桌面工作台�
 | 客户端平台 | 提供方 | 安装包与下载 |
 | --- | --- | --- |
 | **Ubuntu 22.04 x86_64 / amd64** | **AIsMov 社区测试版 1.26.0-linux.9** | [下载 Linux .deb](https://github.com/AIsMovDataInfra/RackTop/releases/download/v1.26.0-linux.9/RackTop_1.26.0-linux.9_amd64.deb) · [版本说明、源码与校验文件](https://github.com/AIsMovDataInfra/RackTop/releases/tag/v1.26.0-linux.9) |
-| macOS Apple Silicon（M 系列） | AIsMov 社区版 1.27.0（待发布） | [计划下载 arm64 .dmg](https://github.com/AIsMovDataInfra/RackTop/releases/download/v1.27.0/RackTop_1.27.0_macos-arm64-unsigned.dmg) |
-| macOS Intel | AIsMov 社区版 1.27.0（待发布） | [计划下载 x64 .dmg](https://github.com/AIsMovDataInfra/RackTop/releases/download/v1.27.0/RackTop_1.27.0_macos-x64-unsigned.dmg) |
+| macOS Apple Silicon（M 系列） | AIsMov 社区测试版 1.27.0 | [下载 arm64 .dmg](https://github.com/AIsMovDataInfra/RackTop/releases/download/v1.27.0/RackTop_1.27.0_macos-arm64-unsigned.dmg) |
+| macOS Intel | AIsMov 社区测试版 1.27.0 | [下载 x64 .dmg](https://github.com/AIsMovDataInfra/RackTop/releases/download/v1.27.0/RackTop_1.27.0_macos-x64-unsigned.dmg) |
 | Windows x64 | Tongzh-SEU 官方 v1.25.4 | [下载官方安装程序](https://github.com/Tongzh-SEU/RackTop/releases/download/v1.25.4/RackTop_1.25.4_x64-setup.exe) |
 
-macOS 链接是待上传的计划地址，实际可用性以 [v1.27.0 Release](https://github.com/AIsMovDataInfra/RackTop/releases/tag/v1.27.0) 附件为准。这批 DMG 使用 ad-hoc 签名，未经过 Apple 公证；首次打开可能需要在「系统设置 → 隐私与安全性」允许，详见 [安装步骤](docs/MACOS.md#安装与首次打开)。Windows 安装包继续由 [上游 Releases](https://github.com/Tongzh-SEU/RackTop/releases) 提供。
+macOS 下载与校验文件以 [v1.27.0 Release](https://github.com/AIsMovDataInfra/RackTop/releases/tag/v1.27.0) 附件为准。这批 DMG 使用 ad-hoc 签名，未经过 Apple 公证；首次打开可能需要在「系统设置 → 隐私与安全性」允许，详见 [安装步骤](docs/MACOS.md#安装与首次打开)。Windows 安装包继续由 [上游 Releases](https://github.com/Tongzh-SEU/RackTop/releases) 提供。
 
 Linux 新版发布在 [本仓库 Releases](https://github.com/AIsMovDataInfra/RackTop/releases)，首次安装或从 linux.1～linux.3 升级需手动安装一次；linux.4 起可在应用中检查并安装后续签名更新。
 
