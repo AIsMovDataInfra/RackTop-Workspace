@@ -1,0 +1,21 @@
+.asset-label-scroll { width: 100%; overflow-x: auto; padding: 1px; }
+.asset-label-scroll:focus-visible { outline: 2px solid var(--info); outline-offset: 3px; }
+.asset-label-table { width: 100%; min-width: 540px; table-layout: fixed; border-collapse: collapse; background: #fff; color: #000; font-size: 1rem; line-height: 1.5; }
+.asset-label-table th, .asset-label-table td { padding: 9px 10px; border: 1px solid #000; vertical-align: middle; text-align: left; white-space: normal; overflow-wrap: anywhere; }
+.asset-label-table thead th { padding: 12px; font-size: 1.35rem; text-align: center; font-weight: 700; }
+.asset-label-table tbody th { font-weight: 600; }
+.asset-label-key { width: 20%; }
+.asset-label-qr-column { width: 30%; }
+.asset-label-table .asset-label-qr { padding: 8px; text-align: center; }
+.asset-label-qr img { display: block; width: 100%; height: auto; margin: 0 auto; }
+.asset-label-number { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+@media print {
+  /* Undo the dialog's inline scroll lock for the printed page. */
+  body.equipment-label-open { overflow: visible !important; }
+  /* Percentages use the paper's content area, not the phone's screen width. */
+  body.equipment-label-open .dialog .dialog-body > .asset-label-scroll { display: block; width: 140mm; max-width: 100%; overflow: visible; padding: 0; break-inside: avoid; }
+  body.equipment-label-open .asset-label-table { width: 100%; min-width: 0; color: #000; background: #fff; font-size: 10pt; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+  body.equipment-label-open .asset-label-table th, body.equipment-label-open .asset-label-table td { padding: 2mm; }
+  body.equipment-label-open .asset-label-table thead th { font-size: 14pt; }
+  body.equipment-label-open .asset-label-qr img { width: 100%; height: auto; }
+}

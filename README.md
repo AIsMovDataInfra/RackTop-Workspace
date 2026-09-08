@@ -4,7 +4,7 @@
 
 本次 Linux 测试版：**1.29.0-linux.11**，目标为 **Ubuntu 22.04 x86_64 / amd64 图形桌面**。下载入口见下表，构建和发布状态以对应 Release 的实际附件为准。新增功能与版本记录见 [更新说明](docs/VERSION_INFOS.md)。上游功能说明与截图保留在下方；Linux 的实际验证范围见 [安装与构建说明](docs/LINUX.md#验证范围)。
 
-macOS 维护版 **1.29.0** 分别提供 Apple Silicon 和 Intel 安装包，沿用维护版的本机 SSH 密钥管理、共享网关、邀请码与访客终端/文件访问、在线团队预约等功能，并增加二维码设备管理入口。下载状态、首次打开和验证范围见 [macOS 使用说明](docs/MACOS.md)。
+macOS 维护版 **1.30.0** 分别提供 Apple Silicon 和 Intel 安装包，沿用维护版的本机 SSH 密钥管理、共享网关、邀请码与访客终端/文件访问、在线团队预约等功能，并增加二维码设备管理入口。下载状态、首次打开和验证范围见 [macOS 使用说明](docs/MACOS.md)。
 
 <div align="right">
   🌐 Language:
@@ -49,11 +49,11 @@ RackTop 是面向个人研究者和小型团队的 GPU 服务器桌面工作台�
 | 客户端平台 | 提供方 | 安装包与下载 |
 | --- | --- | --- |
 | **Ubuntu 22.04 x86_64 / amd64** | **AIsMov 社区测试版 1.29.0-linux.11** | [下载 Linux .deb](https://github.com/AIsMovDataInfra/RackTop/releases/download/v1.29.0-linux.11/RackTop_1.29.0-linux.11_amd64.deb) · [版本说明、源码与校验文件](https://github.com/AIsMovDataInfra/RackTop/releases/tag/v1.29.0-linux.11) |
-| macOS Apple Silicon（M 系列） | AIsMov 社区测试版 1.29.0 | [下载 arm64 .dmg](https://github.com/AIsMovDataInfra/RackTop/releases/download/v1.29.0/RackTop_1.29.0_macos-arm64-unsigned.dmg) |
-| macOS Intel | AIsMov 社区测试版 1.29.0 | [下载 x64 .dmg](https://github.com/AIsMovDataInfra/RackTop/releases/download/v1.29.0/RackTop_1.29.0_macos-x64-unsigned.dmg) |
+| macOS Apple Silicon（M 系列） | AIsMov 社区测试版 1.30.0 | [下载 arm64 .dmg](https://github.com/AIsMovDataInfra/RackTop/releases/download/v1.30.0/RackTop_1.30.0_macos-arm64-unsigned.dmg) |
+| macOS Intel | AIsMov 社区测试版 1.30.0 | [下载 x64 .dmg](https://github.com/AIsMovDataInfra/RackTop/releases/download/v1.30.0/RackTop_1.30.0_macos-x64-unsigned.dmg) |
 | Windows x64 | Tongzh-SEU 官方 v1.25.4 | [下载官方安装程序](https://github.com/Tongzh-SEU/RackTop/releases/download/v1.25.4/RackTop_1.25.4_x64-setup.exe) |
 
-macOS 下载与校验文件以 [v1.29.0 Release](https://github.com/AIsMovDataInfra/RackTop/releases/tag/v1.29.0) 附件为准。这批 DMG 使用 ad-hoc 签名，未经过 Apple 公证；首次打开可能需要在「系统设置 → 隐私与安全性」允许，详见 [安装步骤](docs/MACOS.md#安装与首次打开)。Windows 安装包继续由 [上游 Releases](https://github.com/Tongzh-SEU/RackTop/releases) 提供。
+macOS 下载与校验文件以 [v1.30.0 Release](https://github.com/AIsMovDataInfra/RackTop/releases/tag/v1.30.0) 附件为准。这批 DMG 使用 ad-hoc 签名，未经过 Apple 公证；首次打开可能需要在「系统设置 → 隐私与安全性」允许，详见 [安装步骤](docs/MACOS.md#安装与首次打开)。Windows 安装包继续由 [上游 Releases](https://github.com/Tongzh-SEU/RackTop/releases) 提供。
 
 Linux 新版发布在 [本仓库 Releases](https://github.com/AIsMovDataInfra/RackTop/releases)，首次安装或从 linux.1～linux.3 升级需手动安装一次；linux.4 起可在应用中检查并安装后续签名更新。
 
@@ -68,7 +68,7 @@ racktop
 
 ## 团队预约 Web
 
-[团队资源预约网页](team-web/README.md) 提供整机和指定 GPU 排期、冲突检查、续约、取消和管理员资源目录。成员使用用户名和密码注册并登录后查看资源、排期和设备，再提交预约，不需要邮箱或飞书账号。RackTop 的「团队预约」入口连接同一中央服务，管理员可选择桌面服务器同步 GPU 硬件清单，网页与桌面共用资源和预约数据；SSH 主机地址、登录凭据和私钥不会随同步上传。正式服务使用 HTTPS，飞书登录和群通知保留为可选配置；本机 demo 明确标识，不能用于生产。预约不锁定 GPU，也不终止训练进程。
+[团队资源预约网页](team-web/README.md) 提供整机和指定 GPU 排期、冲突检查、续约、取消和管理员资源目录。员工用非空用户名和密码注册，支持中英文，不需要邮箱；超级管理员从 A公司、B公司、C公司、西浦中分配公司后，员工即可查看资源、排期和设备并提交预约。唯一超级管理员可管理成员、分配公司、处理忘记密码申请并重置员工密码；资源管理员不具备这些账号权限。具体步骤见[团队账号与找回密码](docs/TEAM_ACCOUNTS.md)。RackTop 的「团队预约」入口连接同一中央服务，管理员可选择桌面服务器同步 GPU 硬件清单，网页与桌面共用资源和预约数据；SSH 主机地址、登录凭据和私钥不会随同步上传。正式服务使用 HTTPS，飞书登录和群通知保留为可选配置；本机 demo 明确标识，不能用于生产。预约不锁定 GPU，也不终止训练进程。
 
 本机体验（Node.js 24+）：`npm ci` 后执行 `npm run team:dev`，打开 `http://127.0.0.1:1421/`。
 

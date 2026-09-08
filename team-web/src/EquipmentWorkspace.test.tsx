@@ -13,8 +13,8 @@ vi.mock('qrcode', () => ({ default: { toDataURL: vi.fn().mockResolvedValue('data
 const t = (zh: string) => zh
 const state: PreferencesState = { t, preferences: { locale: 'zh-CN', theme: 'light', largeText: false }, setPreferences: vi.fn() }
 const anonymous: Session = { user: null, csrfToken: 'anonymous', authMode: 'account', feishuConfigured: false, notifications: { configured: false }, timezone: 'Asia/Shanghai' }
-const member: Session = { ...anonymous, user: { id: 'member', name: '李同学', role: 'member' } }
-const equipment: Equipment = { id: 'ef96d063-030e-4ec7-ae3f-a4d47185c012', code: 'EQ-000001', name: '实验室相机', model: 'Z9', category: '摄像头模组', serialNumber: '00000001', legacySerialNumber: 'SN-123', responsiblePerson: '负责人甲', currentUser: '', photo: null, location: '上海', notes: '', status: 'available', version: 1, createdAt: '2030-01-01T00:00:00Z', updatedAt: '2030-01-01T00:00:00Z' }
+const member: Session = { ...anonymous, user: { id: 'member', name: '李同学', role: 'member', company: 'A公司', isSuperAdmin: false } }
+const equipment: Equipment = { id: 'ef96d063-030e-4ec7-ae3f-a4d47185c012', code: 'EQ-000001', name: '实验室相机', company: 'A公司', model: 'Z9', category: '摄像头模组', serialNumber: '00000001', legacySerialNumber: 'SN-123', responsiblePerson: '负责人甲', currentUser: '', photo: null, location: '上海', notes: '', status: 'available', version: 1, createdAt: '2030-01-01T00:00:00Z', updatedAt: '2030-01-01T00:00:00Z' }
 let container: HTMLDivElement, root: ReturnType<typeof createRoot>
 function enter(name: string, value: string) { const input = container.querySelector<HTMLInputElement>(`input[name="${name}"]`)!; act(() => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value); input.dispatchEvent(new Event('input', { bubbles: true })) }) }
 async function click(text: string) { const button = [...container.querySelectorAll('button')].find((item) => item.textContent === text)!; expect(button, text).toBeDefined(); await act(async () => button.click()) }
@@ -62,7 +62,7 @@ describe('equipment inventory', () => {
     expect(container.querySelector<HTMLInputElement>('[name="responsiblePerson"]')!.value).toBe('李同学')
     await submit(); expect(create).not.toHaveBeenCalled()
     select('category', '机械臂'); select('location', '上海'); await submit()
-    expect(create).toHaveBeenCalledWith({ name: '新设备', category: '机械臂', model: '', responsiblePerson: '李同学', currentUser: '', location: '上海', notes: '', status: 'available' })
+    expect(create).toHaveBeenCalledWith({ name: '新设备', company: 'A公司', category: '机械臂', model: '', responsiblePerson: '李同学', currentUser: '', location: '上海', notes: '', status: 'available' })
     expect(container.querySelector('[role="dialog"]')).toBeNull()
   })
 
@@ -176,10 +176,34 @@ describe('equipment inventory', () => {
     const print = vi.spyOn(window, 'print').mockImplementation(() => {})
     await act(async () => root.render(<EquipmentLabel equipment={equipment} t={t} onClose={vi.fn()} />))
     expect(QRCode.toDataURL).toHaveBeenCalledWith(`${window.location.origin}/equipment/${equipment.id}`, expect.objectContaining({ margin: 4, errorCorrectionLevel: 'M' }))
-    expect(container.querySelector('.equipment-print-label')?.textContent).toContain('实验室相机00000001Z9')
-    expect(container.querySelector('a[download]')?.getAttribute('href')).toMatch(/^data:image\/png;/)
-    expect(container.querySelector('a[download]')?.getAttribute('download')).toBe('00000001-QR.png')
+    expect(container.querySelector('table')?.getAttribute('aria-label')).toBe('固定资产标识码')
+    expect(container.querySelector('thead th')?.getAttribute('colspan')).toBe('3')
+    expect(container.querySelector('td[rowspan]')?.getAttribute('rowspan')).toBe('5')
+    expect([...container.querySelectorAll('tbody th')].map((cell) => cell.textContent)).toEqual(['公司名称', '资产编号', '资产名称', '责任人', '使用人'])
+    expect([...container.querySelectorAll('tbody tr')].map((row) => row.querySelector('td')?.textContent)).toEqual(['A公司', '00000001', '实验室相机', '负责人甲', '—'])
+    expect(container.querySelector('a[download="00000001-asset-label.svg"]')?.getAttribute('href')).toMatch(/^data:image\/svg\+xml;/)
+    expect(container.querySelector('a[download="00000001-QR.png"]')?.getAttribute('href')).toMatch(/^data:image\/png;/)
+    expect(container.querySelector('a[download="00000001-QR.png"]')?.getAttribute('download')).toBe('00000001-QR.png')
     await click('打印标签'); expect(print).toHaveBeenCalledOnce()
+  })
+
+  it('keeps company read-only for members and offers exactly four choices and member navigation for the super administrator', async () => {
+    const create = vi.spyOn(api, 'createEquipment').mockResolvedValue({ equipment })
+    await mount(); await click('编辑信息')
+    expect(container.querySelector('[name="company"]')).toBeNull()
+    expect(container.querySelector('[role="dialog"]')?.textContent).toContain('公司名称：A公司')
+    await click('取消')
+    expect(container.textContent).not.toContain('成员管理')
+    const superAdmin: Session = { ...member, user: { ...member.user!, role: 'admin', isSuperAdmin: true, company: null } }
+    await act(async () => root.render(<EquipmentWorkspace session={superAdmin} state={state} navigate={vi.fn()} onSessionChanged={vi.fn()} onSessionExpired={vi.fn()} onLogout={vi.fn()} />))
+    expect(container.textContent).toContain('成员管理')
+    expect(container.querySelector('.profile small')?.textContent).toBe('超级管理员')
+    await click('新增设备')
+    expect([...container.querySelectorAll('select[name="company"] option')].map((option) => option.getAttribute('value'))).toEqual(['', 'A公司', 'B公司', 'C公司', '西浦'])
+    enter('name', '管理设备'); select('category', '机械臂'); select('location', '上海')
+    await submit(); expect(create).not.toHaveBeenCalled()
+    select('company', '西浦'); await submit()
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ name: '管理设备', company: '西浦' }))
   })
 
   it('closes the editor with Escape and restores the originating button focus', async () => {

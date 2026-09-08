@@ -1,3 +1,4 @@
+import { assignFixtureCompany } from './helpers/account-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { request } from 'node:http';
@@ -41,6 +42,7 @@ async function fixture(t) {
     const response = await call('/api/auth/register', { method: 'POST', session: initial,
       body: { username, name: username, password: 'equipment HTTP test password' } });
     assert.equal(response.status, 201, response.text);
+    response.body.user = assignFixtureCompany(config.dbPath, response.body.user);
     return { cookie: response.headers['set-cookie'][0].split(';')[0], csrfToken: response.body.csrfToken, user: response.body.user };
   }
   return { call, register, async restart() { await app.close(); app = createTeamServer(config); port = (await app.start()).port; } };

@@ -128,6 +128,33 @@ impl Stored {
                 .and_then(|u| u.get("role"))
                 .and_then(Value::as_str)
                 == Some("admin")
+            && self.user.as_ref().is_some_and(user_has_company_access)
+    }
+    fn refresh_user(&mut self, generation: u64, token: &str, user: Value) -> Result<(), String> {
+        // Status requests can finish after logout, another login, or a newer identity refresh.
+        if self.generation != generation || self.token.as_deref() != Some(token) || self.login_pending {
+            return Ok(());
+        }
+        if self.user.as_ref().and_then(|value| value.get("id")) != user.get("id") {
+            return Err("团队账号状态已变化，请重新登录".into());
+        }
+        if self.user.as_ref() != Some(&user) {
+            self.user = Some(user);
+            self.advance();
+        }
+        Ok(())
+    }
+    fn company_required(&mut self, token: &str) {
+        if self.token.as_deref() != Some(token) || self.login_pending {
+            return;
+        }
+        if let Some(user) = self.user.as_mut() {
+            if user.get("company") != Some(&Value::Null) || user.get("isSuperAdmin") != Some(&Value::Bool(false)) {
+                user["company"] = Value::Null;
+                user["isSuperAdmin"] = Value::Bool(false);
+                self.advance();
+            }
+        }
     }
     fn can_sync(&self, generation: u64, token: &str, server_id: &str) -> bool {
         self.is_admin()
@@ -293,6 +320,16 @@ impl TeamManager {
     pub fn status(&self) -> Result<Value, String> {
         Ok(self.read()?.public_status())
     }
+    async fn refresh_status(&self) -> Result<Value, String> {
+        let state = self.read()?;
+        let Some(token) = state.token.as_deref().filter(|_| !state.login_pending) else {
+            return self.status();
+        };
+        let session = self.request(reqwest::Method::GET, "/api/session", Some(token), None).await?;
+        let user = login_user(session.get("user"))?;
+        self.update(false, |value| value.refresh_user(state.generation, token, user))?;
+        self.status()
+    }
     async fn request(
         &self,
         method: reqwest::Method,
@@ -338,6 +375,13 @@ impl TeamManager {
         let value: Value =
             serde_json::from_slice(&bytes).map_err(|_| "预约中心返回了无法识别的数据")?;
         if !status.is_success() {
+            if status.as_u16() == 403 && value.pointer("/error/code").and_then(Value::as_str) == Some("COMPANY_REQUIRED") {
+                if let Some(token) = token {
+                    // Keep the login session, but stop repeated background inventory requests.
+                    let _ = self.update(false, |value| { value.company_required(token); Ok(()) });
+                }
+                return Err("COMPANY_REQUIRED: 请联系超级管理员分配公司后再使用预约和设备管理".into());
+            }
             let message = value
                 .pointer("/error/message")
                 .and_then(Value::as_str)
@@ -579,7 +623,34 @@ fn login_user(value: Option<&Value>) -> Result<Value, String> {
     let role = valid("role", 20)
         .filter(|r| matches!(*r, "admin" | "member"))
         .ok_or("账号权限无效")?;
-    Ok(json!({"id":id,"name":name,"username":username,"role":role}))
+    let mut projected = json!({"id":id,"name":name,"username":username,"role":role});
+    if let Some(company) = value.get("company") {
+        if !company.is_null() && !company.as_str().is_some_and(is_team_company) {
+            return Err("账号公司无效".into());
+        }
+        projected["company"] = company.clone();
+    }
+    if let Some(is_super_admin) = value.get("isSuperAdmin") {
+        if !is_super_admin.is_boolean() { return Err("账号权限无效".into()); }
+        projected["isSuperAdmin"] = is_super_admin.clone();
+    }
+    if let Some(version) = value.get("version") {
+        if !version.as_u64().is_some_and(|number| number > 0) { return Err("账号版本无效".into()); }
+        projected["version"] = version.clone();
+    }
+    Ok(projected)
+}
+
+fn is_team_company(company: &str) -> bool {
+    matches!(company, "A公司" | "B公司" | "C公司" | "西浦")
+}
+
+fn user_has_company_access(user: &Value) -> bool {
+    user.get("isSuperAdmin").and_then(Value::as_bool) == Some(true)
+        || match user.get("company") {
+            None => true, // Older account services did not have a company field.
+            Some(company) => company.as_str().is_some_and(is_team_company),
+        }
 }
 
 pub fn inventory_payload(
@@ -659,7 +730,7 @@ pub fn inventory_payload(
 pub struct TeamState(pub Arc<TeamManager>);
 #[tauri::command]
 pub async fn team_status(state: State<'_, TeamState>) -> Result<Value, String> {
-    state.0.status()
+    state.0.refresh_status().await
 }
 #[tauri::command]
 pub async fn team_login(
@@ -902,6 +973,67 @@ mod tests {
             &json!({"id":"1","name":"N","username":"u","role":"superuser"})
         ))
         .is_err());
+    }
+
+    #[test]
+    fn team_company_projection_accepts_optional_safe_fields_and_rejects_invalid_values() {
+        let account = json!({"id":"member-1","name":"成员","username":"member","role":"member","company":"西浦","isSuperAdmin":false,"version":2,"password":"private-password","recoveryRequestedAt":"private-date"});
+        let projected = login_user(Some(&account)).unwrap();
+        assert_eq!(projected["company"], "西浦");
+        assert_eq!(projected["isSuperAdmin"], false);
+        assert_eq!(projected["version"], 2);
+        assert_eq!(projected.as_object().unwrap().len(), 7);
+        assert!(!projected.to_string().contains("private-"));
+        for (field, invalid) in [("company", json!("未知公司")), ("isSuperAdmin", json!("true")), ("version", json!(0))] {
+            let mut candidate = account.clone();
+            candidate[field] = invalid;
+            assert!(login_user(Some(&candidate)).is_err());
+        }
+        let mut waiting = account.clone();
+        waiting["company"] = Value::Null;
+        assert!(login_user(Some(&waiting)).is_ok());
+    }
+
+    #[test]
+    fn team_company_assignment_refreshes_identity_and_rejects_stale_results() {
+        let mut value = signed_in();
+        value.company_required("test-session-token");
+        assert!(!value.is_admin());
+        assert!(value.public_status()["authenticated"].as_bool().unwrap());
+        let waiting_generation = value.generation;
+        let mut assigned = user("member-1");
+        assigned["company"] = json!("A公司");
+        assigned["isSuperAdmin"] = json!(false);
+        assigned["version"] = json!(2);
+        value.refresh_user(waiting_generation, "test-session-token", assigned.clone()).unwrap();
+        assert!(value.is_admin());
+        assert_eq!(value.public_status()["user"]["company"], "A公司");
+        let mut stale = assigned.clone();
+        stale["company"] = Value::Null;
+        stale["version"] = json!(1);
+        value.refresh_user(waiting_generation, "test-session-token", stale).unwrap();
+        assert!(value.is_admin());
+        let generation = value.generation;
+        value.clear_login();
+        value.refresh_user(generation, "test-session-token", assigned).unwrap();
+        assert!(value.user.is_none());
+        assert!(value.token.is_none());
+    }
+
+    #[test]
+    fn team_company_denial_keeps_session_and_stops_sync_until_assignment() {
+        let mut value = signed_in();
+        assert!(value.is_admin()); // Existing services without company metadata remain compatible.
+        let generation = value.generation;
+        value.company_required("test-session-token");
+        assert!(!value.can_sync(generation, "test-session-token", "connection-a"));
+        assert!(!value.can_sync(value.generation, "test-session-token", "connection-a"));
+        assert_eq!(value.token.as_deref(), Some("test-session-token"));
+        assert_eq!(value.bindings.len(), 2);
+        value.user.as_mut().unwrap()["isSuperAdmin"] = json!(true);
+        assert!(value.is_admin());
+        value.company_required("old-token");
+        assert!(value.is_admin());
     }
 
     #[test]

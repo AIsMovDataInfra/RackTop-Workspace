@@ -1,11 +1,13 @@
-import type { BookingDraft, Equipment, EquipmentDraft, EquipmentHistory, Reservation, Resource, ResourceDraft, Session } from './types'
+import type { BookingDraft, Company, Equipment, EquipmentDraft, EquipmentHistory, Member, Reservation, Resource, ResourceDraft, Session } from './types'
 
 export class ApiError extends Error {
   constructor(message: string, public status: number, public code: string, public conflicts: Reservation[] = []) { super(message); this.name = 'ApiError' }
 }
 let csrfToken: string | null = null
 export const SESSION_EXPIRED_EVENT = 'racktop-team-session-expired'
+export const ACCOUNT_CHANGED_EVENT = 'racktop-team-account-changed'
 function expired(path: string, status: number, code?: string) {
+  if (status === 403 && ['COMPANY_REQUIRED', 'SUPERADMIN_REQUIRED'].includes(code || '')) window.dispatchEvent(new Event(ACCOUNT_CHANGED_EVENT))
   if (status === 401 && !(path === '/auth/change-password' && code === 'INVALID_CREDENTIALS') && !['/session', '/auth/login', '/auth/register', '/auth/demo'].includes(path)) { csrfToken = null; window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT)) }
 }
 
@@ -37,6 +39,12 @@ export const api = {
   register: (details: { username: string; name: string; password: string; bootstrapToken?: string }) => sessionRequest('/auth/register', 'POST', details),
   login: (details: { username: string; password: string; rememberMe?: boolean }) => sessionRequest('/auth/login', 'POST', details),
   changePassword: (details: { oldPassword: string; newPassword: string }) => sessionRequest('/auth/change-password', 'POST', details),
+  requestPasswordRecovery: (username: string) => request<{ ok: true }>('/auth/recovery-request', 'POST', { username }),
+  members: () => request<{ members: Member[] }>('/admin/members'),
+  createMember: (details: { username: string; name: string; password: string; company: Company }) => request<{ member: Member }>('/admin/members', 'POST', details),
+  setMemberCompany: (member: Member, company: Company) => request<{ member: Member }>(`/admin/members/${encodeURIComponent(member.id)}`, 'PATCH', { version: member.version, company }),
+  resetMemberPassword: (member: Member, newPassword: string) => request<{ member: Member }>(`/admin/members/${encodeURIComponent(member.id)}/reset-password`, 'POST', { version: member.version, newPassword }),
+  deleteMember: (member: Member) => request<{ ok: true }>(`/admin/members/${encodeURIComponent(member.id)}`, 'DELETE', { version: member.version }),
   demoLogin: (userId: string) => sessionRequest('/auth/demo', 'POST', { userId }),
   logout: async () => { try { await request('/auth/logout', 'POST', {}) } finally { csrfToken = null } },
   resources: () => request<{ resources: Resource[] }>('/resources'),
@@ -58,8 +66,12 @@ export const api = {
   equipmentPhoto: async (id: string, version: number) => {
     const path = `/equipment/${encodeURIComponent(id)}/photo?v=${version}`
     const response = await fetch(`/api${path}`, { credentials: 'same-origin', cache: 'no-store' })
-    expired(path, response.status)
-    if (!response.ok) throw new ApiError('照片暂时无法读取 / Could not load the photo', response.status, 'PHOTO_READ_FAILED')
+    if (!response.ok) {
+      let code = 'PHOTO_READ_FAILED'
+      try { const body = await response.json(); if (typeof body?.error?.code === 'string') code = body.error.code } catch { /* The proxy may return a non-JSON error. */ }
+      expired(path, response.status, code)
+      throw new ApiError('照片暂时无法读取 / Could not load the photo', response.status, code)
+    }
     return response.blob()
   },
   setEquipmentPhoto: (id: string, version: number, dataUrl: string) => request<{ equipment: Equipment }>(`/equipment/${encodeURIComponent(id)}/photo`, 'POST', { version, dataUrl }),

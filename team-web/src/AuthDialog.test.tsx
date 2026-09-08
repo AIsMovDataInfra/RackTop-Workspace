@@ -12,7 +12,7 @@ import type { Reservation, Resource, Session } from './types'
 ;(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 const t = (zh: string, _en: string) => zh
 const anonymous: Session = { user: null, csrfToken: 'anonymous-csrf', authMode: 'account', feishuConfigured: false, notifications: { configured: false }, timezone: 'Asia/Shanghai' }
-const member: Session = { ...anonymous, user: { id: 'member-1', name: '测试成员', role: 'member', username: 'test-member' } }
+const member: Session = { ...anonymous, user: { id: 'member-1', name: '测试成员', role: 'member', username: 'test-member', company: 'A公司', isSuperAdmin: false } }
 const state: PreferencesState = { t, preferences: { locale: 'zh-CN', theme: 'light', largeText: false }, setPreferences: vi.fn() }
 const resource: Resource = { id: 'server-1', name: '同步 A100', cluster: '研发', gpuModel: 'A100', gpuCount: 1, notes: '', enabled: true, inventoryVersion: 3, inventoryState: 'synced', status: 'unknown', lastSeenAt: '2030-09-01T02:00:00Z', gpus: [{ id: 'stable-gpu', uuid: 'GPU-physical', index: 2, model: 'A100', memoryTotalMb: 81920 }] }
 let container: HTMLDivElement
@@ -24,7 +24,7 @@ async function click(text: string) { const button = [...container.querySelectorA
 async function submit() { await act(async () => container.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))) }
 function mockCatalog() { vi.spyOn(api, 'resources').mockResolvedValue({ resources: [resource] }); return vi.spyOn(api, 'reservations').mockResolvedValue({ reservations: [] }) }
 
-describe('username accounts and public browsing', () => {
+describe('username accounts and member sign-in', () => {
   it('shows the login gate without fetching resources or schedules for anonymous visitors', async () => {
     const reservations = mockCatalog()
     vi.spyOn(api, 'session').mockResolvedValue(anonymous)
@@ -119,6 +119,39 @@ describe('username accounts and public browsing', () => {
     await act(async () => container.querySelector('.dialog form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })))
     expect(register).toHaveBeenCalledWith(expect.objectContaining({ bootstrapToken: 'test-bootstrap-secret' }))
     expect(JSON.stringify(window.localStorage)).not.toContain('test-bootstrap-secret')
+  })
+
+  it('requests password recovery with only a username and displays a generic result without signing in', async () => {
+    const recovery = vi.spyOn(api, 'requestPasswordRecovery').mockResolvedValue({ ok: true })
+    const signedIn = vi.fn()
+    await act(async () => root.render(<AuthDialog session={anonymous} t={t} onClose={vi.fn()} onSignedIn={signedIn} />))
+    enter('username', ' 中文员工 '); enter('password', '应清除')
+    await click('忘记密码？')
+    expect(container.querySelector('h2')?.textContent).toBe('找回密码')
+    expect(container.querySelectorAll('input')).toHaveLength(1)
+    expect(container.querySelector('[name="password"]')).toBeNull()
+    await submit()
+    expect(recovery).toHaveBeenCalledWith('中文员工')
+    expect(signedIn).not.toHaveBeenCalled()
+    expect(container.querySelector('[role="status"]')?.textContent).toContain('如果账号存在')
+    expect(container.querySelector('[role="status"]')?.textContent).toContain('请联系超级管理员')
+    await click('返回登录')
+    expect(container.querySelector<HTMLInputElement>('[name="username"]')?.value).toBe(' 中文员工 ')
+    expect(container.querySelector<HTMLInputElement>('[name="password"]')?.value).toBe('')
+  })
+
+  it('opens the recovery link directly, rejects empty usernames, and preserves the full scanned URL', async () => {
+    window.history.replaceState({}, '', '/equipment/device?auth=recover&from=qr')
+    const recovery = vi.spyOn(api, 'requestPasswordRecovery').mockResolvedValue({ ok: true })
+    await act(async () => root.render(<AuthDialog embedded session={anonymous} t={t} onClose={vi.fn()} onSignedIn={vi.fn()} />))
+    expect(container.querySelector('h2')?.textContent).toBe('找回密码')
+    enter('username', '  '); await submit(); expect(recovery).not.toHaveBeenCalled()
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('请输入用户名')
+    enter('username', '不存在的用户'); await submit()
+    expect(container.querySelector('[role="status"]')?.textContent).toContain('如果账号存在')
+    expect(window.location.pathname + window.location.search).toBe('/equipment/device?auth=recover&from=qr')
+    await click('返回登录'); await click('注册账号')
+    expect(container.textContent).toContain('等待超级管理员分配公司')
   })
 
   it('does not display a private purpose or edit controls to a guest even with an older cached response', async () => {

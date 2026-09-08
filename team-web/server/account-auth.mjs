@@ -9,6 +9,7 @@ const SESSION_MS = 8 * 60 * 60_000;
 const REMEMBERED_SESSION_MS = 30 * 24 * 60 * 60_000;
 const ANONYMOUS_MS = 10 * 60_000;
 const DEVICE_MS = 30 * 24 * 60 * 60_000;
+export const ACCOUNT_COMPANIES = Object.freeze(['A公司', 'B公司', 'C公司', '西浦']);
 // OWASP Password Storage Cheat Sheet: equivalent 32 MiB scrypt configuration.
 // https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html#scrypt
 const SCRYPT = Object.freeze({ N: 32768, r: 8, p: 3, maxmem: 64 * 1024 * 1024 });
@@ -53,6 +54,14 @@ function password(value, { existing = false } = {}) {
   }
   return value;
 }
+function company(value) {
+  if (!ACCOUNT_COMPANIES.includes(value)) throw fail(422, 'INVALID_COMPANY', '请选择 A公司、B公司、C公司或西浦。');
+  return value;
+}
+function version(value) {
+  if (!Number.isSafeInteger(value) || value < 1) throw fail(422, 'INVALID_VERSION', '请刷新成员信息后重试。');
+  return value;
+}
 function json(res, status, body) {
   res.statusCode = status;
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -94,6 +103,24 @@ export function createAccountAuth(config) {
     CREATE INDEX IF NOT EXISTS account_sessions_user ON account_sessions(user_id,kind);
     CREATE TABLE IF NOT EXISTS account_auth_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
   `);
+  // Additive, transactional migration preserves every existing identity and grant.
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const columns = new Set(db.prepare('PRAGMA table_info(account_users)').all().map(column => column.name));
+    for (const [column, definition] of Object.entries({
+      is_super_admin: 'INTEGER NOT NULL DEFAULT 0 CHECK(is_super_admin IN (0,1))',
+      company: "TEXT CHECK(company IS NULL OR company IN ('A公司','B公司','C公司','西浦'))",
+      version: 'INTEGER NOT NULL DEFAULT 1 CHECK(version > 0)',
+      recovery_requested_at: 'INTEGER', deleted_at: 'INTEGER',
+    })) if (!columns.has(column)) db.exec(`ALTER TABLE account_users ADD COLUMN ${column} ${definition}`);
+    db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS account_unique_super_admin ON account_users(is_super_admin) WHERE is_super_admin = 1;
+      CREATE TABLE IF NOT EXISTS account_admin_audit (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, actor_id TEXT, target_id TEXT NOT NULL,
+        action TEXT NOT NULL, old_version INTEGER, new_version INTEGER NOT NULL,
+        old_company TEXT, new_company TEXT, created_at INTEGER NOT NULL
+      );`);
+    db.exec('COMMIT');
+  } catch (error) { db.exec('ROLLBACK'); db.close(); throw error; }
   const rates = new Map();
   let hashing = 0, closed = false;
   const dummySalt = randomBytes(16).toString('base64url');
@@ -161,14 +188,15 @@ export function createAccountAuth(config) {
     return typeof raw === 'string' ? /^Bearer ([A-Za-z0-9_-]{43})$/.exec(raw)?.[1] ?? null : null;
   }
   function userView(row) {
-    return row?.id ? { id: row.id, name: row.name, role: row.role, username: row.username } : null;
+    return row?.id && row.deleted_at == null ? { id: row.id, name: row.name, role: row.role, username: row.username,
+      isSuperAdmin: Boolean(row.is_super_admin), company: row.company ?? null, version: row.version ?? 1 } : null;
   }
   function recordFor(req, browserOnly = false) {
     purge();
     const hasBearer = !browserOnly && req.headers?.authorization !== undefined;
     const token = hasBearer ? bearerToken(req) : browserToken(req);
     if (!token) return null;
-    const row = db.prepare(`SELECT s.token_hash, s.kind, s.expires_at, s.remember_me, a.id, a.name, a.username, a.role
+    const row = db.prepare(`SELECT s.token_hash, s.kind, s.expires_at, s.remember_me, a.id, a.name, a.username, a.role, a.is_super_admin, a.company, a.version, a.deleted_at
       FROM account_sessions s LEFT JOIN account_users a ON a.id = s.user_id
       WHERE s.token_hash = ? AND s.kind = ? AND s.expires_at > ?`).get(digest(token), hasBearer ? 'device' : 'browser', now());
     return row ? { user: userView(row), csrfToken: row.kind === 'browser' ? csrfFor(token) : null,
@@ -212,19 +240,21 @@ export function createAccountAuth(config) {
     const record = recordFor(req);
     if (record?.kind !== 'device') verifyCsrf(req);
     if (!record?.user || !session?.user || record.user.id !== session.user.id || record.user.role !== session.user.role
+      || record.user.isSuperAdmin !== session.user.isSuperAdmin || record.user.company !== session.user.company || record.user.version !== session.user.version
       || record.kind !== session.kind || (record.kind === 'browser' && !equal(record.csrfToken, session.csrfToken))) throw fail(401, 'AUTH_REQUIRED', '请先登录。');
   }
   async function authenticate(req, body) {
     const normalizedUsername = username(body.username);
     const supplied = password(body.password, { existing: true });
     credentialRate(req, normalizedUsername);
-    const account = db.prepare('SELECT * FROM account_users WHERE username = ?').get(normalizedUsername);
+    const account = db.prepare('SELECT * FROM account_users WHERE username = ? AND deleted_at IS NULL').get(normalizedUsername);
     const matched = await verifyPassword(supplied, account?.password_hash);
     // Another request may change the password while scrypt runs. Never issue a stale grant.
-    if (!matched || !account || closed || db.prepare('SELECT password_hash FROM account_users WHERE id = ?').get(account.id)?.password_hash !== account.password_hash) {
+    const fresh = !closed && account ? db.prepare('SELECT * FROM account_users WHERE id = ? AND deleted_at IS NULL').get(account.id) : null;
+    if (!matched || !fresh || fresh.password_hash !== account.password_hash) {
       throw fail(401, 'INVALID_CREDENTIALS', '用户名或密码不正确。');
     }
-    return account;
+    return fresh;
   }
   function bootstrapAllowed(body, normalizedUsername) {
     const provided = body.bootstrapToken;
@@ -238,9 +268,152 @@ export function createAccountAuth(config) {
     if (adminUsername && normalizedUsername === adminUsername) throw fail(403, 'BOOTSTRAP_REQUIRED', '此用户名须使用管理员认领码注册。');
     return false;
   }
+  function memberView(row) {
+    return { ...userView(row), createdAt: new Date(row.created_at).toISOString(),
+      recoveryRequestedAt: row.recovery_requested_at == null ? null : new Date(row.recovery_requested_at).toISOString() };
+  }
+  function requireSuperAdmin(req, write = false) {
+    const session = resolve(req);
+    if (!session?.user) throw fail(401, 'AUTH_REQUIRED', '请先登录。');
+    if (!session.user.isSuperAdmin) throw fail(403, 'SUPERADMIN_REQUIRED', '仅超级管理员可管理成员。');
+    if (write) verifyWrite(req, session);
+    return session;
+  }
+  function activeMember(id) {
+    const row = db.prepare('SELECT * FROM account_users WHERE id = ? AND deleted_at IS NULL').get(id);
+    if (!row) throw fail(404, 'MEMBER_NOT_FOUND', '成员不存在或已删除。');
+    return row;
+  }
+  function editableMember(id, expectedVersion, actorId, allowSuperAdmin = false) {
+    const row = activeMember(id);
+    if (!allowSuperAdmin && (row.is_super_admin || row.id === actorId)) throw fail(403, 'SUPER_ADMIN_PROTECTED', '此操作不能修改超级管理员或当前账号。');
+    if (row.version !== expectedVersion) throw fail(409, 'VERSION_CONFLICT', '成员信息已变化，请刷新后重试。');
+    return row;
+  }
+  function audit(actorId, row, action, nextVersion, nextCompany = row.company ?? null) {
+    db.prepare(`INSERT INTO account_admin_audit(actor_id,target_id,action,old_version,new_version,old_company,new_company,created_at)
+      VALUES(?,?,?,?,?,?,?,?)`).run(actorId, row.id, action, row.version ?? null, nextVersion, row.company ?? null, nextCompany, now());
+  }
+  function transaction(fn) {
+    db.exec('BEGIN IMMEDIATE');
+    try { const result = fn(); db.exec('COMMIT'); return result; }
+    catch (error) { db.exec('ROLLBACK'); throw error; }
+  }
+  function insertMember(normalizedUsername, displayName, passwordHash, selectedCompany, actorId, superAdmin = false) {
+    const nameKey = displayName.normalize('NFKC').toLowerCase();
+    if (db.prepare('SELECT COUNT(*) AS n FROM account_users WHERE deleted_at IS NULL').get().n >= 500) throw fail(403, 'ACCOUNT_LIMIT', '本站成员数量已达上限，请联系管理员。');
+    if (db.prepare('SELECT id FROM account_users WHERE username = ? OR name_key = ?').get(normalizedUsername, nameKey)) throw fail(409, 'ACCOUNT_EXISTS', '用户名或名字已被使用。');
+    const id = randomUUID();
+    db.prepare(`INSERT INTO account_users(id,username,name,name_key,password_hash,role,created_at,is_super_admin,company)
+      VALUES(?,?,?,?,?,?,?,?,?)`).run(id, normalizedUsername, displayName, nameKey, passwordHash, superAdmin ? 'admin' : 'member', now(), superAdmin ? 1 : 0, selectedCompany);
+    const row = activeMember(id);
+    audit(actorId, { ...row, version: null, company: null }, superAdmin ? 'super-admin-created' : 'member-created', row.version, selectedCompany);
+    return row;
+  }
+  async function handleMembers(req, res, path, body) {
+    const actor = requireSuperAdmin(req, req.method !== 'GET');
+    if (path === '/api/admin/members' && req.method === 'GET') {
+      json(res, 200, { members: db.prepare('SELECT * FROM account_users WHERE deleted_at IS NULL ORDER BY created_at,id').all().map(memberView) });
+      return true;
+    }
+    if (path === '/api/admin/members' && req.method === 'POST') {
+      fields(body, ['username', 'name', 'password', 'company']);
+      const normalizedUsername = username(body.username), displayName = name(body.name), supplied = password(body.password), selectedCompany = company(body.company);
+      rate(`admin-write:${actor.user.id}`, 60, 15 * 60_000);
+      const passwordHash = await hashPassword(supplied);
+      const fresh = requireSuperAdmin(req, true);
+      if (fresh.user.id !== actor.user.id) throw fail(401, 'AUTH_REQUIRED', '登录状态已变化，请重新登录。');
+      const row = transaction(() => insertMember(normalizedUsername, displayName, passwordHash, selectedCompany, fresh.user.id));
+      json(res, 201, { member: memberView(row) });
+      return true;
+    }
+    const match = /^\/api\/admin\/members\/([0-9a-f-]{36})(\/reset-password)?$/.exec(path);
+    if (!match) throw fail(404, 'NOT_FOUND', '没有此成员管理接口。');
+    const [, id, reset] = match;
+    if (reset && req.method === 'POST') {
+      fields(body, ['version', 'newPassword']);
+      const expectedVersion = version(body.version), supplied = password(body.newPassword);
+      editableMember(id, expectedVersion, actor.user.id);
+      rate(`admin-reset:${actor.user.id}`, 30, 15 * 60_000);
+      const passwordHash = await hashPassword(supplied);
+      const fresh = requireSuperAdmin(req, true);
+      if (fresh.user.id !== actor.user.id) throw fail(401, 'AUTH_REQUIRED', '登录状态已变化，请重新登录。');
+      const row = transaction(() => {
+        const previous = editableMember(id, expectedVersion, actor.user.id);
+        db.prepare('UPDATE account_users SET password_hash = ?, recovery_requested_at = NULL, version = version + 1 WHERE id = ?').run(passwordHash, id);
+        db.prepare('DELETE FROM account_sessions WHERE user_id = ?').run(id);
+        audit(fresh.user.id, previous, 'password-reset', previous.version + 1);
+        return activeMember(id);
+      });
+      json(res, 200, { member: memberView(row) });
+      return true;
+    }
+    if (!reset && req.method === 'PATCH') {
+      fields(body, ['version', 'company']);
+      const expectedVersion = version(body.version), selectedCompany = company(body.company);
+      const row = transaction(() => {
+        const previous = editableMember(id, expectedVersion, actor.user.id, true);
+        if (previous.company !== selectedCompany) {
+          db.prepare('UPDATE account_users SET company = ?, version = version + 1 WHERE id = ?').run(selectedCompany, id);
+          audit(actor.user.id, previous, 'company-changed', previous.version + 1, selectedCompany);
+        }
+        return activeMember(id);
+      });
+      json(res, 200, { member: memberView(row) });
+      return true;
+    }
+    if (!reset && req.method === 'DELETE') {
+      fields(body, ['version']);
+      const expectedVersion = version(body.version);
+      transaction(() => {
+        const previous = editableMember(id, expectedVersion, actor.user.id);
+        db.prepare(`UPDATE account_users SET username = ?, name = '已删除成员', name_key = ?, password_hash = '!deleted',
+          company = NULL, recovery_requested_at = NULL, deleted_at = ?, version = version + 1 WHERE id = ?`)
+          .run(`deleted-${randomUUID()}`, `deleted:${randomUUID()}`, now(), id);
+        db.prepare('DELETE FROM account_sessions WHERE user_id = ?').run(id);
+        audit(actor.user.id, previous, 'member-deleted', previous.version + 1, null);
+      });
+      json(res, 200, { ok: true });
+      return true;
+    }
+    throw fail(404, 'NOT_FOUND', '没有此成员管理接口。');
+  }
+  // Explicit deployment operation; never called on server startup or via HTTP.
+  async function provisionSuperAdmin(options) {
+    fields(options, ['mode', 'username', 'name', 'password', 'company']);
+    if (!['create', 'reset'].includes(options.mode)) throw fail(422, 'INVALID_INPUT', '必须明确指定 create 或 reset 模式。');
+    const normalizedUsername = username(options.username ?? 'admin');
+    const displayName = name(options.name ?? '超级管理员');
+    const selectedCompany = options.company === undefined ? null : company(options.company);
+    const supplied = password(options.password);
+    function check() {
+      const superAdmin = db.prepare('SELECT * FROM account_users WHERE is_super_admin = 1').get();
+      const existing = db.prepare('SELECT * FROM account_users WHERE username = ?').get(normalizedUsername);
+      if (existing && !existing.is_super_admin) throw fail(409, 'ADMIN_NAME_IN_USE', '同名普通账号已存在；拒绝抢占或提升权限。请先核实并处理该账号。');
+      if (superAdmin && superAdmin.username !== normalizedUsername) throw fail(409, 'SUPER_ADMIN_EXISTS', '超级管理员已存在。');
+      if (options.mode === 'reset' && !superAdmin) throw fail(404, 'SUPER_ADMIN_NOT_FOUND', '超级管理员不存在，请先执行 create。');
+      return superAdmin;
+    }
+    const existing = check();
+    if (existing && options.mode === 'create') return { created: false, reset: false, member: memberView(existing) };
+    const passwordHash = await hashPassword(supplied);
+    if (closed) throw fail(503, 'AUTH_CLOSED', '认证服务暂不可用。');
+    return transaction(() => {
+      const fresh = check();
+      if (fresh && options.mode === 'create') return { created: false, reset: false, member: memberView(fresh) };
+      if (options.mode === 'reset') {
+        if (fresh.version !== existing.version || fresh.password_hash !== existing.password_hash) throw fail(409, 'VERSION_CONFLICT', '超级管理员账号已变化，请检查后重试。');
+        db.prepare('UPDATE account_users SET password_hash = ?, recovery_requested_at = NULL, version = version + 1 WHERE id = ?').run(passwordHash, fresh.id);
+        db.prepare('DELETE FROM account_sessions WHERE user_id = ?').run(fresh.id);
+        audit(null, fresh, 'super-admin-password-reset', fresh.version + 1);
+        return { created: false, reset: true, member: memberView(activeMember(fresh.id)) };
+      }
+      return { created: true, reset: false, member: memberView(insertMember(normalizedUsername, displayName, passwordHash, selectedCompany, null, true)) };
+    });
+  }
   async function handle(req, res, url, body) {
     const path = url.pathname;
-    if (path !== '/api/session' && !path.startsWith('/api/auth/')) return false;
+    if (path !== '/api/session' && !path.startsWith('/api/auth/') && !path.startsWith('/api/admin/members')) return false;
     validateRequest(req);
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('Referrer-Policy', 'no-referrer');
@@ -255,6 +428,10 @@ export function createAccountAuth(config) {
       }
       return true;
     }
+    if (path.startsWith('/api/admin/members')) {
+      if (url.search) throw fail(422, 'INVALID_INPUT', '此接口不接受查询参数。');
+      return handleMembers(req, res, path, body);
+    }
     if (req.method !== 'POST') throw fail(404, 'NOT_FOUND', '没有此认证接口。');
     if (path === '/api/auth/register') {
       verifyCsrf(req);
@@ -265,19 +442,20 @@ export function createAccountAuth(config) {
       rate(`register:${address(req)}`, 10, 60 * 60_000);
       const admin = bootstrapAllowed(body, normalizedUsername);
       const passwordHash = await hashPassword(supplied);
-      if (closed) throw fail(503, 'AUTH_CLOSED', '认证服务暂不可用。');
+      verifyCsrf(req);
       db.exec('BEGIN IMMEDIATE');
       let account;
       try {
         // Recheck after the asynchronous password hash and within the transaction.
         if (admin) bootstrapAllowed(body, normalizedUsername);
-        if (db.prepare('SELECT COUNT(*) AS n FROM account_users').get().n >= 500) throw fail(403, 'ACCOUNT_LIMIT', '本站成员数量已达上限，请联系管理员。');
+        if (db.prepare('SELECT COUNT(*) AS n FROM account_users WHERE deleted_at IS NULL').get().n >= 500) throw fail(403, 'ACCOUNT_LIMIT', '本站成员数量已达上限，请联系管理员。');
         if (db.prepare('SELECT id FROM account_users WHERE username = ? OR name_key = ?').get(normalizedUsername, nameKey)) throw fail(409, 'ACCOUNT_EXISTS', '用户名或名字已被使用，请登录或使用其他名字。');
         account = { id: randomUUID(), username: normalizedUsername, name: displayName, role: admin ? 'admin' : 'member' };
         db.prepare('INSERT INTO account_users(id,username,name,name_key,password_hash,role,created_at) VALUES(?,?,?,?,?,?,?)').run(account.id, normalizedUsername, displayName, nameKey, passwordHash, account.role, now());
         if (admin) db.prepare("INSERT INTO account_auth_meta(key,value) VALUES('admin_claimed',?)").run(account.id);
         db.exec('COMMIT');
       } catch (error) { db.exec('ROLLBACK'); throw error; }
+      account = db.prepare('SELECT * FROM account_users WHERE id = ?').get(account.id);
       json(res, 201, payload(createSession(req, res, account, rememberMe)));
       return true;
     }
@@ -286,6 +464,7 @@ export function createAccountAuth(config) {
       fields(body, ['username', 'password', 'rememberMe']);
       const rememberMe = remember(body.rememberMe);
       const account = await authenticate(req, body);
+      verifyCsrf(req);
       json(res, 200, payload(createSession(req, res, account, rememberMe)));
       return true;
     }
@@ -302,6 +481,8 @@ export function createAccountAuth(config) {
       fields(body, ['username', 'password', 'deviceName']);
       const deviceName = name(body.deviceName, '设备名称');
       const account = await authenticate(req, body);
+      verifyOrigin(req);
+      if (browserToken(req)) verifyCsrf(req);
       purge();
       if (db.prepare("SELECT COUNT(*) AS n FROM account_sessions WHERE user_id = ? AND kind = 'device'").get(account.id).n >= 8) throw fail(409, 'DEVICE_LIMIT', '最多登录 8 台设备，请先退出其他设备，或修改密码撤销所有设备。');
       if (db.prepare('SELECT COUNT(*) AS n FROM account_sessions').get().n >= 2500) throw fail(503, 'SESSION_LIMIT', '当前登录请求较多，请稍后重试。');
@@ -319,6 +500,17 @@ export function createAccountAuth(config) {
       json(res, 200, { ok: true });
       return true;
     }
+    if (path === '/api/auth/recovery-request') {
+      verifyCsrf(req);
+      fields(body, ['username']);
+      const normalizedUsername = username(body.username);
+      rate(`recovery-ip:${address(req)}`, 10, 15 * 60_000);
+      rate(`recovery-user:${digest(normalizedUsername)}`, 3, 60 * 60_000);
+      db.prepare(`UPDATE account_users SET recovery_requested_at = ?, version = version + 1
+        WHERE username = ? AND deleted_at IS NULL AND recovery_requested_at IS NULL`).run(now(), normalizedUsername);
+      json(res, 200, { ok: true });
+      return true;
+    }
     if (path === '/api/auth/change-password') {
       const current = verifyCsrf(req);
       if (!current.user) throw fail(401, 'AUTH_REQUIRED', '请先登录。');
@@ -332,16 +524,16 @@ export function createAccountAuth(config) {
       if (!fresh?.user || fresh.user.id !== current.user.id || !equal(fresh.csrfToken, current.csrfToken)) throw fail(401, 'AUTH_REQUIRED', '登录状态已变化，请重新登录。');
       db.exec('BEGIN IMMEDIATE');
       try {
-        const changed = db.prepare('UPDATE account_users SET password_hash = ? WHERE id = ? AND password_hash = ?').run(passwordHash, account.id, account.password_hash);
+        const changed = db.prepare('UPDATE account_users SET password_hash = ?, recovery_requested_at = NULL, version = version + 1 WHERE id = ? AND password_hash = ? AND deleted_at IS NULL').run(passwordHash, account.id, account.password_hash);
         if (changed.changes !== 1) throw fail(401, 'AUTH_REQUIRED', '密码已变化，请重新登录。');
         db.prepare('DELETE FROM account_sessions WHERE user_id = ?').run(account.id);
         db.exec('COMMIT');
       } catch (error) { db.exec('ROLLBACK'); throw error; }
-      json(res, 200, payload(createSession(req, res, account, current.rememberMe)));
+      json(res, 200, payload(createSession(req, res, db.prepare('SELECT * FROM account_users WHERE id = ?').get(account.id), current.rememberMe)));
       return true;
     }
     throw fail(404, 'NOT_FOUND', '没有此认证接口。');
   }
-  return { handle, resolve, verifyWrite, sessionPayload(req) { validateRequest(req); return payload(recordFor(req)); },
+  return { handle, resolve, verifyWrite, provisionSuperAdmin, sessionPayload(req) { validateRequest(req); return payload(recordFor(req)); },
     close() { if (!closed) { closed = true; rates.clear(); db.close(); } } };
 }

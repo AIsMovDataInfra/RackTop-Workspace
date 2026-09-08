@@ -4,18 +4,18 @@ RackTop 的 AIsMov 维护版从 **1.27.0** 提供 Apple Silicon 与 Intel 两种
 
 ## 下载与系统要求
 
-**发布状态：1.29.0 Mac 测试版已发布。** 两种 DMG、对应更新归档、源码及 `SHA256SUMS` 已上传至 [v1.29.0 Release](https://github.com/AIsMovDataInfra/RackTop/releases/tag/v1.29.0)。
+**发布状态：1.30.0 Mac 测试版准备发布。** 两种 DMG、对应更新归档、源码及 `SHA256SUMS` 以实际附件为准，见 [v1.30.0 Release](https://github.com/AIsMovDataInfra/RackTop/releases/tag/v1.30.0)。
 
 | Mac 机型 | 安装包 |
 | --- | --- |
-| Apple Silicon（M1 / M2 / M3 / M4 等 M 系列） | [RackTop_1.29.0_macos-arm64-unsigned.dmg](https://github.com/AIsMovDataInfra/RackTop/releases/download/v1.29.0/RackTop_1.29.0_macos-arm64-unsigned.dmg) |
-| Intel 处理器 | [RackTop_1.29.0_macos-x64-unsigned.dmg](https://github.com/AIsMovDataInfra/RackTop/releases/download/v1.29.0/RackTop_1.29.0_macos-x64-unsigned.dmg) |
+| Apple Silicon（M1 / M2 / M3 / M4 等 M 系列） | [RackTop_1.30.0_macos-arm64-unsigned.dmg](https://github.com/AIsMovDataInfra/RackTop/releases/download/v1.30.0/RackTop_1.30.0_macos-arm64-unsigned.dmg) |
+| Intel 处理器 | [RackTop_1.30.0_macos-x64-unsigned.dmg](https://github.com/AIsMovDataInfra/RackTop/releases/download/v1.30.0/RackTop_1.30.0_macos-x64-unsigned.dmg) |
 
 在 Apple 菜单的「关于本机」查看芯片类型。两个安装包均为原生架构构建，选择与本机芯片对应的文件。项目配置的最低系统版本为 **macOS 11.0**；这表示构建目标，实际验证范围见文末。
 
 ## 安装与首次打开
 
-1. 下载对应的 DMG；如需校验，同时下载同一 Release 的 `SHA256SUMS` 文件，在下载目录运行 `shasum -a 256 RackTop_1.29.0_macos-arm64-unsigned.dmg`。在 `SHA256SUMS` 中找到文件名完全匹配的那一行，确认其第一列摘要与命令输出一致。Intel 版替换为对应的 `x64` 文件名。
+1. 下载对应的 DMG；如需校验，同时下载同一 Release 的 `SHA256SUMS` 文件，在下载目录运行 `shasum -a 256 RackTop_1.30.0_macos-arm64-unsigned.dmg`。在 `SHA256SUMS` 中找到文件名完全匹配的那一行，确认其第一列摘要与命令输出一致。Intel 版替换为对应的 `x64` 文件名。
 2. 打开 DMG，将 **RackTop** 拖入 **应用程序**。升级已有安装时，先退出 RackTop 再替换应用。
 3. 从「应用程序」启动 RackTop。
 4. 如果 macOS 提示无法验证开发者或无法检查恶意软件，确认下载来源后，打开「系统设置 → 隐私与安全性」，在本次被阻止的应用旁选择「仍要打开」，再确认「打开」。此入口通常需要先尝试打开一次才出现。操作依据 [Apple 的安全打开 App 说明](https://support.apple.com/zh-cn/102445)。

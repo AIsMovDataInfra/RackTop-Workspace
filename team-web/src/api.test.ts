@@ -1,9 +1,16 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { api, ApiError, SESSION_EXPIRED_EVENT } from './api'
+import { api, ApiError, ACCOUNT_CHANGED_EVENT, SESSION_EXPIRED_EVENT } from './api'
 
 afterEach(() => vi.unstubAllGlobals())
 
 describe('authenticated reservation API', () => {
+  it('refreshes account permissions on photo access denial without treating it as a failed login', async () => {
+    const changed = vi.fn(), expired = vi.fn()
+    window.addEventListener(ACCOUNT_CHANGED_EVENT, changed); window.addEventListener(SESSION_EXPIRED_EVENT, expired)
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: { code: 'COMPANY_REQUIRED' } }), { status: 403 })))
+    try { await expect(api.equipmentPhoto('fixture', 1)).rejects.toMatchObject({ status: 403, code: 'COMPANY_REQUIRED' }); expect(changed).toHaveBeenCalledOnce(); expect(expired).not.toHaveBeenCalled() }
+    finally { window.removeEventListener(ACCOUNT_CHANGED_EVENT, changed); window.removeEventListener(SESSION_EXPIRED_EVENT, expired) }
+  })
   it('uses anonymous CSRF for demo sign-in and rotates it for booking without sending owner or role', async () => {
     const fetch = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ user: null, csrfToken: 'anonymous-token' }))).mockResolvedValueOnce(new Response(JSON.stringify({ user: { id: 'demo-lin', role: 'member' }, csrfToken: 'signed-in-token' }))).mockResolvedValueOnce(new Response(JSON.stringify({ reservation: { id: 'reservation-1' } })))
     vi.stubGlobal('fetch', fetch)

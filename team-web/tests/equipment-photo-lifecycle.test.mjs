@@ -1,3 +1,4 @@
+import { assignFixtureCompany } from './helpers/account-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { request } from 'node:http';
@@ -38,6 +39,7 @@ async function fixture(t) {
   const signed = await call('/api/auth/register', { username: 'lifecycle', name: '生命周期测试', password: '临时测试' },
     { cookie: anon.cookie, csrfToken: anon.body.csrfToken });
   assert.equal(signed.status, 201);
+  assignFixtureCompany(dbPath, signed.body.user);
   const session = { cookie: signed.cookie, csrfToken: signed.body.csrfToken };
   const created = await call('/api/equipment', { name: '照片处理设备', category: '摄像头模组', location: '上海' }, session);
   assert.equal(created.status, 201);
@@ -118,5 +120,26 @@ test('logout during asynchronous photo compression prevents the pending write', 
     assert.equal((await upload.promise).status, 401);
     assertUnchanged(dbPath, equipment.id);
     assert.equal((await call(`/api/equipment/${equipment.id}/photo`, undefined, session)).status, 401);
+  } finally { decoder.release(); }
+});
+
+test('revoking company access during photo normalization denies the pending write and future reads', { timeout: 10000 }, async t => {
+  const { dbPath, session, equipment, begin, call, dataUrl } = await fixture(t);
+  const decoder = pauseDecoder(t);
+  try {
+    const upload = begin(`/api/equipment/${equipment.id}/photo`, { version: 1, dataUrl }, session);
+    await decoder.entered;
+    const db = new DatabaseSync(dbPath);
+    try { db.prepare("UPDATE account_users SET company = NULL, version = version + 1 WHERE username = 'lifecycle'").run(); }
+    finally { db.close(); }
+    decoder.release();
+    const result = await upload.promise;
+    assert.equal(result.status, 403); assert.equal(result.body.error.code, 'COMPANY_REQUIRED');
+    assertUnchanged(dbPath, equipment.id);
+    for (const path of [`/api/equipment/${equipment.id}/photo`, '/api/equipment', '/api/resources', '/api/reservations']) {
+      const denied = await call(path, undefined, session);
+      assert.equal(denied.status, 403); assert.equal(denied.body.error.code, 'COMPANY_REQUIRED');
+    }
+    assert.equal((await call('/api/session', undefined, session)).body.user.company, null);
   } finally { decoder.release(); }
 });

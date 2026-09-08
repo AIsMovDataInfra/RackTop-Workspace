@@ -13,7 +13,10 @@ COPY --from=build /app/team-web/dist ./team-web/dist
 COPY team-web/server ./team-web/server
 COPY package.json package-lock.json LICENSE NOTICE.md ./
 RUN npm ci --omit=dev && npm cache clean --force
-COPY scripts/team-backup.mjs ./scripts/team-backup.mjs
+COPY scripts/team-backup.mjs scripts/team-import-inventory.mjs scripts/team-admin.mjs ./scripts/
+COPY docs/EQUIPMENT.md docs/TEAM_ACCOUNTS.md ./docs/
+COPY team-web/README.md team-web/API.md team-web/.env.example ./team-web/
+COPY team-web/deploy ./team-web/deploy
 RUN mkdir /data && chown node:node /data
 USER node
 EXPOSE 4318

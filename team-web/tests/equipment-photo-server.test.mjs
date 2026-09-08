@@ -1,3 +1,4 @@
+import { assignFixtureCompany } from './helpers/account-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { request } from 'node:http';
@@ -30,6 +31,7 @@ async function fixture(t) {
   const start = { cookie: anon.headers['set-cookie'][0].split(';')[0], csrfToken: anon.body.csrfToken };
   const registered = await call('/api/auth/register', { method: 'POST', session: start, body: { username: '拍', name: '照片验收', password: '照' } });
   assert.equal(registered.status, 201);
+  assignFixtureCompany(config.dbPath, registered.body.user);
   const session = { cookie: registered.headers['set-cookie'][0].split(';')[0], csrfToken: registered.body.csrfToken };
   const created = await call('/api/equipment', { method: 'POST', session, body: { name: '测试摄像头', category: '摄像头模组', location: '上海' } });
   assert.equal(created.status, 201, JSON.stringify(created.body));

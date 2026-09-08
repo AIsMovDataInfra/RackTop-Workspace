@@ -12,6 +12,7 @@ const server: Server = { id: 'local-a', name: 'A100', host: 'secret-host.invalid
 const anonymous: TeamStatus = { url:'https://136.0.110.161',authenticated:false,user:null,bindings:{} }
 const admin: TeamStatus = { ...anonymous,authenticated:true,user:{id:'admin',name:'管理员',username:'owner',role:'admin'} }
 const member: TeamStatus = { ...anonymous,authenticated:true,user:{id:'member',name:'团队成员',username:'中',role:'member'} }
+const waiting: TeamStatus = { ...member, user: { ...member.user!, company: null, isSuperAdmin: false, version: 1 } }
 const privateData: TeamData = {
   resources:[{id:'resource-123',name:'成员专用资源',cluster:'团队',gpuModel:'A100',gpuCount:8,status:'unknown',lastSeenAt:null,inventoryState:'synced',enabled:true}],
   reservations:[{id:'booking-123',resourceId:'resource-123',resourceName:'成员预约记录',ownerName:'预约成员',scope:'machine',gpuIndices:[],startAt:new Date().toISOString(),endAt:new Date(Date.now()+3_600_000).toISOString(),status:'confirmed'}],
@@ -24,7 +25,7 @@ beforeEach(()=>{
   vi.spyOn(teamApi,'status').mockResolvedValue(anonymous)
   vi.spyOn(teamApi,'data').mockResolvedValue({resources:[],reservations:[]})
 })
-afterEach(()=>{act(()=>root.unmount());container.remove();vi.restoreAllMocks()})
+afterEach(()=>{act(()=>root.unmount());container.remove();vi.restoreAllMocks();vi.useRealTimers()})
 describe('team workspace',()=>{
   it('requires login before requesting or displaying any team data and keeps the registration link reachable',async()=>{
     vi.mocked(teamApi.data).mockResolvedValue(privateData)
@@ -42,6 +43,77 @@ describe('team workspace',()=>{
     expect(container.textContent).not.toContain(server.identityFile)
     await click('打开预约网页')
     expect(openExternalUrl).toHaveBeenCalledWith('https://136.0.110.161/')
+  })
+  it('opens password recovery at the trusted team service without passing credentials',async()=>{
+    await mount();await click('账号登录')
+    const password=container.querySelector<HTMLInputElement>('input[type=password]')!
+    await act(async()=>{
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(password,'仅本机输入')
+      password.dispatchEvent(new Event('input',{bubbles:true}))
+    })
+    await click('忘记密码')
+    expect(openExternalUrl).toHaveBeenLastCalledWith('https://136.0.110.161/?auth=recover')
+    expect(container.querySelector('[role=dialog]')).not.toBeNull()
+  })
+  it('keeps an unassigned member signed in without polling business data and loads data after company assignment',async()=>{
+    vi.useFakeTimers()
+    vi.mocked(teamApi.status).mockResolvedValue(waiting)
+    vi.mocked(teamApi.data).mockResolvedValue(privateData)
+    await mount()
+    expect(container.textContent).toContain('等待分配公司')
+    expect(container.textContent).not.toContain('尚未连接团队账号')
+    expect(container.textContent).not.toContain('团队资源 0')
+    expect(container.textContent).not.toContain('当前与即将开始的预约')
+    expect(teamApi.data).not.toHaveBeenCalled()
+    await act(async()=>{await vi.advanceTimersByTimeAsync(60_000)})
+    expect(teamApi.data).not.toHaveBeenCalled()
+    await click('打开预约网页')
+    expect(openExternalUrl).toHaveBeenLastCalledWith('https://136.0.110.161/')
+    vi.mocked(teamApi.status).mockResolvedValue({ ...waiting, user: { ...waiting.user!, company: '西浦', version: 2 } })
+    await click('刷新')
+    expect(container.textContent).not.toContain('等待分配公司')
+    expect(container.textContent).toContain('团队成员 · 西浦')
+    expect(container.textContent).toContain('成员预约记录')
+    expect(container.textContent).toContain('成员专用资源')
+  })
+  it('prevents an unassigned resource admin from publishing and still allows logout',async()=>{
+    vi.mocked(teamApi.status).mockResolvedValue({ ...admin, user: { ...admin.user!, company: null, isSuperAdmin: false } })
+    const logout=vi.spyOn(teamApi,'logout').mockImplementation(async()=>{vi.mocked(teamApi.status).mockResolvedValue(anonymous)})
+    await mount()
+    expect(container.textContent).toContain('等待分配公司')
+    expect(container.textContent).not.toContain('同步本机资源')
+    expect(teamApi.data).not.toHaveBeenCalled()
+    await click('退出账号')
+    expect(logout).toHaveBeenCalledOnce()
+    expect(container.textContent).toContain('尚未连接团队账号')
+  })
+  it('lets the super administrator access data without a company',async()=>{
+    vi.mocked(teamApi.status).mockResolvedValue({ ...admin, user: { ...admin.user!, company: null, isSuperAdmin: true, version: 1 } })
+    vi.mocked(teamApi.data).mockResolvedValue(privateData)
+    await mount()
+    expect(container.textContent).toContain('超级管理员')
+    expect(container.textContent).toContain('同步本机资源')
+    expect(container.textContent).toContain('成员预约记录')
+    expect(container.textContent).not.toContain('等待分配公司')
+  })
+  it('clears visible data but preserves the login when the server requires company assignment',async()=>{
+    vi.mocked(teamApi.status).mockResolvedValue({ ...member, user: { ...member.user!, company: 'A公司', isSuperAdmin: false, version: 1 } })
+    vi.mocked(teamApi.data).mockResolvedValue(privateData)
+    await mount()
+    expect(container.textContent).toContain('成员预约记录')
+    vi.mocked(teamApi.data).mockImplementationOnce(async()=>{
+      vi.mocked(teamApi.status).mockResolvedValue(waiting)
+      throw new Error('COMPANY_REQUIRED: 请联系超级管理员分配公司')
+    })
+    await click('刷新')
+    expect(container.textContent).toContain('等待分配公司')
+    expect(container.textContent).not.toContain('尚未连接团队账号')
+    expect(container.textContent).not.toContain('成员预约记录')
+    expect(container.textContent).not.toContain('成员专用资源')
+    expect(container.querySelector('[role=alert]')).toBeNull()
+    const count=vi.mocked(teamApi.data).mock.calls.length
+    await click('刷新')
+    expect(teamApi.data).toHaveBeenCalledTimes(count)
   })
   it('publishes only selected IDs and shows per-resource synchronization errors',async()=>{
     vi.mocked(teamApi.status).mockResolvedValue(admin)
