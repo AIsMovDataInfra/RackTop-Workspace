@@ -4,7 +4,7 @@ RackTop 的 AIsMov 维护版从 **1.27.0** 提供 Apple Silicon 与 Intel 两种
 
 ## 下载与系统要求
 
-**当前版本：1.28.0 Mac 测试版。** 两种 DMG、对应更新归档、源码及 `SHA256SUMS` 的实际构建和发布状态以对应附件为准： [v1.28.0 Release](https://github.com/AIsMovDataInfra/RackTop/releases/tag/v1.28.0)。
+**发布状态：1.28.0 Mac 测试版已发布。** 两种 DMG、对应更新归档、源码及 `SHA256SUMS` 已上传至 [v1.28.0 Release](https://github.com/AIsMovDataInfra/RackTop/releases/tag/v1.28.0)。
 
 | Mac 机型 | 安装包 |
 | --- | --- |
@@ -67,7 +67,9 @@ RACKTOP_MACOS_TARGET=x86_64-apple-darwin RACKTOP_REQUIRE_UPDATER=0 npm run bundl
 
 ## 验证范围
 
-1.28.0 使用 [本标签双架构工作流](https://github.com/AIsMovDataInfra/RackTop/actions/runs/34194968571) 构建并验证，最终安装包以本版本 Release 附件为准。以下保留首批 1.27.0 的平台验证记录。
+1.28.0 的 [标签双架构工作流 34194968571](https://github.com/AIsMovDataInfra/RackTop/actions/runs/34194968571) 已通过：两架构前端/Rust 检查、DMG 与更新包一致性、代码签名、更新签名、隔离原生启动及最终发布均成功。安装包采用 ad-hoc 签名、未经 Apple 公证。设备网页的浏览器操作已验证；真实 Mac 用户的首次安装、系统浏览器打开和自动更新仍需单独验收。
+
+以下保留首批 1.27.0 的平台验证记录。
 
 GitHub Actions [v1.27.0 标签双架构构建 34180973823](https://github.com/AIsMovDataInfra/RackTop/actions/runs/34180973823) 已在 Apple Silicon **macOS 14.8.9** 与 Intel **macOS 15.7.9** 完成验证：
 
