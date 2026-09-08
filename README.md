@@ -2,7 +2,7 @@
 
 本项目由 **AIsMov** 持续维护，代码、功能改进与 Linux 发布托管于 [AIsMovDataInfra/RackTop](https://github.com/AIsMovDataInfra/RackTop)。本 fork 最初基于 [Tongzh-SEU/RackTop](https://github.com/Tongzh-SEU/RackTop) 官方 **v1.25.4**；原作者为 **Tongzh-SEU**。本仓库保留上游 Git 历史、作者信息和 [GPL-3.0 许可证](LICENSE)，作为独立社区 fork 开发和发布。
 
-最新已发布的 Linux 测试版：**1.26.0-linux.4**；下方下载表指向此版本，目标为 **Ubuntu 22.04 x86_64 / amd64 图形桌面**。当前源码的新增功能与版本记录见 [更新说明](docs/VERSION_INFOS.md)。上游功能说明与截图保留在下方；Linux 的实际验证范围见 [安装与构建说明](docs/LINUX.md#验证范围)。
+本次 Linux 测试版：**1.26.0-linux.9**，目标为 **Ubuntu 22.04 x86_64 / amd64 图形桌面**。发布正在准备中，下方 linux.9 安装包在标签构建通过后可下载；请以对应 Release 的实际附件为准。新增功能与版本记录见 [更新说明](docs/VERSION_INFOS.md)。上游功能说明与截图保留在下方；Linux 的实际验证范围见 [安装与构建说明](docs/LINUX.md#验证范围)。
 
 <div align="right">
   🌐 Language:
@@ -46,7 +46,7 @@ RackTop 是面向个人研究者和小型团队的 GPU 服务器桌面工作台�
 
 | 客户端平台 | 提供方 | 安装包与下载 |
 | --- | --- | --- |
-| **Ubuntu 22.04 x86_64 / amd64** | **AIsMov 社区测试版 1.26.0-linux.4** | [下载 Linux .deb](https://github.com/AIsMovDataInfra/RackTop/releases/download/v1.26.0-linux.4/RackTop_1.26.0-linux.4_amd64.deb) · [版本说明、源码与校验文件](https://github.com/AIsMovDataInfra/RackTop/releases/tag/v1.26.0-linux.4) |
+| **Ubuntu 22.04 x86_64 / amd64** | **AIsMov 社区测试版 1.26.0-linux.9** | [下载 Linux .deb](https://github.com/AIsMovDataInfra/RackTop/releases/download/v1.26.0-linux.9/RackTop_1.26.0-linux.9_amd64.deb) · [版本说明、源码与校验文件](https://github.com/AIsMovDataInfra/RackTop/releases/tag/v1.26.0-linux.9) |
 | macOS Apple Silicon | Tongzh-SEU 官方 v1.25.4 | [下载官方 .dmg](https://github.com/Tongzh-SEU/RackTop/releases/download/v1.25.4/RackTop_1.25.4_macos-arm64.dmg) |
 | Windows x64 | Tongzh-SEU 官方 v1.25.4 | [下载官方安装程序](https://github.com/Tongzh-SEU/RackTop/releases/download/v1.25.4/RackTop_1.25.4_x64-setup.exe) |
 
@@ -55,7 +55,7 @@ Windows/macOS 安装包由官方仓库提供；后续版本请查看 [上游 Rel
 下载 `.deb` 后，在下载目录运行：
 
 ```bash
-sudo apt install ./RackTop_1.26.0-linux.4_amd64.deb
+sudo apt install ./RackTop_1.26.0-linux.9_amd64.deb
 racktop
 ```
 
@@ -63,7 +63,7 @@ racktop
 
 ## 团队预约 Web
 
-新增独立的 [团队资源预约网页](team-web/README.md)：共享整机和指定 GPU 排期、冲突检查、续约、取消和管理员资源目录，支持飞书登录与可选群通知。需要部署一个中央服务，成员通过浏览器访问。开发环境使用明确标识的本机演示数据；正式部署需要飞书应用配置与 HTTPS。它与桌面端监控独立，不采集实际 GPU 利用率或保存共享 SSH 密码。
+[团队资源预约网页](team-web/README.md) 提供整机和指定 GPU 排期、冲突检查、续约、取消和管理员资源目录。成员可以免登录浏览公开排期，用用户名和密码注册后预约，不需要邮箱或飞书账号。RackTop 的「团队预约」入口连接同一中央服务，管理员可选择桌面服务器同步 GPU 硬件清单，网页与桌面共用资源和预约数据；SSH 主机地址、登录凭据和私钥不会随同步上传。正式服务使用 HTTPS，飞书登录和群通知保留为可选配置；本机 demo 明确标识，不能用于生产。预约不锁定 GPU，也不终止训练进程。
 
 本机体验（Node.js 24+）：`npm ci` 后执行 `npm run team:dev`，打开 `http://127.0.0.1:1421/`。
 

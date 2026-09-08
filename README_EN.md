@@ -2,9 +2,9 @@
 
 **AIsMov** maintains this project, with source code, feature development and Linux releases hosted at [AIsMovDataInfra/RackTop](https://github.com/AIsMovDataInfra/RackTop). This fork was initially based on official [Tongzh-SEU/RackTop](https://github.com/Tongzh-SEU/RackTop) **v1.25.4**. **Tongzh-SEU** remains the original author. Development and releases continue as an independent community fork, preserving upstream Git history, attribution and the [GPL-3.0 license](LICENSE).
 
-Latest published Linux pre-release: **1.26.0-linux.4**; the download table points to this version for **Ubuntu 22.04 x86_64 / amd64 desktops**. See the [changelog](docs/VERSION_INFOS.md) for changes in the current source. The upstream feature guide and screenshots appear below; see [Linux validation and limitations](docs/LINUX.md#验证范围) for the scope tested on Linux.
+This Linux pre-release is **1.26.0-linux.9**, targeting **Ubuntu 22.04 x86_64 / amd64 desktops**. Publication is being prepared; the linux.9 package linked below becomes available after the tag build passes. Check the corresponding Release assets for availability. See the [changelog](docs/VERSION_INFOS.md) for changes. The upstream feature guide and screenshots appear below; see [Linux validation and limitations](docs/LINUX.md#验证范围) for the scope tested on Linux.
 
-The new [team reservation web app](team-web/README.md) supports whole-machine and selected-GPU bookings, conflict checks, renewals, cancellation and an administrator resource catalog. It runs as a separate central service with Feishu login and optional group notifications. Local demos are explicitly labeled; shared deployment requires Feishu credentials and HTTPS. It does not monitor live GPU utilization or store SSH credentials. Run `npm ci` and `npm run team:dev` with Node.js 24+ to try it locally.
+The [team reservation web app](team-web/README.md) supports whole-machine and selected-GPU bookings, conflict checks, renewals, cancellation and an administrator resource catalog. Anyone can browse the public schedule; booking requires a username and password, with no email or Feishu account needed. RackTop’s Team Reservations entry connects to the same central service, and administrators can select desktop servers to synchronize GPU inventories. The web and desktop views share resources and bookings; synchronization does not upload SSH host addresses, login credentials or private keys. Production uses HTTPS. Feishu login and group notifications remain optional, and clearly labeled local demos are not suitable for production. Reservations do not lock GPUs or stop training processes. Run `npm ci` and `npm run team:dev` with Node.js 24+ to try it locally.
 
 <div align="right">
   🌐 Language:
@@ -45,7 +45,7 @@ Find the right GPU before launching a job, monitor resources and processes while
 
 | Client platform | Publisher | Installer |
 | --- | --- | --- |
-| **Ubuntu 22.04 x86_64 / amd64** | **AIsMov community pre-release 1.26.0-linux.4** | [Linux .deb](https://github.com/AIsMovDataInfra/RackTop/releases/download/v1.26.0-linux.4/RackTop_1.26.0-linux.4_amd64.deb) · [Release notes, source and checksums](https://github.com/AIsMovDataInfra/RackTop/releases/tag/v1.26.0-linux.4) |
+| **Ubuntu 22.04 x86_64 / amd64** | **AIsMov community pre-release 1.26.0-linux.9** | [Linux .deb](https://github.com/AIsMovDataInfra/RackTop/releases/download/v1.26.0-linux.9/RackTop_1.26.0-linux.9_amd64.deb) · [Release notes, source and checksums](https://github.com/AIsMovDataInfra/RackTop/releases/tag/v1.26.0-linux.9) |
 | macOS Apple Silicon | Tongzh-SEU official v1.25.4 | [Official .dmg](https://github.com/Tongzh-SEU/RackTop/releases/download/v1.25.4/RackTop_1.25.4_macos-arm64.dmg) |
 | Windows x64 | Tongzh-SEU official v1.25.4 | [Official installer](https://github.com/Tongzh-SEU/RackTop/releases/download/v1.25.4/RackTop_1.25.4_x64-setup.exe) |
 
@@ -54,7 +54,7 @@ Windows/macOS downloads are hosted by the original project. Check [upstream Rele
 Install the downloaded package from its directory:
 
 ```bash
-sudo apt install ./RackTop_1.26.0-linux.4_amd64.deb
+sudo apt install ./RackTop_1.26.0-linux.9_amd64.deb
 racktop
 ```
 
