@@ -2,7 +2,7 @@
 
 本项目由 **AIsMov** 持续维护，代码、功能改进与 Linux / macOS 发布托管于 [AIsMovDataInfra/RackTop](https://github.com/AIsMovDataInfra/RackTop)。本 fork 最初基于 [Tongzh-SEU/RackTop](https://github.com/Tongzh-SEU/RackTop) 官方 **v1.25.4**；原作者为 **Tongzh-SEU**。本仓库保留上游 Git 历史、作者信息和 [GPL-3.0 许可证](LICENSE)，作为独立社区 fork 开发和发布。
 
-本次 Linux 测试版：**1.29.0-linux.11**，目标为 **Ubuntu 22.04 x86_64 / amd64 图形桌面**。下载入口见下表，构建和发布状态以对应 Release 的实际附件为准。新增功能与版本记录见 [更新说明](docs/VERSION_INFOS.md)。上游功能说明与截图保留在下方；Linux 的实际验证范围见 [安装与构建说明](docs/LINUX.md#验证范围)。
+本次 Linux 测试版：**1.30.0-linux.12**，目标为 **Ubuntu 22.04 x86_64 / amd64 图形桌面**。下载入口见下表，构建和发布状态以对应 Release 的实际附件为准。新增功能与版本记录见 [更新说明](docs/VERSION_INFOS.md)。上游功能说明与截图保留在下方；Linux 的实际验证范围见 [安装与构建说明](docs/LINUX.md#验证范围)。
 
 macOS 维护版 **1.30.0** 分别提供 Apple Silicon 和 Intel 安装包，沿用维护版的本机 SSH 密钥管理、共享网关、邀请码与访客终端/文件访问、在线团队预约等功能，并增加二维码设备管理入口。下载状态、首次打开和验证范围见 [macOS 使用说明](docs/MACOS.md)。
 
@@ -48,7 +48,7 @@ RackTop 是面向个人研究者和小型团队的 GPU 服务器桌面工作台�
 
 | 客户端平台 | 提供方 | 安装包与下载 |
 | --- | --- | --- |
-| **Ubuntu 22.04 x86_64 / amd64** | **AIsMov 社区测试版 1.29.0-linux.11** | [下载 Linux .deb](https://github.com/AIsMovDataInfra/RackTop/releases/download/v1.29.0-linux.11/RackTop_1.29.0-linux.11_amd64.deb) · [版本说明、源码与校验文件](https://github.com/AIsMovDataInfra/RackTop/releases/tag/v1.29.0-linux.11) |
+| **Ubuntu 22.04 x86_64 / amd64** | **AIsMov 社区测试版 1.30.0-linux.12** | [下载 Linux .deb](https://github.com/AIsMovDataInfra/RackTop/releases/download/v1.30.0-linux.12/RackTop_1.30.0-linux.12_amd64.deb) · [版本说明、源码与校验文件](https://github.com/AIsMovDataInfra/RackTop/releases/tag/v1.30.0-linux.12) |
 | macOS Apple Silicon（M 系列） | AIsMov 社区测试版 1.30.0 | [下载 arm64 .dmg](https://github.com/AIsMovDataInfra/RackTop/releases/download/v1.30.0/RackTop_1.30.0_macos-arm64-unsigned.dmg) |
 | macOS Intel | AIsMov 社区测试版 1.30.0 | [下载 x64 .dmg](https://github.com/AIsMovDataInfra/RackTop/releases/download/v1.30.0/RackTop_1.30.0_macos-x64-unsigned.dmg) |
 | Windows x64 | Tongzh-SEU 官方 v1.25.4 | [下载官方安装程序](https://github.com/Tongzh-SEU/RackTop/releases/download/v1.25.4/RackTop_1.25.4_x64-setup.exe) |
@@ -60,7 +60,7 @@ Linux 新版发布在 [本仓库 Releases](https://github.com/AIsMovDataInfra/Ra
 下载 `.deb` 后，在下载目录运行：
 
 ```bash
-sudo apt install ./RackTop_1.29.0-linux.11_amd64.deb
+sudo apt install ./RackTop_1.30.0-linux.12_amd64.deb
 racktop
 ```
 
