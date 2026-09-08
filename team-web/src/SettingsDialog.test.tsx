@@ -34,3 +34,17 @@ it('reports the current password error without claiming a password change', asyn
   expect(container.querySelector('[role="alert"]')?.textContent).toContain('当前密码不正确')
   expect(onSessionChanged).not.toHaveBeenCalled()
 })
+
+it('accepts a short Chinese new password, preserves spaces and rejects only blank new input', async () => {
+  const change = vi.spyOn(api, 'changePassword').mockResolvedValue(session)
+  await act(async () => root.render(<SettingsDialog state={state} session={session} onClose={vi.fn()} />))
+  enter('[autocomplete="current-password"]', ' '.repeat(12)); enter('[autocomplete="new-password"]', '   ')
+  await act(async () => container.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })))
+  expect(change).not.toHaveBeenCalled()
+  expect(container.querySelector('[role="alert"]')?.textContent).toContain('请输入密码')
+  enter('[autocomplete="new-password"]', ' 密 ')
+  expect(container.querySelector<HTMLFormElement>('form')!.checkValidity()).toBe(true)
+  await act(async () => container.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })))
+  expect(change).toHaveBeenCalledWith({ oldPassword: ' '.repeat(12), newPassword: ' 密 ' })
+  expect(container.querySelector('input[minlength], input[maxlength], input[pattern]')).toBeNull()
+})

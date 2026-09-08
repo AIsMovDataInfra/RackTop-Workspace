@@ -14,3 +14,13 @@ export interface Session {
 }
 export interface BookingDraft { resourceId: string; scope: 'machine' | 'gpus'; gpuIndices: number[]; startAt: string; endAt: string; purpose: string; gpuIds?: string[]; inventoryVersion?: number; requestId?: string }
 export interface ResourceDraft { cluster: string; name: string; gpuModel: string; gpuCount: number; notes: string; enabled?: boolean }
+export type EquipmentStatus = 'available' | 'in_use' | 'maintenance' | 'retired'
+export interface EquipmentDraft {
+  name: string; category: string; model: string; serialNumber: string
+  responsiblePerson: string; location: string; notes: string; status: EquipmentStatus
+}
+export interface Equipment extends EquipmentDraft { id: string; code: string; version: number; createdAt: string; updatedAt: string }
+export interface EquipmentHistory {
+  actorName: string; action: 'created' | 'updated'; at: string
+  changes: { field: string; oldValue: string | null; newValue: string }[]
+}

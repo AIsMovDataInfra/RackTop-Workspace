@@ -6,6 +6,7 @@ import { createStore, ApiError } from './store.mjs';
 import { createAuth } from './auth.mjs';
 import { createAccountAuth } from './account-auth.mjs';
 import { createNotifier } from './notifier.mjs';
+import { createEquipmentStore } from './equipment-store.mjs';
 
 const directory = dirname(fileURLToPath(import.meta.url));
 const mimeTypes = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.ico': 'image/x-icon', '.woff': 'font/woff', '.woff2': 'font/woff2' };
@@ -100,6 +101,7 @@ export function createTeamServer(overrides = {}) {
   const auth = config.auth || (config.mode === 'account' ? createAccountAuth(config) : createAuth(config));
   const notifier = config.notifier || createNotifier(config);
   const store = config.store || createStore({ dbPath: config.dbPath, now: config.now, notificationsConfigured: config.notificationsConfigured });
+  const equipmentStore = createEquipmentStore({ dbPath: config.dbPath, now: config.now });
   if (config.mode === 'demo' && config.seedDemo !== false) store.seedDemo();
   let timer, closing = false, notificationRun = null;
   let listenAuthority;
@@ -155,6 +157,18 @@ export function createTeamServer(overrides = {}) {
       const session = auth.resolve(req);
       // A rejected device credential must not silently become a public visitor.
       if (req.headers.authorization !== undefined && !session?.user) throw new ApiError(401, 'UNAUTHENTICATED', '设备登录已过期，请重新登录');
+      const equipmentMatch = /^\/api\/equipment\/([^/]+)$/.exec(url.pathname);
+      if (url.pathname === '/api/equipment' || equipmentMatch) {
+        if ([...url.searchParams].length) throw new ApiError(422, 'INVALID_INPUT', '设备接口不支持查询参数');
+        if (req.method === 'GET') {
+          json(res, 200, equipmentMatch ? equipmentStore.get(equipmentMatch[1]) : { equipment: equipmentStore.list() }); return;
+        }
+        if (!session?.user) throw new ApiError(401, 'UNAUTHENTICATED', '请先登录');
+        if (['POST', 'PATCH', 'PUT', 'DELETE'].includes(req.method)) auth.verifyWrite(req, session);
+        if (!equipmentMatch && req.method === 'POST') { json(res, 201, { equipment: equipmentStore.create(body, session.user) }); return; }
+        if (equipmentMatch && req.method === 'PATCH') { json(res, 200, { equipment: equipmentStore.update(equipmentMatch[1], body, session.user) }); return; }
+        throw new ApiError(405, 'METHOD_NOT_ALLOWED', '设备仅支持查看、新建和修改，请将停用设备标为已退役');
+      }
       // Account mode has an intentionally public, read-only team schedule. No member
       // credentials, reservation purposes or resource notes leave this projection.
       if (!session?.user && config.mode === 'account' && req.method === 'GET') {
@@ -251,7 +265,7 @@ export function createTeamServer(overrides = {}) {
     clearInterval(timer);
     await new Promise(resolveClose => { server.close(() => resolveClose()); server.closeIdleConnections(); });
     if (notificationRun) await notificationRun.catch(() => {});
-    auth.close(); store.close();
+    auth.close(); equipmentStore.close(); store.close();
   }
   return { config, server, store, auth, start, close, processNotifications };
 }

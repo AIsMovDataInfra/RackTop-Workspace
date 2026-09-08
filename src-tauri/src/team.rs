@@ -367,9 +367,7 @@ impl TeamManager {
         });
     }
     async fn login(&self, username: String, password: String) -> Result<Value, String> {
-        if username.len() > 80 || password.len() > 512 {
-            return Err("用户名或密码长度无效".into());
-        }
+        validate_login_input(&username, &password)?;
         // Verify both keyring read and write before the server creates a device credential.
         let (generation, old_token) = self.update(true, |v| {
             let token = v.token.clone();
@@ -552,6 +550,17 @@ pub fn prepare_profile(input: Value) -> Result<usize, String> {
     })
 }
 
+fn validate_login_input(username: &str, password: &str) -> Result<(), String> {
+    if username.trim().is_empty() {
+        return Err("请输入用户名".into());
+    }
+    // Existing accounts may have an all-space password; never trim it here.
+    if password.is_empty() {
+        return Err("请输入密码".into());
+    }
+    Ok(())
+}
+
 fn login_user(value: Option<&Value>) -> Result<Value, String> {
     let value = value.ok_or("预约中心没有返回账号信息")?;
     let valid = |key: &str, max| {
@@ -562,7 +571,11 @@ fn login_user(value: Option<&Value>) -> Result<Value, String> {
     };
     let id = valid("id", 100).ok_or("账号标识无效")?;
     let name = valid("name", 200).ok_or("账号姓名无效")?;
-    let username = valid("username", 80).ok_or("账号用户名无效")?;
+    let username = value
+        .get("username")
+        .and_then(Value::as_str)
+        .filter(|s| !s.trim().is_empty())
+        .ok_or("账号用户名无效")?;
     let role = valid("role", 20)
         .filter(|r| matches!(*r, "admin" | "member"))
         .ok_or("账号权限无效")?;
@@ -887,6 +900,26 @@ mod tests {
         assert!(!projected.to_string().contains("private-"));
         assert!(login_user(Some(
             &json!({"id":"1","name":"N","username":"u","role":"superuser"})
+        ))
+        .is_err());
+    }
+
+    #[test]
+    fn team_login_accepts_short_unicode_and_long_credentials_without_trimming_passwords() {
+        for username in ["中".to_owned(), "a".to_owned(), " A.+ @ 中文 ! ".repeat(80)] {
+            for password in ["密".to_owned(), " ".repeat(12), "中文密码 ! ".repeat(100)] {
+                assert!(validate_login_input(&username, &password).is_ok());
+            }
+            let projected = login_user(Some(
+                &json!({"id":"member-1","name":"成员","username":username,"role":"member"}),
+            ))
+            .unwrap();
+            assert_eq!(projected["username"], username);
+        }
+        assert!(validate_login_input(" \t ", "密").is_err());
+        assert!(validate_login_input("中", "").is_err());
+        assert!(login_user(Some(
+            &json!({"id":"member-1","name":"成员","username":"   ","role":"member"})
         ))
         .is_err());
     }

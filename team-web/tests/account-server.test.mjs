@@ -187,11 +187,28 @@ test('readConfig propagates production account settings and rejects unsafe deplo
   assert.equal(config.adminUsername, 'owner'); assert.equal(config.bootstrapToken, bootstrapToken);
   assert.equal(readConfig({ TEAM_TRUST_PROXY: 'false' }).trustProxy, false);
   assert.throws(() => readConfig({ TEAM_TRUST_PROXY: 'yes' }), /TEAM_TRUST_PROXY/);
-  for (const extra of [{ publicUrl: 'http://127.0.0.1:4318' }, { adminUsername: 'not an account' }, { bootstrapToken: 'too-short' },
+  for (const extra of [{ publicUrl: 'http://127.0.0.1:4318' }, { adminUsername: '   ' }, { bootstrapToken: 'too-short' },
     { host: '0.0.0.0' }, { trustProxy: 'true' }, { publicUrl: 'https://team.example.test/path' }]) {
     assert.throws(() => createTeamServer({ ...config, ...extra })); assert.equal(existsSync(dbPath), false);
   }
   const app = createTeamServer({ ...config, port: 0 }); await app.close();
   // Site restarts may omit the setup token; keeping that secret configured is not required.
   const restarted = createTeamServer({ ...config, port: 0, bootstrapToken: '' }); await restarted.close();
+});
+
+test('HTTP accounts accept short Chinese credentials and long ordinary values while retaining the total body limit', async t => {
+  const { call, register, anonymous, sessionOf } = await fixture(t);
+  let session = await register('小', { name: '短账号', password: '密' });
+  const change = await call('/api/auth/change-password', { method: 'POST', session, body: { oldPassword: '密', newPassword: '新' } });
+  assert.equal(change.status, 200, change.text); session = sessionOf(change);
+  await call('/api/auth/logout', { method: 'POST', session, body: {} });
+  const login = await call('/api/auth/login', { method: 'POST', session: await anonymous(), body: { username: ' 小 ', password: '新' } });
+  assert.equal(login.status, 200, login.text);
+  const username = 'Name 中文 + @.'.repeat(80), password = '密 '.repeat(300);
+  const long = await register(username, { name: '长账号', password });
+  assert.equal(long.user.username, username.toLowerCase());
+  const device = await call('/api/auth/device-login', { method: 'POST', body: { username, password, deviceName: '桌面' } });
+  assert.equal(device.status, 200, device.text);
+  const oversized = await call('/api/auth/register', { method: 'POST', session: await anonymous(), body: { username: 'body-limit', name: '容量边界', password: 'x'.repeat(64 * 1024) } });
+  assert.equal(oversized.status, 413); assert.equal(oversized.body.error.code, 'BODY_TOO_LARGE');
 });

@@ -39,7 +39,7 @@
 
 `Session`：`{user:User|null,csrfToken:string|null,authMode:'account',accountRegistration:true,rememberMe:boolean,feishuConfigured:false,notifications:{configured:boolean},timezone:'Asia/Shanghai'}`。
 
-用户名去除两端空格并转小写，匹配 `[a-z0-9_-]{3,32}`；姓名 1–60 字符、规范化后唯一、注册后固定。密码为 12–128 个 Unicode 字符且不裁剪空格。`rememberMe` 只能为布尔值；省略或 false 时网页登录 8 小时，true 为 30 天。改密保留当前网页登录时长偏好并重新计时。匿名会话 10 分钟过期。
+用户名去除两端空格并转小写后须非空，支持中英文，不另设格式或长度限制（仍受整个请求 64 KiB 上限约束）；姓名是独立显示名，1–60 字符、规范化后唯一、注册后固定。新密码须非空且不能全为空白，原样保存，不裁剪空格；登录继续兼容旧账号已设置的含空格密码。`rememberMe` 只能为布尔值；省略或 false 时网页登录 8 小时，true 为 30 天。改密保留当前网页登录时长偏好并重新计时。匿名会话 10 分钟过期。
 
 管理员必须用服务端 `TEAM_BOOTSTRAP_TOKEN` 一次性认领，不能通过“第一个注册”或名字获得权限。可用 `TEAM_ADMIN_USERNAME` 保留首次管理员用户名；没有正确码不能抢注该用户名。首页 `/#setup=<认领码>` 只负责向注册表单提供码，服务端在事务中消费并持久化认领状态。用户自己设置账号和密码；服务端没有默认管理员密码。首版没有找回密码或管理员重置密码 API。
 
@@ -47,7 +47,7 @@
 
 ## 公开浏览白名单
 
-只有 account 模式允许以下业务 GET 在没有 Cookie 时公开访问，不会为每次公开读取创建新会话：
+资源与预约的以下业务 GET 仅在 account 模式允许没有 Cookie 时公开访问，不会为每次公开读取创建新会话。设备台账另有独立的公开浏览接口，见下一节。
 
 | 路径 | 匿名可见内容 |
 | --- | --- |
@@ -59,6 +59,41 @@
 预约列表支持 `from`、`to`、`mine`，拒绝重复和未知参数；匿名 `mine=true` 返回 401，`mine=false` 可用。缺省窗口为过去 7 天至未来 30 天，最大查询跨度 366 天，最多 1000 条。资源和预约的公开投影使用字段白名单；新内部字段不会自动公开。
 
 已登录成员可读取完整团队资源和排期，包括停用资源、备注和预约用途。因此备注和用途不应用来保存秘密。所有业务写入仍需登录，公开显示姓名并不允许匿名修改或取消同名预约。
+
+## 硬件设备台账
+
+设备台账用于登记实物设备，与算力预约的 `Resource` 分开存储。新库不创建示例设备，也不自动把 SSH 连接转换成实物。设备表与账号、预约共用 `TEAM_DB_PATH` 指定的 SQLite 文件，原数据库快照备份会包含设备及变更记录。
+
+| 请求 | 输入／返回 |
+| --- | --- |
+| `GET /api/equipment` | 所有模式均可匿名读取 → `{equipment:Equipment[]}`，包括已退役设备，按更新时间倒序、编号排序。 |
+| `POST /api/equipment` | 任意已登录成员；设备字段 → `201 {equipment:Equipment}`。 |
+| `GET /api/equipment/:id` | 所有模式均可匿名读取 → `{equipment:Equipment,history:EquipmentChange[]}`。 |
+| `PATCH /api/equipment/:id` | 任意已登录成员；`{version,...修改字段}` → `200 {equipment:Equipment}`。 |
+
+设备 ID 是服务端分配且永不更改的 UUID；编号是服务端生成的唯一 `RT-XXXXXXXX`。名称、位置、负责人或状态改变时 ID 与编号保持不变，二维码应使用 `/equipment/:id` 页面链接。没有删除接口；停用设备设为 `retired`，旧二维码仍可查看。`PUT`、`DELETE` 等不支持的方法返回 405。
+
+`Equipment` 包含 `id,code,name,category,model,serialNumber,responsiblePerson,location,notes,status,version,createdAt,updatedAt`。`version` 从 1 开始；时间为 UTC ISO8601。接口使用明确的公开字段列表，不返回创建者、编辑者的账号 ID。
+
+可写字段与限制：
+
+| 字段 | 规则 |
+| --- | --- |
+| `name` | 必填，去除首尾空白后非空，最多 120 字符。 |
+| `category` | 可选，最多 80 字符。 |
+| `model`、`serialNumber` | 可选，各最多 160 字符。 |
+| `responsiblePerson` | 可选，最多 80 字符。 |
+| `location` | 可选，最多 160 字符。 |
+| `notes` | 可选，最多 4000 字符，允许多行。 |
+| `status` | `available`、`in_use`、`maintenance`、`retired`，新建省略时为 `available`。 |
+
+可选文本新建省略时为空串，修改时传空串清空、省略则保留。文本去除首尾空白，拒绝控制字符；HTML 内容作为普通文本保留，由 React 转义显示。`id`、`code`、时间、创建者／编辑者等由服务端确定，客户端提交会被字段白名单拒绝。列表首版最多 5000 台设备，达到上限返回 `409 EQUIPMENT_LIMIT`；筛选在页面本地执行。所有设备接口均不支持查询参数，未知或重复参数返回 422。
+
+修改必须携带当前整数 `version`，至少提交一个可写字段。版本过期返回 `409 VERSION_CONFLICT`，客户端应保留当前草稿并让用户刷新核对，不能自动覆盖。实际内容未改变时返回原对象，不递增版本或增加历史；成功修改在同一 `BEGIN IMMEDIATE` 事务中更新设备、递增版本并写历史，任何一步失败都会回滚，跨进程同时编辑同一版本也只有一份成功。
+
+`EquipmentChange` 为 `{actorName,action:'created'|'updated',at,changes:[{field,oldValue,newValue}]}`；新建的 `oldValue` 为 null，更新为原字符串。详情仅公开最近 30 次记录，最新在前；同一毫秒内的修改仍按写入顺序排列。`actorName` 来自真实登录账号，不接受客户端自报；完整内部记录另存实际账号 ID 以保持归属。
+
+负责人、位置、备注与历史内容均是预期可被扫码者公开查看的台账内容。公开查看不会创建会话；新增、修改继续要求原有的登录、同源 Origin 和网页 CSRF，失效 Bearer 不会回退为匿名身份。此权限不改变预约的本人／管理员修改规则，也不允许普通成员管理算力资源。
 
 ## 资源与桌面同步
 

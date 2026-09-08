@@ -31,7 +31,7 @@ function fields(body, allowed) {
 function username(value) {
   if (typeof value !== 'string') throw fail(422, 'INVALID_USERNAME', '请输入用户名。');
   const normalized = value.trim().toLowerCase();
-  if (!/^[a-z0-9_-]{3,32}$/.test(normalized)) throw fail(422, 'INVALID_USERNAME', '用户名须为 3–32 位字母、数字、下划线或短横线。');
+  if (!normalized) throw fail(422, 'INVALID_USERNAME', '请输入用户名。');
   return normalized;
 }
 function remember(value) {
@@ -45,9 +45,11 @@ function name(value, label = '名字') {
   if (!normalized || [...normalized].length > 60 || /[\p{Cc}\p{Cf}]/u.test(normalized)) throw fail(422, 'INVALID_NAME', `${label}须为 1–60 个可见字符。`);
   return normalized;
 }
-function password(value) {
-  if (typeof value !== 'string' || [...value].length < 12 || [...value].length > 128 || Buffer.byteLength(value) > 512) {
-    throw fail(422, 'INVALID_PASSWORD', '密码须为 12–128 个字符，空格会保留。');
+function password(value, { existing = false } = {}) {
+  // Old accounts could use only spaces. Preserve their login and old-password
+  // checks while requiring newly chosen passwords to contain a non-space value.
+  if (typeof value !== 'string' || !value || (!existing && !value.trim())) {
+    throw fail(422, 'INVALID_PASSWORD', '请输入密码。');
   }
   return value;
 }
@@ -214,7 +216,7 @@ export function createAccountAuth(config) {
   }
   async function authenticate(req, body) {
     const normalizedUsername = username(body.username);
-    const supplied = password(body.password);
+    const supplied = password(body.password, { existing: true });
     credentialRate(req, normalizedUsername);
     const account = db.prepare('SELECT * FROM account_users WHERE username = ?').get(normalizedUsername);
     const matched = await verifyPassword(supplied, account?.password_hash);
@@ -321,7 +323,7 @@ export function createAccountAuth(config) {
       const current = verifyCsrf(req);
       if (!current.user) throw fail(401, 'AUTH_REQUIRED', '请先登录。');
       fields(body, ['oldPassword', 'newPassword']);
-      const oldPassword = password(body.oldPassword), newPassword = password(body.newPassword);
+      const oldPassword = password(body.oldPassword, { existing: true }), newPassword = password(body.newPassword);
       credentialRate(req, current.user.username);
       const account = db.prepare('SELECT * FROM account_users WHERE id = ?').get(current.user.id);
       if (!await verifyPassword(oldPassword, account?.password_hash)) throw fail(401, 'INVALID_CREDENTIALS', '当前密码不正确。');

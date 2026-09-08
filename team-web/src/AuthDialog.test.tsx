@@ -66,6 +66,38 @@ describe('username accounts and public browsing', () => {
     expect(signedIn).not.toHaveBeenCalled()
   })
 
+  it('submits short Chinese and long ordinary credentials without browser format or length gates', async () => {
+    const register = vi.spyOn(api, 'register').mockResolvedValue(member)
+    await act(async () => root.render(<AuthDialog session={anonymous} t={t} onClose={vi.fn()} onSignedIn={vi.fn()} />))
+    await click('注册账号')
+    for (const [username, password] of [['中', '密'], [' A.+ @ 中文 ! '.repeat(40), ` ${'密 '.repeat(300)}`]]) {
+      enter('username', username); enter('name', '测试成员'); enter('password', password)
+      expect(container.querySelector<HTMLFormElement>('form')!.checkValidity()).toBe(true)
+      await submit()
+      expect(register).toHaveBeenLastCalledWith({ username: username.trim(), name: '测试成员', password })
+    }
+    for (const name of ['username', 'password']) {
+      const input = container.querySelector(`input[name="${name}"]`)!
+      for (const attr of ['minlength', 'maxlength', 'pattern']) expect(input.hasAttribute(attr)).toBe(false)
+    }
+    expect(container.textContent).not.toMatch(/3–32|12–128|至少 12/)
+  })
+
+  it('rejects blank new credentials but sends an existing all-space password unchanged at login', async () => {
+    const register = vi.spyOn(api, 'register').mockResolvedValue(member)
+    const login = vi.spyOn(api, 'login').mockResolvedValue(member)
+    await act(async () => root.render(<AuthDialog session={anonymous} t={t} onClose={vi.fn()} onSignedIn={vi.fn()} />))
+    await click('注册账号')
+    enter('username', '   '); enter('name', '测试成员'); enter('password', '密'); await submit()
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('请输入用户名')
+    enter('username', '中'); enter('password', '   '); await submit()
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('请输入密码')
+    expect(register).not.toHaveBeenCalled()
+    await click('登录')
+    enter('username', ' 中 '); enter('password', ' '.repeat(12)); await submit()
+    expect(login).toHaveBeenCalledWith({ username: '中', password: ' '.repeat(12), rememberMe: true })
+  })
+
   it('resumes the same GPU reservation after username login', async () => {
     mockCatalog(); vi.spyOn(api, 'session').mockResolvedValue(anonymous); vi.spyOn(api, 'login').mockResolvedValue(member)
     await act(async () => root.render(<App />))
