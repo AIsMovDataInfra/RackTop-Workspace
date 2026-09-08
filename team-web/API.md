@@ -1,6 +1,8 @@
 # RackTop 团队预约 API
 
-接口实现位于 `team-web/server/`，使用 Node.js 24+、单服务进程和本地 SQLite。正式默认模式为 `account`（用户名＋密码），另保留本机 `demo` 与可选 `feishu`。本次计划公网入口是 `https://136.0.110.161`，路径均以根级 `/api` 开始；是否已经上线以交付报告为准。
+接口实现位于 `team-web/server/`，使用 Node.js 24+、单服务进程和本地 SQLite。正式默认模式为 `account`（用户名＋密码），另保留本机 `demo` 与可选 `feishu`。已部署的公网入口是 `https://136.0.110.161`，路径均以根级 `/api` 开始。
+
+本版新增设备、成员公司管理和密码找回需使用 `account` 模式。`demo`／`feishu` 尚未提供公司身份，暂不支持新增设备；已登录用户仍可查看和维护已有设备的其他字段及照片。完整录入验收请使用独立的 `account` 测试库；当前线上账号模式不受此限制。
 
 ## 传输、身份与错误
 
@@ -20,7 +22,8 @@
 
 ## 数据结构
 
-- `User`：`{id,username?,name,role:'admin'|'member'}`。`username` 属于 account 模式；没有邮箱或邮件验证字段。账号 UUID 由服务端分配，固定姓名不是授权凭据，客户端不能自报 `role` 或 `ownerId`。
+- `User`：account 模式返回 `{id,username,name,role:'admin'|'member',isSuperAdmin:boolean,company:Company|null,version:number}`；demo／feishu 仍可省略账号专有字段。`Company` 只能为 `A公司`、`B公司`、`C公司`、`西浦`，null 表示尚未分配。`role:'admin'` 是资源管理员身份，只有 `isSuperAdmin:true` 才能管理成员。没有邮箱字段；客户端不能自报 `role`、`isSuperAdmin` 或 `ownerId`。
+- `Member`：仅超级管理员成员接口返回 `{...User,createdAt,recoveryRequestedAt}`；后两项为 UTC ISO8601，尚无找回申请时 `recoveryRequestedAt=null`。只含账号业务信息，不返回密码、密码哈希、会话／设备令牌或内部管理审计记录。
 - `Gpu`：`{id,uuid,index,model,memoryTotalMb}`。`id` 是服务端稳定 ID，`uuid` 是规范化为小写的真实 NVIDIA 完整硬件 UUID，`index` 是当前显示编号；预约不要用编号代替稳定身份。
 - `Resource`：`{id,cluster,name,gpuModel,gpuCount,notes,enabled,gpus,inventoryVersion,inventoryState,lastSeenAt,observedAt,status,pendingGpus}`。清单状态为 `manual|synced|conflict`，在线状态为 `online|offline|unknown`；超过 90 秒的采集显示 unknown。手工资源 `gpus=[]`，CPU 资源 `gpuCount=0`。待确认清单的 GPU 没有已确认的稳定 ID。
 - `Reservation`：`{id,resourceId,resourceName,cluster,ownerId,ownerName,scope,gpuIndices,gpuIds,inventoryVersion,startAt,endAt,purpose,status,createdAt,updatedAt,version,plannedEndAt}`。`scope=machine|gpus`，`status=confirmed|cancelled|completed`。提前结束时保存原结束时间 `plannedEndAt`；没有该值时为 null。界面按时间推导未开始／进行中／已到期。
@@ -30,9 +33,10 @@
 | 请求 | 输入／返回 |
 | --- | --- |
 | `GET /api/session` | 返回会话；首次网页访问创建匿名 CSRF 会话。有效设备 Bearer 可查询自身身份，无效设备令牌返回 401。 |
-| `POST /api/auth/register` | `{username,name,password,bootstrapToken?,rememberMe?}` → `201 Session`，注册成功自动登录。 |
+| `POST /api/auth/register` | `{username,name,password,bootstrapToken?,rememberMe?}` → `201 Session`，注册成功自动登录，`company=null`，等待超级管理员分配公司；注册请求不能自选公司或超管身份。 |
 | `POST /api/auth/login` | `{username,password,rememberMe?}` → `200 Session`，轮换 Cookie 和 CSRF。 |
 | `POST /api/auth/logout` | `{}` → 匿名 `Session`，注销当前网页登录。 |
+| `POST /api/auth/recovery-request` | `{username}` → `200 {ok:true}`；须先获取匿名或已登录网页 CSRF，会话无需已有用户。账号存在与否返回相同结构，不直接修改密码或发邮件。 |
 | `POST /api/auth/change-password` | `{oldPassword,newPassword}` → 新 `Session`；仅网页登录，须当前密码和 CSRF，撤销该账号所有旧会话／设备令牌。 |
 | `POST /api/auth/device-login` | `{username,password,deviceName}` → `{token,expiresAt,user}`。无需预先创建 Cookie，但须正确 Origin；携带本网页 Cookie 的调用仍需 CSRF。 |
 | `POST /api/auth/device-logout` | 使用设备 Bearer，输入 `{}` → `{ok:true}`，立即撤销该令牌。 |
@@ -41,17 +45,37 @@
 
 用户名去除两端空格并转小写后须非空，支持中英文，不另设格式或长度限制（仍受整个请求 64 KiB 上限约束）；姓名是独立显示名，1–60 字符、规范化后唯一、注册后固定。新密码须非空且不能全为空白，原样保存，不裁剪空格；登录继续兼容旧账号已设置的含空格密码。`rememberMe` 只能为布尔值；省略或 false 时网页登录 8 小时，true 为 30 天。改密保留当前网页登录时长偏好并重新计时。匿名会话 10 分钟过期。
 
-管理员必须用服务端 `TEAM_BOOTSTRAP_TOKEN` 一次性认领，不能通过“第一个注册”或名字获得权限。可用 `TEAM_ADMIN_USERNAME` 保留首次管理员用户名；没有正确码不能抢注该用户名。首页 `/#setup=<认领码>` 只负责向注册表单提供码，服务端在事务中消费并持久化认领状态。用户自己设置账号和密码；服务端没有默认管理员密码。首版没有找回密码或管理员重置密码 API。
+超级管理员由部署端显式执行 `scripts/team-admin.mjs create` 创建，默认用户名为 `admin`，密码只从受保护的标准输入读取，没有代码内置密码，也不在服务启动时自动创建或重置。数据库只允许一个超级管理员；同名普通账号已存在时命令拒绝抢占或提权。重复 create 保留已有超级管理员密码；明确执行 reset 才会重置其密码并撤销旧会话。
 
-错误包括 `INVALID_USERNAME`、`INVALID_NAME`、`INVALID_PASSWORD`、`ACCOUNT_EXISTS`、`INVALID_CREDENTIALS`、`BOOTSTRAP_REQUIRED`、`BOOTSTRAP_REJECTED`、`CSRF_REJECTED`、`DEVICE_LIMIT`、`RATE_LIMITED`。密码使用带随机盐的 scrypt，数据库只保存会话与设备令牌哈希；最多 2 个并发密码计算，不无限排队。最多 500 个账号、500 个匿名会话、2500 个总会话、每账号 8 个网页会话与 8 个设备令牌。
+原 `TEAM_BOOTSTRAP_TOKEN`／`TEAM_ADMIN_USERNAME` 和 `/#setup=<认领码>` 保留为一次性资源管理员认领路径；消费状态持久保存。它只授予 `role:'admin'`，不会授予超级管理员，也不自动分配公司。首个注册者或自报管理员姓名都不会获得额外权限。
+
+找回申请仅记录 `recoveryRequestedAt`；首次尚未处理的申请使账号 version 递增，重复待处理申请不继续递增。每 IP 最多 10 次／15 分钟、每规范化用户名最多 3 次／小时。网页“忘记密码？”或 `?auth=recover` 提交后显示统一提示，由超级管理员核实身份后重置；未知账号不泄露存在性。重置成功或成员自己改密会清除申请并撤销旧网页会话与设备令牌。
+
+错误包括 `INVALID_USERNAME`、`INVALID_NAME`、`INVALID_PASSWORD`、`ACCOUNT_EXISTS`、`INVALID_CREDENTIALS`、`BOOTSTRAP_REQUIRED`、`BOOTSTRAP_REJECTED`、`CSRF_REJECTED`、`DEVICE_LIMIT`、`RATE_LIMITED`。密码使用带随机盐的 scrypt，数据库只保存会话与设备令牌哈希；最多 2 个并发密码计算，不无限排队。最多 500 个未删除账号、500 个匿名会话、2500 个总会话、每账号 8 个网页会话与 8 个设备令牌。
+
+## 超级管理员与成员管理
+
+account 模式提供的 `/api/admin/members` 接口仅接受超级管理员身份；普通成员或只有 `role:'admin'` 的资源管理员返回 `403 SUPERADMIN_REQUIRED`。支持超级管理员网页 Cookie（写入需 CSRF）或设备 Bearer，仍要求正确 Origin。接口不接受任何查询参数。
+
+| 请求 | 输入／返回 |
+| --- | --- |
+| `GET /api/admin/members` | `200 {members:Member[]}`，返回全部未删除账号，按创建时间、ID 排序，包含超级管理员。 |
+| `POST /api/admin/members` | `{username,name,password,company}` → `201 {member:Member}`；创建 `role:'member',isSuperAdmin:false` 员工，company 必选。 |
+| `PATCH /api/admin/members/:id` | `{version,company}` → `200 {member:Member}`；只修改公司，不能清空或修改用户名、姓名、角色。公司相同则不递增版本。 |
+| `POST /api/admin/members/:id/reset-password` | `{version,newPassword}` → `200 {member:Member}`；设置新密码，清除找回申请、递增版本并撤销该员工所有网页登录与设备令牌。 |
+| `DELETE /api/admin/members/:id` | `{version}` → `200 {ok:true}`；撤销登录、删除登录凭据并将账号标记为已删除，保留历史业务记录。 |
+
+修改／重置／删除必须携带当前正整数 version，过期返回 `409 VERSION_CONFLICT`。找回申请也会改变版本，管理员应刷新后核对再操作。重置／删除不能针对超级管理员或操作者自己，返回 `403 SUPER_ADMIN_PROTECTED`；超级管理员可在自己的“设置”中凭当前密码改密，遗忘时由部署端显式执行 `team-admin.mjs reset`。公司 PATCH 允许给超级管理员设置公司，但其业务资格不依赖公司。
+
+删除会释放原用户名与显示姓名，新注册同名账号取得新的 UUID，不继承旧账号身份。原预约、设备、负责人／使用人文字和修改历史保留，不自动取消预约或删除设备。创建、公司修改、重置和删除与内部审计同事务提交；审计不保存密码。新增错误含 `INVALID_COMPANY`、`INVALID_VERSION`、`MEMBER_NOT_FOUND`、`SUPERADMIN_REQUIRED`、`SUPER_ADMIN_PROTECTED`。
 
 ## 成员访问边界
 
-所有模式的业务 API 都要求有效的 `member` 或 `admin` 身份，包含资源、预约、设备列表、详情、修改历史与照片。无会话、已过期会话或已撤销的设备令牌返回 401；不支持的角色返回 403。没有匿名业务读取白名单，不能通过扫码地址、资源 ID、显示姓名或旧图片 URL 跳过登录。
+所有模式的业务 API 都要求有效的 `member` 或 `admin` 身份，包含资源、预约、设备列表、详情、修改历史与照片。account 模式还要求超级管理员身份或有效公司；未分配公司的普通成员和资源管理员返回 `403 COMPANY_REQUIRED`，Cookie 与设备 Bearer 均受此限制。无会话、已过期会话或已撤销的设备令牌返回 401；不支持的角色返回 403。没有匿名业务读取白名单，不能通过扫码地址、资源 ID、显示姓名或旧图片 URL 跳过登录。
 
 静态页面和资源文件仍可获取，用于显示登录／注册界面；`GET /api/session` 提供当前身份或匿名 CSRF 会话，`GET /api/health` 返回 `{ok:true}`。注册、登录等认证入口按上一节各自校验 Origin、CSRF、凭据与认领码。匿名能取得网页壳不代表能取得业务数据。
 
-登录成员可读取完整团队资源和排期，包括停用资源、资源备注、预约用途和待确认 GPU 清单。普通成员可创建自己的预约、维护实物设备；资源创建、修改和同步仅限管理员，修改、取消和提前结束预约仍限本人或管理员。设备使用人／负责人姓名不改变这些权限。
+具有业务访问资格的成员可读取完整团队资源和排期，包括停用资源、资源备注、预约用途和待确认 GPU 清单。普通成员可创建自己的预约、维护实物设备；资源创建、修改和同步仅限管理员，修改、取消和提前结束预约仍限本人或管理员。设备使用人／负责人姓名不改变这些权限。公司用于成员资格和资产归属标记，目前不会将资源、排期或设备按公司隔离；成员目录及其账号信息仍仅超级管理员可读取。未分配成员仍可查询 session、退出、申请找回及凭当前密码修改自己密码，网页等待页每 30 秒或恢复焦点检查分配状态并保留原深链接。客户端遇到 `COMPANY_REQUIRED` 或 `SUPERADMIN_REQUIRED` 时应立即隐藏业务数据并重新查询 session；401 则回到登录，不保留旧页面中的账号资料。
 
 预约列表支持 `from`、`to`、`mine`，拒绝重复和未知参数；`mine=true` 仅返回当前账号的预约。缺省窗口为过去 7 天至未来 30 天，最大查询跨度 366 天，最多 1000 条。
 
@@ -59,7 +83,7 @@
 
 设备台账用于登记实物设备，与算力预约的 `Resource` 分开存储。新库不创建示例设备，也不自动把 SSH 连接转换成实物。设备档案、永久编号分配、修改历史和照片与账号、预约共用 `TEAM_DB_PATH` 指定的 SQLite 文件。
 
-下列接口都需要有效成员身份；所有写入还需要同源 Origin，网页 Cookie 调用需要 CSRF，设备 Bearer 调用遵守前述设备认证规则。
+下列接口都需要有效业务成员身份（account 模式须已分配公司或为超级管理员）；所有写入还需要同源 Origin，网页 Cookie 调用需要 CSRF，设备 Bearer 调用遵守前述设备认证规则。
 
 | 请求 | 输入／返回 |
 | --- | --- |
@@ -68,7 +92,7 @@
 | `GET /api/equipment/:id` | `{equipment:Equipment,history:EquipmentChange[]}`。 |
 | `PATCH /api/equipment/:id` | `{version,...修改字段}` → `200 {equipment:Equipment}`。 |
 
-`Equipment` 包含 `id,code,serialNumber,legacySerialNumber,name,category,model,responsiblePerson,currentUser,location,notes,status,photo,version,createdAt,updatedAt`。时间为 UTC ISO8601；新设备 `version=1`。响应按业务字段投影，不返回创建者、编辑者或历史操作人的账号 ID，不嵌入图片 BLOB。
+`Equipment` 包含 `id,code,serialNumber,legacySerialNumber,name,category,model,company,responsiblePerson,currentUser,location,notes,status,photo,version,createdAt,updatedAt`。时间为 UTC ISO8601；新设备 `version=1`。响应按业务字段投影，不返回创建者、编辑者或历史操作人的账号 ID，不嵌入图片 BLOB。
 
 ### 固定编号与旧记录迁移
 
@@ -76,7 +100,9 @@
 
 旧记录首次升级按 `created_at`、相同时间下的原行插入顺序分配新编号。原自由填写的序列号原样保存在只读 `legacySerialNumber`，没有旧值时为空串；旧 `code`（`RT-XXXXXXXX`）和 UUID 保留，二维码无需重贴。迁移在事务中执行，失败整体回滚，重启重试不会对已迁移记录重新编号。新界面以 `serialNumber` 为主要编号。
 
-没有删除设备的接口；停用设备设为 `retired`，原二维码仍可在登录后读取。设备本体 `PUT`、`DELETE` 返回 405；下方照片子资源支持独立删除。
+网页标签为“固定资产标识码”表格，含公司名称、资产编号、资产名称、责任人、使用人及稳定二维码，支持完整 SVG、单独二维码下载和打印。修改档案后二维码不变，纸面文字需重新打印。
+
+没有删除设备的接口；停用设备设为 `retired`，原二维码仍可由具备业务访问资格的登录成员读取。设备本体 `PUT`、`DELETE` 返回 405；下方照片子资源支持独立删除。
 
 ### 可写字段与版本
 
@@ -85,13 +111,16 @@
 | `name` | 必填，去除首尾空白后非空，最多 120 字符。 |
 | `category` | 新建必选，值只能为 `机械臂`、`台式主机`、`显示屏`、`摄像头模组`、`实验物料`、`小推车`、`夹爪`。 |
 | `model` | 可选，最多 160 字符。 |
+| `company` | 设备所属公司。普通成员新建省略时由服务端取其账号公司，不能提交其他公司；超级管理员新建必须选择四项 Company 之一。已有设备只有超级管理员可修改公司，修改仍需 version。 |
 | `responsiblePerson` | 可选，最多 80 字符；负责人。网页新建时默认当前成员姓名，服务端不自动填入，也不新增必填限制。 |
 | `currentUser` | 可选，最多 80 字符；当前使用人，与负责人独立。传空串可单独清空。 |
 | `location` | 新建必选，只能为 `上海` 或 `太仓`。 |
 | `notes` | 可选，最多 4000 字符，允许多行。 |
 | `status` | `available`、`in_use`、`maintenance`、`retired`，新建省略时为 `available`。 |
 
-可选文本新建省略时为空串，修改时传空串清空、省略则保留。文本去除首尾空白，拒绝控制字符；HTML 内容作为普通文本保留，由 React 转义显示。`id`、`code`、`serialNumber`、`legacySerialNumber`、`photo`、时间和创建者／编辑者等不属于可写字段，客户端提交会被白名单拒绝。设备最多 5000 条，达到上限返回 `409 EQUIPMENT_LIMIT`；列表筛选在页面本地执行。设备本体接口不支持查询参数。
+除 company 的专用规则外，可选文本新建省略时为空串，修改时传空串清空、省略则保留。文本去除首尾空白，拒绝控制字符；HTML 内容作为普通文本保留，由 React 转义显示。`id`、`code`、`serialNumber`、`legacySerialNumber`、`photo`、时间和创建者／编辑者等不属于可写字段，客户端提交会被白名单拒绝。设备最多 5000 条，达到上限返回 `409 EQUIPMENT_LIMIT`；列表筛选在页面本地执行。设备本体接口不支持查询参数。
+
+升级前设备 company 默认为空串（显示“待分配”），不会根据创建者或当前成员猜测归属。旧空公司不阻止其他字段、照片、领用与归还操作。普通成员修改公司返回 403；超管将公司清空或设为枚举外值返回 `422 INVALID_INPUT`。设备公司与员工公司独立保存，修改员工公司不会重分配设备。
 
 旧类别、位置即使不在新枚举中也保留展示，不自动猜测映射；后续任何普通 PATCH（包括领用、归还）都必须使合并后的类别、位置合法，必要时一起提交新值。照片操作不要求同时修正这些旧字段。
 
@@ -107,7 +136,7 @@
 
 | 请求 | 输入／返回 |
 | --- | --- |
-| `GET /api/equipment/:id/photo` | 登录成员读取 JPEG 二进制；`Content-Type: image/jpeg`、`Cache-Control: no-store`、`X-Content-Type-Options: nosniff`。无设备返回 404，无图返回 `404 PHOTO_NOT_FOUND`。 |
+| `GET /api/equipment/:id/photo` | 具备业务访问资格的成员读取 JPEG 二进制；`Content-Type: image/jpeg`、`Cache-Control: no-store`、`X-Content-Type-Options: nosniff`。无设备返回 404，无图返回 `404 PHOTO_NOT_FOUND`。 |
 | `POST /api/equipment/:id/photo` | `{version,dataUrl}` → `200 {equipment:Equipment}`；新增或替换照片。 |
 | `DELETE /api/equipment/:id/photo` | `{version}` → `200 {equipment:Equipment}`；仅移除照片，不删除设备。 |
 
@@ -115,7 +144,7 @@
 
 网页先在本机压缩照片；服务端仍用 sharp 核对真实格式和像素、解码、按方向旋转、去除 EXIF 等元数据、缩小并重新编码为 JPEG。最终宽高均不超过 1600 像素，大小不超过 512 KiB；原图不持久保存。服务端最多同时处理两张照片，繁忙时返回 503，不无限排队。格式不支持返回 415，坏图或过大像素返回 422，文件或请求体过大返回 413。
 
-上传在接收图片前验证成员与写权限，压缩前检查版本，异步压缩后重新验证会话、角色和 CSRF，最后由存储事务再次执行版本 CAS。与普通编辑竞争同一版本时，最多一个请求成功，其余返回 409；压缩期间注销则返回 401 且不写入。上传／替换和删除照片与设备版本递增、真实编辑者及历史写入为同一事务；失败不丢失旧图。删除已无照片的设备时，仍校验版本，成功后保持原版本且不添加历史。
+上传在接收图片前验证成员与写权限，压缩前检查版本，异步压缩后重新验证会话、角色、公司资格和 CSRF，最后由存储事务再次执行版本 CAS。与普通编辑竞争同一版本时，最多一个请求成功，其余返回 409；压缩期间注销则返回 401 且不写入。上传／替换和删除照片与设备版本递增、真实编辑者及历史写入为同一事务；失败不丢失旧图。删除已无照片的设备时，仍校验版本，成功后保持原版本且不添加历史。
 
 压缩中客户端断开后不再写入；服务关闭中的存活请求结束为 503。服务等待在途处理与原通知任务完成后再关闭数据库，避免已断开连接的后台处理读取已关闭的认证库。
 
@@ -125,7 +154,7 @@
 
 | 请求 | 输入／权限 |
 | --- | --- |
-| `GET /api/resources` | `{resources:Resource[]}`；仅已登录成员，返回完整团队目录。 |
+| `GET /api/resources` | `{resources:Resource[]}`；仅具备业务访问资格的成员，返回完整团队目录。 |
 | `POST /api/resources` | 管理员；`{cluster,name,gpuModel,gpuCount,notes?}` → `201 {resource}`，创建手工资源。CPU 数量为 0。 |
 | `PATCH /api/resources/:id` | 管理员；`{cluster?,name?,gpuModel?,gpuCount?,notes?,enabled?,acceptInventoryVersion?}` → `{resource}`。同步资源不能手工改写 GPU 数量和型号。 |
 | `POST /api/resources/sync` | 管理员 Cookie＋CSRF 或管理员设备 Bearer；见下方载荷 → `{resource}`。普通成员设备返回 403。 |
@@ -160,7 +189,7 @@
 | --- | --- |
 | `GET /api/reservations?from=ISO&to=ISO&mine=true` | `{reservations:Reservation[]}`；mine=true 仅当前账号。 |
 | `POST /api/reservations` | `{resourceId,scope,gpuIndices?,gpuIds?,inventoryVersion?,requestId?,startAt,endAt,purpose}` → `201 {reservation}`。 |
-| `GET /api/reservations/:id` | `{reservation}`；仅已登录成员，可查看完整记录。 |
+| `GET /api/reservations/:id` | `{reservation}`；仅具备业务访问资格的成员，可查看完整记录。 |
 | `PATCH /api/reservations/:id` | 本人或管理员；`{version,startAt?,endAt?,purpose?,scope?,gpuIndices?,gpuIds?,inventoryVersion?}` → `{reservation}`，资源 ID 不可更换。 |
 | `POST /api/reservations/:id/cancel` | 本人或管理员；`{version}` → `{reservation}`。 |
 | `POST /api/reservations/:id/finish` | 本人或管理员的进行中预约；`{version}` → `{reservation}`。 |
@@ -191,11 +220,11 @@ account 模式配置包含 `publicUrl,host,dbPath,now?,nodeEnv?,adminUsername?,b
 
 ## 网页深链与桌面登录边界
 
-网页首页支持单个 `?resource=<id>` 或 `?reservation=<id>` 参数；ID 限 1–100 个字母、数字、下划线或短横线，重复或不合法参数不作为目标。`resource` 在成员登录、资源加载后定位并高亮对应机器，不会自动创建预约；资源已停用或不存在时显示不可用提示。`reservation` 在登录后打开预约详情。设备深链 `/equipment/:id` 也先显示登录界面，登录后读取对应档案。
+网页首页支持单个 `?resource=<id>` 或 `?reservation=<id>` 参数；ID 限 1–100 个字母、数字、下划线或短横线，重复或不合法参数不作为目标。`resource` 在成员登录并通过公司门禁、资源加载后定位并高亮对应机器，不会自动创建预约；资源已停用或不存在时显示不可用提示。`reservation` 在具备业务访问资格后打开预约详情。设备深链 `/equipment/:id` 也先经过登录和公司门禁，再读取对应档案。
 
-访客首先看到登录／注册界面，身份有效后才加载资源、排期和设备；深链地址保留，不会把业务数据写进静态登录壳。`/#setup=<一次性码>` 与普通资源深链用途不同：前者只为首次管理员注册提供认领码，读取后移除 fragment，不能用它调用业务 API，也不作为持续登录令牌。
+访客首先看到登录／注册界面，身份及公司资格有效后才加载资源、排期和设备；深链地址保留，不会把业务数据写进静态登录壳。`/#setup=<一次性码>` 与普通资源深链用途不同：前者只为一次性资源管理员注册提供认领码，读取后移除 fragment，不能用它调用业务 API，也不作为持续登录令牌。
 
-桌面读取中央资源和排期也需要有效设备登录；管理员调用 `device-login` 后才可 `resources/sync`，普通成员设备令牌可以读取团队业务，但不能同步或修改资源目录。设备登录在操作系统钥匙串中保存，网页 Cookie 不传给桌面。预约确认仅建立排期记录，任何账号、设备令牌或预约 ID 都不授予 SSH 登录、终端、文件访问或 GPU 操作系统隔离权限。
+桌面读取中央资源和排期也需要有效设备登录；超级管理员或已分配公司的资源管理员调用 `device-login` 后才可 `resources/sync`，已分配公司的普通成员设备令牌可以读取团队业务，但不能同步或修改资源目录。设备登录在操作系统钥匙串中保存，网页 Cookie 不传给桌面。预约确认仅建立排期记录，任何账号、设备令牌或预约 ID 都不授予 SSH 登录、终端、文件访问或 GPU 操作系统隔离权限。
 
 ## 运维与通知
 
