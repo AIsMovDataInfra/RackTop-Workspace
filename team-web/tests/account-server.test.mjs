@@ -56,44 +56,34 @@ async function fixture(t, extra = {}) {
   return { call, register, anonymous, sessionOf, device, app, bootstrapToken, setClock(value) { clock = value; } };
 }
 
-test('production account HTTP permits anonymous schedule viewing while redacting private fields and disabled resources', async t => {
-  const { call, register, app } = await fixture(t);
+test('all business reads require a registered member while login and static shells stay reachable', async t => {
+  const { call, register, anonymous, setClock } = await fixture(t);
   assert.deepEqual((await call('/api/health')).body, { ok: true });
-  assert.equal((await call('/')).status, 200);
-  assert.deepEqual((await call('/api/resources')).body, { resources: [] });
-  assert.deepEqual((await call('/api/reservations')).body, { reservations: [] });
-  const admin = await register('owner'), member = await register();
-  const created = await call('/api/resources', { method: 'POST', session: admin, body: resourceDraft() });
-  assert.equal(created.status, 201, created.text);
-  const resource = created.body.resource;
+  for (const path of ['/', '/equipment', '/equipment/00000000-0000-4000-8000-000000000001']) assert.equal((await call(path)).status, 200);
+  const guest = await anonymous();
+  const admin = await register('owner'), member = await register('中', { password: '密' });
+  assert.equal(member.user.role, 'member');
+  const resource = (await call('/api/resources', { method: 'POST', session: admin, body: resourceDraft() })).body.resource;
   const reserved = await call('/api/reservations', { method: 'POST', session: member, body: booking(resource) });
   assert.equal(reserved.status, 201, reserved.text);
   const reservation = reserved.body.reservation;
-  // A future internal store property must not become public through object spreading.
-  const originalResources = app.store.listResources, originalReservations = app.store.listReservations;
-  app.store.listResources = () => originalResources().map(value => ({ ...value, futurePrivateResourceField: 'internal resource secret' }));
-  app.store.listReservations = (...args) => originalReservations(...args).map(value => ({ ...value, futurePrivateReservationField: 'internal reservation secret' }));
-  const publicResources = await call('/api/resources'), publicSchedule = await call('/api/reservations'), detail = await call(`/api/reservations/${reservation.id}`);
-  for (const response of [publicResources, publicSchedule, detail]) {
-    assert.equal(response.status, 200); assert.equal(response.headers['set-cookie'], undefined);
-    assert.equal(response.headers['cache-control'], 'no-store');
-    for (const privateValue of ['private resource notes', 'private training plan', 'internal resource secret', 'internal reservation secret', member.user.id]) assert.equal(response.text.includes(privateValue), false);
+  const paths = ['/api/resources', `/api/resources/${resource.id}`, '/api/reservations', '/api/reservations?mine=false',
+    '/api/reservations?mine=true', '/api/reservations?unexpected=1', `/api/reservations/${reservation.id}`,
+    '/api/equipment', '/api/equipment/00000000-0000-4000-8000-000000000001'];
+  for (const path of paths) for (const options of [{}, { session: guest }, { headers: { authorization: 'Bearer invalid' } }]) {
+    const response = await call(path, options);
+    assert.equal(response.status, 401, path); assert.equal(response.headers['cache-control'], 'no-store');
+    for (const value of ['private resource notes', 'private training plan', resource.name, member.user.name]) assert.equal(response.text.includes(value), false);
   }
-  assert.equal(publicResources.body.resources[0].notes, '');
-  assert.equal(Object.hasOwn(publicResources.body.resources[0], 'pendingGpus'), false);
-  assert.equal(publicSchedule.body.reservations[0].ownerName, member.user.name);
-  assert.equal(publicSchedule.body.reservations[0].ownerId, '');
-  assert.equal(detail.body.reservation.purpose, '');
   assert.equal((await call('/api/resources', { session: member })).body.resources[0].notes, 'private resource notes');
   assert.equal((await call(`/api/reservations/${reservation.id}`, { session: member })).body.reservation.purpose, 'private training plan');
-  assert.equal((await call('/api/reservations?mine=true')).status, 401);
-  assert.equal((await call('/api/reservations?mine=false')).status, 200);
-  assert.equal((await call('/api/reservations?mine=true&mine=false')).status, 422);
-  assert.equal((await call('/api/reservations?unexpected=1')).status, 422);
-  assert.equal((await call(`/api/resources/${resource.id}`, { method: 'PATCH', session: admin, body: { enabled: false } })).status, 200);
-  assert.deepEqual((await call('/api/resources')).body.resources, []);
-  assert.deepEqual((await call('/api/reservations')).body.reservations, []);
-  assert.equal((await call(`/api/reservations/${reservation.id}`)).status, 404);
+  assert.equal((await call('/api/equipment', { session: member })).status, 200);
+  assert.equal((await call('/api/reservations?mine=true&mine=false', { session: member })).status, 422);
+  assert.equal((await call('/api/reservations?unexpected=1', { session: member })).status, 422);
+  await call('/api/auth/logout', { method: 'POST', session: member, body: {} });
+  for (const path of paths) assert.equal((await call(path, { session: member })).status, 401, `logged out: ${path}`);
+  setClock(BASE + 9 * 60 * 60_000);
+  for (const path of paths) assert.equal((await call(path, { session: admin })).status, 401, `expired: ${path}`);
 });
 
 test('account HTTP writes require CSRF and members can only alter their own bookings', async t => {
@@ -104,7 +94,7 @@ test('account HTTP writes require CSRF and members can only alter their own book
     const response = await call('/api/reservations', { method: 'POST', body: booking(resource), ...options });
     assert.ok([401, 403].includes(response.status));
   }
-  assert.equal((await call('/api/reservations')).body.reservations.length, 0);
+  assert.equal((await call('/api/reservations', { session: member })).body.reservations.length, 0);
   assert.equal((await call('/api/resources', { method: 'POST', session: member, body: resourceDraft({ name: 'Forbidden' }) })).status, 403);
   const reservation = (await call('/api/reservations', { method: 'POST', session: member, body: booking(resource) })).body.reservation;
   assert.equal(reservation.ownerId, member.user.id);
@@ -135,24 +125,23 @@ test('actual HTTP admin device sync carries GPU identities and member device can
   assert.match(resource.gpus[0].id, /^[0-9a-f-]{36}$/); assert.equal(resource.gpus[0].uuid, gpu(1).uuid.toLowerCase());
   const alias = await call('/api/resources/sync', { method: 'POST', bearer: adminToken, body: inventory({ sourceId: 'second-computer', serverId: 'another-ssh-user', name: 'Alias' }) });
   assert.equal(alias.status, 200); assert.equal(alias.body.resource.id, resource.id); assert.equal(alias.body.resource.binding.authoritative, false);
-  assert.equal((await call('/api/resources')).body.resources.length, 1);
+  assert.equal((await call('/api/resources', { bearer: memberToken })).body.resources.length, 1);
   const reserved = await call('/api/reservations', { method: 'POST', bearer: memberToken, body: booking(resource, { scope: 'gpus', gpuIds: [resource.gpus[0].id] }) });
   assert.equal(reserved.status, 201, reserved.text);
   assert.deepEqual(reserved.body.reservation.gpuIds, [resource.gpus[0].id]);
   const changed = await call('/api/resources/sync', { method: 'POST', bearer: adminToken, body: inventory({ gpus: [gpu(2, 0), gpu(3, 1)] }) });
   assert.equal(changed.status, 409); assert.equal(changed.body.error.code, 'INVENTORY_CHANGED');
-  const publicResource = (await call('/api/resources')).body.resources[0];
-  assert.equal(publicResource.inventoryState, 'conflict'); assert.equal(Object.hasOwn(publicResource, 'pendingGpus'), false);
-  assert.equal(JSON.stringify(publicResource).includes(gpu(3).uuid.toLowerCase()), false);
-  assert.deepEqual(publicResource.gpus.map(value => value.id), resource.gpus.map(value => value.id));
+  const memberResource = (await call('/api/resources', { bearer: memberToken })).body.resources[0];
+  assert.equal(memberResource.inventoryState, 'conflict');
+  assert.deepEqual(memberResource.gpus.map(value => value.id), resource.gpus.map(value => value.id));
   setClock(BASE + 91_000);
-  assert.equal((await call('/api/resources')).body.resources[0].status, 'unknown');
+  assert.equal((await call('/api/resources', { bearer: memberToken })).body.resources[0].status, 'unknown');
   assert.equal((await call('/api/auth/device-logout', { method: 'POST', bearer: adminToken, body: {} })).status, 200);
   assert.equal((await call('/api/resources/sync', { method: 'POST', bearer: adminToken, body: inventory() })).status, 401);
-  for (const path of ['/api/resources', '/api/reservations']) {
+  for (const path of ['/api/resources', '/api/reservations', '/api/equipment']) {
     assert.equal((await call(path, { bearer: adminToken })).status, 401, 'revoked credentials must not downgrade to public access');
     assert.equal((await call(path, { bearer: 'invalid' })).status, 401, 'malformed credentials must not downgrade to public access');
-    assert.equal((await call(path)).status, 200, 'visitors without Authorization retain public access');
+    assert.equal((await call(path)).status, 401, 'visitors must sign in before business access');
   }
   setClock(BASE + 31 * 24 * 60 * 60_000);
   assert.equal((await call('/api/resources', { bearer: memberToken })).status, 401, 'expired device credentials must require login');
@@ -175,7 +164,7 @@ test('HTTP registration cannot inject roles or squat the configured administrato
   assert.equal(current.body.user.id, owner.user.id); assert.equal(current.body.accountRegistration, true);
   const logout = await call('/api/auth/logout', { method: 'POST', session: owner, body: {} }); assert.equal(logout.status, 200);
   assert.equal((await call('/api/session', { session: owner })).body.user, null);
-  assert.equal((await call('/api/resources', { session: owner })).status, 200);
+  assert.equal((await call('/api/resources', { session: owner })).status, 401);
 });
 
 test('readConfig propagates production account settings and rejects unsafe deployment configuration before opening a database', async t => {
