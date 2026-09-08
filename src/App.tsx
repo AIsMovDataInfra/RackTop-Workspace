@@ -66,6 +66,7 @@ import { api } from './services/api'
 import { CONNECTION_RETRY_DELAY_MS, shouldDeferConnection } from './utils/connectionRetry'
 import { checkDesktopAppUpdate, relaunchUpdatedApp, type DesktopAppUpdate, type DesktopDownloadEvent } from './services/appUpdater'
 import { openExternalUrl } from './services/external'
+import { TEAM_URL } from './services/team'
 import { popupServerContextMenu } from './services/serverContextMenu'
 import type { AppSettings, DetailTab, GpuMemoryStallWarning, HistoryHeatmapPoint, HistoryPoint, HostKeyInfo, IdleReservation, IdleReservationFilters, InteractionLogSummary, LinkedProjectResourcePlan, Project, ProjectDraft, ProjectSyncProgress, RemoteHistorySyncResult, Server, ServerDraft, ServerNotificationCategory, ServerNotificationSettings, Snapshot } from './types/models'
 import { isRackTopManagedIdentity } from './utils/sshSetup'
@@ -1645,6 +1646,7 @@ function App() {
           <button onClick={importConfig} disabled={importingConfig}><Download size={16} />{importingConfig ? '正在读取 SSH Config…' : '导入 SSH Config'}</button>
           <button onClick={() => setShowSshExport(true)} disabled={servers.length === 0}><Upload size={16} />导出 SSH Config</button>
           <button onClick={() => setShowKeyManager(true)}><KeyRound size={16} />密钥管理</button>
+          <button onClick={() => { void openExternalUrl(`${TEAM_URL}/equipment`).catch(() => setToast(`打开设备管理失败，请在浏览器访问 ${TEAM_URL}/equipment`)) }} title="在浏览器打开设备管理"><HardDrive size={16} />设备管理</button>
           <button onClick={() => setShowActivityLog(true)}><ScrollText size={16} />日志</button>
           <button onClick={() => setShowSettings(true)}><Settings size={16} />设置</button>
         </div>

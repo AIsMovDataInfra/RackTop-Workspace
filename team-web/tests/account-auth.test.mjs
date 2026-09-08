@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, scryptSync } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { createAccountAuth } from '../server/account-auth.mjs';
 
@@ -128,12 +128,11 @@ test('login rotates session and CSRF, preserves identity, and logout invalidates
   await assert.rejects(client.call('/api/auth/logout', { method: 'POST', body: {}, headers: { 'x-csrf-token': anonymousCsrf } }), { code: 'CSRF_REJECTED' });
 });
 
-test('password validation preserves whitespace and rejects malformed identities and excessive inputs', async t => {
+test('new passwords reject only empty or whitespace-only input and preserve surrounding spaces', async t => {
   const auth = createAccountAuth(BASE); t.after(() => auth.close());
   const client = browser(auth);
   await client.call('/api/session');
-  for (const value of ['', 'short', 'x'.repeat(129)]) await assert.rejects(client.register({ password: value }), { code: 'INVALID_PASSWORD' });
-  await assert.rejects(client.register({ username: 'a..b' }), { code: 'INVALID_USERNAME' });
+  for (const value of ['', '   ', '\t\n', null, 123]) await assert.rejects(client.register({ password: value }), { code: 'INVALID_PASSWORD' });
   await assert.rejects(client.register({ name: 'hidden\u202ename' }), { code: 'INVALID_NAME' });
   const spaced = '  preserve these spaces  ';
   await client.register({ password: spaced });
@@ -290,9 +289,9 @@ test('remember-me issues a 30-day session, survives the default expiry and stays
   assert.equal(auth.resolve(client.request()), null);
 });
 
-test('username bounds and remember-me input are strict and old email payloads are rejected', async t => {
+test('empty usernames are rejected while remember-me and legacy payload validation stay strict', async t => {
   const auth = createAccountAuth(BASE); t.after(() => auth.close());
-  for (const username of ['ab', 'a'.repeat(33), 'name@example.test', '有中文', 'has space', 'a.b']) {
+  for (const username of ['', '   ', '\t\n', null, 123]) {
     await assert.rejects(browser(auth).register({ username }), { code: 'INVALID_USERNAME' });
   }
   await assert.rejects(browser(auth).register({ rememberMe: 'true' }), { code: 'INVALID_INPUT' });
@@ -300,6 +299,48 @@ test('username bounds and remember-me input are strict and old email payloads ar
   const client = browser(auth); await client.register({ username: 'Team_Member-1' });
   assert.equal(auth.resolve(client.request()).user.username, 'team_member-1');
   await assert.rejects(client.call('/api/auth/login', { method: 'POST', body: { username: 'team_member-1', password: PASSWORD, rememberMe: 1 } }), { code: 'INVALID_INPUT' });
+});
+
+test('short Chinese usernames and passwords register, log in and change password without format or length gates', async t => {
+  const auth = createAccountAuth(BASE); t.after(() => auth.close());
+  const client = browser(auth);
+  const registered = await client.register({ username: ' 中 ', password: '密' });
+  assert.equal(registered.payload.user.username, '中');
+  await client.call('/api/auth/logout', { method: 'POST', body: {} });
+  assert.equal((await client.call('/api/auth/login', { method: 'POST', body: { username: '中', password: '密' } })).payload.user.id, registered.payload.user.id);
+  await assert.rejects(client.call('/api/auth/change-password', { method: 'POST', body: { oldPassword: '密', newPassword: ' \t ' } }), { code: 'INVALID_PASSWORD' });
+  const newPassword = ` ${'中文 ! @ +'.repeat(80)} `;
+  await client.call('/api/auth/change-password', { method: 'POST', body: { oldPassword: '密', newPassword } });
+  await assert.rejects(device(native(auth), { username: '中', password: '密' }), { code: 'INVALID_CREDENTIALS' });
+  assert.ok((await device(native(auth), { username: '中', password: newPassword })).payload.token);
+});
+
+test('ordinary punctuation, spaces, Chinese and long usernames retain trimmed case-insensitive uniqueness', async t => {
+  const auth = createAccountAuth(BASE); t.after(() => auth.close());
+  for (const [index, input] of ['a', ' A.+ @ 中文 ! ', 'Long 用户 @ +'.repeat(80)].entries()) {
+    const client = browser(auth), normalized = input.trim().toLowerCase();
+    const result = await client.register({ username: input, name: `成员 ${index}`, password: 'p' });
+    assert.equal(result.payload.user.username, normalized);
+    assert.ok((await device(native(auth), { username: input.toUpperCase(), password: 'p' })).payload.token);
+    await assert.rejects(browser(auth).register({ username: ` ${input.toUpperCase()} `, name: `另一成员 ${index}`, password: 'p' }), { code: 'ACCOUNT_EXISTS' });
+  }
+});
+
+test('existing all-space password hashes still authenticate and can be changed', async t => {
+  const directory = mkdtempSync(join(tmpdir(), 'racktop-legacy-space-password-')), dbPath = join(directory, 'accounts.sqlite');
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const auth = createAccountAuth({ ...BASE, dbPath }); t.after(() => auth.close());
+  const client = browser(auth); await client.register();
+  const legacyPassword = ' '.repeat(12), salt = randomBytes(16).toString('base64url');
+  const hash = scryptSync(legacyPassword, salt, 32, { N: 32768, r: 8, p: 3, maxmem: 64 * 1024 * 1024 });
+  const db = new DatabaseSync(dbPath);
+  db.prepare('UPDATE account_users SET password_hash = ? WHERE username = ?')
+    .run(`scrypt-32768-8-3$${salt}$${hash.toString('base64url')}`, 'member'); db.close();
+  await client.call('/api/auth/logout', { method: 'POST', body: {} });
+  assert.ok((await client.call('/api/auth/login', { method: 'POST', body: { username: 'member', password: legacyPassword } })).payload.user);
+  assert.ok((await device(native(auth), { password: legacyPassword })).payload.token);
+  await client.call('/api/auth/change-password', { method: 'POST', body: { oldPassword: legacyPassword, newPassword: '新' } });
+  assert.ok((await device(native(auth), { password: '新' })).payload.token);
 });
 
 test('500 anonymous sessions cannot consume the capacity reserved for member and device logins', async t => {

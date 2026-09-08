@@ -6,9 +6,9 @@ export function errorText(error: unknown, t: Translate) {
     const messages: Record<string, [string, string]> = {
       INVALID_CREDENTIALS: ['用户名或密码不正确。', 'The username or password is incorrect.'],
       ACCOUNT_EXISTS: ['用户名或姓名已被使用，请登录已有账号或使用不同的姓名。', 'This username or name is already in use. Sign in to your account or use another name.'],
-      INVALID_USERNAME: ['用户名须为 3–32 位字母、数字、下划线或短横线。', 'Use 3–32 letters, numbers, underscores or hyphens for your username.'],
+      INVALID_USERNAME: ['请输入用户名', 'Enter a username'],
       INVALID_NAME: ['姓名须为 1–60 个字符。', 'Your name must contain 1–60 characters.'],
-      INVALID_PASSWORD: ['密码须为 12–128 个字符。', 'Your password must contain 12–128 characters.'],
+      INVALID_PASSWORD: ['请输入密码', 'Enter a password'],
       BOOTSTRAP_REJECTED: ['管理员设置链接无效或已经使用，请联系部署管理员。', 'This administrator setup link is invalid or already used. Contact your deployment administrator.'],
       BOOTSTRAP_REQUIRED: ['此用户名预留给管理员，请使用管理员设置链接注册。', 'This username is reserved for the administrator. Register using the administrator setup link.'],
       ACCOUNT_LIMIT: ['当前账号数量已达上限，请联系管理员。', 'The account limit has been reached. Contact your administrator.'],

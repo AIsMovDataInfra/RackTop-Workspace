@@ -64,6 +64,25 @@ describe('team workspace',()=>{
     expect(openExternalUrl).toHaveBeenCalledWith('https://136.0.110.161/?resource=resource-123')
     expect(container.textContent).toContain('状态未知')
   })
+  it('logs in with Chinese or long ordinary usernames and a short password without browser constraints',async()=>{
+    const login=vi.spyOn(teamApi,'login').mockResolvedValue(anonymous)
+    await mount()
+    for (const username of ['中',' A.+ @ 中文 ! '.repeat(40)]) {
+      await click('账号登录')
+      const user=container.querySelector<HTMLInputElement>('input[autocomplete=username]')!
+      const password=container.querySelector<HTMLInputElement>('input[type=password]')!
+      await act(async()=>{
+        for(const [field,value] of [[user,username],[password,' 密 ']] as const){
+          Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(field,value)
+          field.dispatchEvent(new Event('input',{bubbles:true}))
+        }
+      })
+      expect(container.querySelector<HTMLFormElement>('form')!.checkValidity()).toBe(true)
+      expect(container.querySelector('input[minlength],input[maxlength],input[pattern]')).toBeNull()
+      await act(async()=>container.querySelector('form')!.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true})))
+      expect(login).toHaveBeenLastCalledWith(username.trim(),' 密 ')
+    }
+  })
   it('allows logout while synchronization is waiting and updates local state even if revocation fails',async()=>{
     vi.mocked(teamApi.status).mockResolvedValue(admin)
     let finishSync!: (value:TeamStatus)=>void

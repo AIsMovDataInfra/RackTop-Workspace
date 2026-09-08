@@ -1,7 +1,7 @@
 {
   "name": "racktop",
   "private": true,
-  "version": "1.27.0",
+  "version": "1.28.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -29,11 +29,13 @@
     "echarts": "^6.0.0",
     "echarts-for-react": "^3.0.5",
     "lucide-react": "^0.468.0",
+    "qrcode": "1.5.4",
     "react": "^19.1.1",
     "react-dom": "^19.1.1"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.8.4",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "^19.1.10",
     "@types/react-dom": "^19.1.7",
     "@vitejs/plugin-react": "^4.4.1",

@@ -41,8 +41,10 @@ async function mount() {
   api.isDesktop = true
   now = 1_800_000_000_000
   vi.spyOn(Date, 'now').mockImplementation(() => now)
-  vi.spyOn(window, 'setInterval').mockImplementation((callback, delay) => { const id = nextId++; intervals.set(id, { callback: callback as () => void, delay: delay ?? 0 }); return id })
-  vi.spyOn(window, 'clearInterval').mockImplementation((id) => { if (id) intervals.delete(id) })
+  // Keep DOM numeric timer IDs even when dependencies bring in Node timer types.
+  const browserTimers: Pick<Window, 'setInterval' | 'clearInterval'> = window
+  vi.spyOn(browserTimers, 'setInterval').mockImplementation((callback, delay) => { const id = nextId++; intervals.set(id, { callback: callback as () => void, delay: delay ?? 0 }); return id })
+  vi.spyOn(browserTimers, 'clearInterval').mockImplementation((id) => { if (id) intervals.delete(id) })
   const container = document.createElement('div'); document.body.append(container)
   root = createRoot(container)
   await act(async () => { root?.render(<App />); await Promise.resolve() })
