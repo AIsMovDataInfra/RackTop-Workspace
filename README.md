@@ -2,7 +2,7 @@
 
 本项目由 **AIsMov** 维护，当前代码与 Linux / macOS 分发位于独立公开仓库 [AIsMovDataInfra/RackTop-Workspace](https://github.com/AIsMovDataInfra/RackTop-Workspace)。桌面应用继续叫 **RackTop**，在线网页为 **AIsMov RackTop 团队工作台**。项目源自 [Tongzh-SEU/RackTop](https://github.com/Tongzh-SEU/RackTop) 及 [原 AIsMov 维护仓库](https://github.com/AIsMovDataInfra/RackTop)，保留原作者 **Tongzh-SEU**、完整 Git 历史、[GPL-3.0](LICENSE) 和[来源说明](NOTICE.md)。
 
-本轮统一版本为 **2.0.0**：Linux 面向 Ubuntu 22.04 amd64，Mac 提供 Apple Silicon 和 Intel 两种包。构建与发布正在验收，是否可下载以 [2.0.0 Release](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/tag/v2.0.0) 实际附件为准；验证进展见[详细版本说明](docs/VERSION_INFOS.md)。旧仓库和旧更新清单保持原状，首次迁入请手动安装新包，原本机资料继续保留。
+本轮统一版本为 **2.0.0**：Linux 面向 Ubuntu 22.04 amd64，Mac 提供 Apple Silicon 和 Intel 两种包。三平台安装包已发布至 [2.0.0 Release](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/tag/v2.0.0)，公开下载、摘要与更新签名均已核验；在线团队工作台已于 2026-09-09 部署，生产迁移与原管理员登录通过；各项验证见[本轮记录](docs/VERIFICATION.md)。旧仓库和旧更新清单保持原状，首次迁入请手动安装新包，原本机资料继续保留。
 
 <div align="right">
   🌐 Language:
@@ -51,7 +51,7 @@ RackTop 是面向个人研究者和小型团队的 GPU 服务器桌面工作台�
 | macOS Intel | AIsMov 2.0.0 测试版 | [下载 x64 .dmg](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.0.0/RackTop_2.0.0_macos-x64-unsigned.dmg) |
 | Windows x64 | Tongzh-SEU 官方历史版 v1.25.4 | [下载官方安装程序](https://github.com/Tongzh-SEU/RackTop/releases/download/v1.25.4/RackTop_1.25.4_x64-setup.exe) |
 
-上述 2.0.0 链接是本轮目标附件，发布完成前可能暂不可下载。Linux 和 Mac 共用 [v2.0.0 Release](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/tag/v2.0.0)，按文件名选择平台和芯片；Mac `.app.tar.gz` 为更新技术附件，通常安装请选 DMG。Mac 包采用 ad-hoc 签名、未经过 Apple 公证，首次打开步骤见 [Mac 指南](docs/MACOS.md#安装与首次打开)。Windows 继续使用[上游版本](https://github.com/Tongzh-SEU/RackTop/releases)。
+上述 2.0.0 安装包已发布并验证可下载，完整文件名与校验值见[附件摘要表](docs/VERIFICATION.md#公开附件与更新签名)。Linux 和 Mac 共用 [v2.0.0 Release](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/tag/v2.0.0)，按文件名选择平台和芯片；Mac `.app.tar.gz` 为更新技术附件，通常安装请选 DMG。Mac 包采用 ad-hoc 签名、未经过 Apple 公证，首次打开步骤见 [Mac 指南](docs/MACOS.md#安装与首次打开)。Windows 继续使用[上游版本](https://github.com/Tongzh-SEU/RackTop/releases)。
 
 从旧 `1.30.0-linux.12` 或其他旧维护版迁入，下载并手动安装一次新仓库包。新分发使用专用签名密钥和新更新地址，旧更新通道不会自动迁移；应用标识与本机数据目录保持兼容。Mac 用户先退出应用，再用新 DMG 替换安装。
 

@@ -4,7 +4,7 @@ RackTop 2.0.0 是 [AIsMovDataInfra/RackTop-Workspace](https://github.com/AIsMovD
 
 ## 下载与系统要求
 
-**发布状态：2.0.0 正在构建与验收。** 目标为两种 DMG、对应更新归档，并与 Linux 共享源码、许可证、NOTICE 及 `SHA256SUMS`；是否就绪以 [v2.0.0 Release](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/tag/v2.0.0) 实际附件为准。
+**发布状态：2.0.0 已发布并完成安装包核验。** [v2.0.0 Release](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/tag/v2.0.0) 提供两种DMG、对应更新归档，并与Linux共享源码、许可证、NOTICE及 `SHA256SUMS`。全部公开附件可匿名下载，摘要及更新签名通过，见[完整校验表](VERIFICATION.md#公开附件与更新签名)。
 
 | Mac 机型 | 安装包 |
 | --- | --- |
@@ -30,7 +30,7 @@ RackTop 2.0.0 是 [AIsMovDataInfra/RackTop-Workspace](https://github.com/AIsMovD
 
 ## 更新
 
-首次从旧维护版迁入 2.0.0，请退出 RackTop 后用新仓库对应架构的 DMG 替换应用。旧仓库与旧更新清单不变；新分发使用专用更新签名与 [RackTop-Workspace Releases](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases)，保留原应用标识和用户数据兼容。新版本通过新仓库 `updater/macos.json` 的 `darwin-aarch64` / `darwin-x86_64` 选择包并验证签名；首次迁移与后续自动更新的实际安装验收仍待补。
+首次从旧维护版迁入 2.0.0，请退出 RackTop 后用新仓库对应架构的 DMG 替换应用。旧仓库与旧更新清单不变；新分发使用专用更新签名与 [RackTop-Workspace Releases](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases)，保留原应用标识和用户数据兼容。新版本通过新仓库 `updater/macos.json` 的 `darwin-aarch64` / `darwin-x86_64` 选择包并验证签名；两种公开更新归档已用新仓库公钥复验签名，Mac与Linux清单位于同一updater提交 `3818abe`。真实Mac用户的首次迁移与后续自动更新替换仍需在用户设备上验证。
 
 Tauri 更新签名与 Apple Developer ID / 公证是两套机制。更新包具备 Tauri 签名，不代表其通过 Apple 公证。自动更新不可用时，退出应用后手动下载并安装本机架构对应的 DMG。应用数据与安装包分开存放，替换前可先在设置中导出配置备份。
 
@@ -69,7 +69,9 @@ SSH 导入与导出合并到 **SSH 配置**，导出可勾选特定连接，不�
 
 ## 验证范围
 
-2.0.0 的共享桌面前端目前 322 项测试和生产构建通过；Linux Rust 160 项通过不代替 Mac Rust 与原生验证。Mac 双架构 CI、附件、签名、原生启动及新签名迁移仍在验收，尚不声明 Mac 发布或用户设备完整操作已完成。
+[标签工作流](https://github.com/AIsMovDataInfra/RackTop-Workspace/actions/runs/34294527671)的Apple Silicon、Intel及最终发布全部成功。两架构分别通过DMG挂载、架构及代码签名、DMG与更新归档内容一致性、更新签名校验；在原生runner的隔离资料目录中启动至少8秒并初始化独立数据库。两张原生窗口截图均已逐张查看，显示RackTop v2.0.0、SSH配置与团队工作台，前端完整且无白屏或可见文字裁剪。
+
+公开DMG与更新归档摘要均与原生报告、GitHub及SHA256SUMS一致，两种更新签名本机复验通过。这些证据覆盖包完整性、原生启动和窗口外观，未执行真人Mac完整交互、Gatekeeper首次放行或自动更新替换。共享桌面前端322项及生产构建通过，线上部署和浏览器操作记录见[本轮验证记录](VERIFICATION.md)。
 
 ### 历史 1.x 验证记录
 

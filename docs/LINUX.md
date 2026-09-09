@@ -1,6 +1,6 @@
 # Linux 客户端（实验版）
 
-RackTop 2.0.0 由独立仓库 [AIsMovDataInfra/RackTop-Workspace](https://github.com/AIsMovDataInfra/RackTop-Workspace) 分发，面向 Ubuntu 22.04 x86_64 / amd64 图形桌面。Linux 与 Mac 使用相同版本号，安装包名区分平台。本轮构建和公开下载仍在验收，以 [v2.0.0 Release](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/tag/v2.0.0) 的实际附件为准。项目源自上游及旧 AIsMov 维护版，保留 Tongzh-SEU 原作者署名、完整历史及 GPL-3.0。
+RackTop 2.0.0 由独立仓库 [AIsMovDataInfra/RackTop-Workspace](https://github.com/AIsMovDataInfra/RackTop-Workspace) 分发，面向 Ubuntu 22.04 x86_64 / amd64 图形桌面。Linux 与 Mac 使用相同版本号，安装包名区分平台。[v2.0.0 Release](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/tag/v2.0.0) 已发布，Deb的公开下载、摘要、签名、版本与amd64架构均已核验。项目源自上游及旧 AIsMov 维护版，保留 Tongzh-SEU 原作者署名、完整历史及 GPL-3.0。
 
 ## 安装与启动
 
@@ -102,7 +102,9 @@ npm run bundle:linux -- --locked
 
 ## 验证范围
 
-2.0.0 当前已完成桌面 322 项、Linux Rust 160 项测试（3 项依赖外部环境的既有测试忽略）及桌面生产构建。网页 91 项及浏览器工作台流程已验证；双平台 CI、公开附件下载、签名与安装迁移仍在验收，结果待补；本轮不能沿用下面历史版本的成功记录代替验证。
+2.0.0 当前已完成桌面 322 项、Linux Rust 160 项测试（3 项依赖外部环境的既有测试忽略）及桌面生产构建。网页 91 项及浏览器工作台流程已验证。[标签工作流](https://github.com/AIsMovDataInfra/RackTop-Workspace/actions/runs/34294527671)三平台构建及发布均成功；Linux另通过中继27项、签名下载器9项、真实中继重连及至少15秒隔离原生启动检查。9个公开附件的下载、摘要和全部更新签名通过。在线工作台已部署，迁移与原管理员登录通过，详见[本轮验证记录](VERIFICATION.md)。
+
+本机已将公开Deb安装至用户目录，启动入口为2.0.0，原数据库、配置及权限保持。系统级dpkg仍是 `1.26.0-linux.8`；用户目录安装没有替换系统包。原进程与共享会话未重启，退出并重新打开后使用新版。本次未执行原用户资料下的完整交互或自动更新安装；CI启动使用隔离资料。Deb文件及完整SHA-256见[附件摘要表](VERIFICATION.md#公开附件与更新签名)。
 
 ### 历史 1.x 验证记录
 
