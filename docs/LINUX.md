@@ -1,13 +1,13 @@
 # Linux 客户端（实验版）
 
-RackTop 2.2.0 是 [AIsMovDataInfra/RackTop-Workspace](https://github.com/AIsMovDataInfra/RackTop-Workspace) 正在准备的统一测试候选，面向 Ubuntu 22.04 x86_64 / amd64 图形桌面，同时为 Mac Apple Silicon 和 Intel 准备同版本源码与安装包。2.2.0 的公开标签、Deb、Mac 安装包、更新清单、生产中继部署和本机安装均待后续完成。当前可下载并完成核验的仍是 [v2.1.1测试版Release](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/tag/v2.1.1)。项目源自上游及旧 AIsMov 维护版，保留 Tongzh-SEU 原作者署名、完整历史及 GPL-3.0。
+RackTop 2.2.0 是 [AIsMovDataInfra/RackTop-Workspace](https://github.com/AIsMovDataInfra/RackTop-Workspace) 已发布的统一测试版，面向 Ubuntu 22.04 x86_64 / amd64 图形桌面，并与 Mac Apple Silicon 和 Intel 共用版本、标签和 Release。Linux 与两种 Mac 架构已完成原生构建和发布验证，生产共享中继 `0.3.0` 已部署，本机已完成 Linux 2.2.0 用户级安装。下载见 [v2.2.0 测试版 Release](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/tag/v2.2.0)，完整证据见[2.2.0 验证记录](VERIFICATION_2_2.md)。项目源自上游及旧 AIsMov 维护版，保留 Tongzh-SEU 原作者署名、完整历史及 GPL-3.0。
 
 ## 安装与启动
 
-2.2.0 尚无公开安装包。当前从 [Linux / Mac Release](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases) 下载已发布的2.1.1 `.deb` 后，在其所在目录执行：
+从 [v2.2.0 Release](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/tag/v2.2.0) 下载 Linux amd64 `.deb` 后，在其所在目录执行：
 
 ```bash
-sudo apt install ./RackTop_2.1.1_linux-amd64.deb
+sudo apt install ./RackTop_2.2.0_linux-amd64.deb
 racktop
 ```
 
@@ -24,11 +24,11 @@ racktop
 
 ## 一键更新与首次升级
 
-从旧 `1.30.0-linux.12` 或其他旧维护版迁入当前已发布的 **2.1.1**，必须先下载新仓库Deb并手动安装一次。2.2.0发布后也将沿用同一新仓库更新通道。旧仓库及旧更新清单保持原状，不会自动将旧客户端引导到新仓库。新版本保留 `com.racktop.desktop` 标识与数据目录，服务器、项目、密钥引用和本机历史继续使用原资料；更换安装前可先备份应用数据。
+从旧 `1.30.0-linux.12` 或其他旧维护版迁入当前已发布的 **2.2.0**，必须先下载新仓库 Deb 并手动安装一次。此后使用新仓库更新通道；2.2.0 的 `linux-amd64.json` 与 `macos.json` 已发布，三个平台更新签名均通过复验。旧仓库及旧更新清单保持原状，不会自动将旧客户端引导到新仓库。新版本保留 `com.racktop.desktop` 标识与数据目录，服务器、项目、密钥引用和本机历史继续使用原资料；更换安装前可先备份应用数据。
 
 安装新分发后，启动和每 24 小时检查新仓库更新，也可点击左上角手动检查。选择“更新到 v…”后先下载、验证新仓库的专用签名、包名、版本和架构，再通过系统授权窗口安装；拒绝降级。安装取消、网络或授权失败可重试或手动下载。系统安装需要 `pkexec`、APT 和可用的桌面授权代理，系统管理员密码与服务器 SSH 密码无关。
 
-维护者在**新仓库** GitHub Actions Secret 配置 `LINUX_UPDATER_PRIVATE_KEY`，与 `src-tauri/linux-updater.pub` 匹配；Mac 使用其专用更新密钥。不要复用旧仓库私钥或修改旧 feed，也不把密钥放入 Git、安装包或附件。统一发布流程确认 Linux / Mac 全部附件可下载且摘要一致后，才同时推进新仓库 `updater` 分支的 `linux-amd64.json` 和 `macos.json`；不能在包尚未就绪时先发清单。
+维护者在**新仓库** GitHub Actions Secret 配置 `LINUX_UPDATER_PRIVATE_KEY`，与 `src-tauri/linux-updater.pub` 匹配；Linux 与 Mac 当前共用这套 RackTop-Workspace 更新包签名密钥。Apple Developer ID 代码签名与公证属于另一套独立配置。不要复用旧仓库私钥或修改旧 feed，也不把密钥放入 Git、安装包或附件。统一发布流程确认 Linux / Mac 全部附件可下载且摘要一致后，才同时推进新仓库 `updater` 分支的 `linux-amd64.json` 和 `macos.json`；不能在包尚未就绪时先发清单。
 
 签名工具与本地下载测试：
 
@@ -47,11 +47,11 @@ python3 scripts/test-linux-update.py src-tauri/target/release/racktop-probe src-
 
 连接失败后自动重试等待 30 分钟；后台历史同步也遵守这一等待时间，避免每 5 分钟绕过限制。手动刷新或重新启动应用可立即重连，成功连接后恢复正常采样频率。离线时仍保留最后一份快照供查看。
 
-## 2.2.0 资源共享候选
+## 2.2.0 资源共享
 
 同一邀请码在到期前可供多台设备依次加入，每台设备使用自己的设备密钥和成员授权。成功加入不会从分享者界面删除当前邀请码；撤销任一成员时会轮换邀请码，使旧码立即失效，同时保留其他已授权成员。成员在线时，分享者可看到该连接的公网出口 IP；离线后不再显示。NAT、VPN、代理或公司统一出口可能让多台设备显示相同地址，IP 不作为身份或授权依据。完整步骤与安全边界见[资源共享说明](SHARING.md)。
 
-共享资源及其他桌面页面的原生下拉菜单在本候选版统一校正纵向布局。Linux 图形环境、大号文字和不同窗口尺寸仍需在本轮后续实际验收；当前说明不代表2.2.0 Deb已经构建或安装。
+共享资源及其他桌面页面的原生下拉菜单在 2.2.0 统一校正纵向布局，相关桌面自动化回归已通过。Linux Deb 已通过包结构、签名下载器和隔离资料原生启动检查，并已在本机安装到用户目录。
 
 ## 通过跳板机使用两组密码
 
@@ -108,7 +108,9 @@ npm run bundle:linux -- --locked
 
 ## 验证范围
 
-2.2.0当前为测试候选。版本一致性和源码差异检查在候选准备中执行；下拉菜单交互、邀请码多设备绑定与撤销轮换、在线访客IP、Rust、中继、生产构建、签名更新及原生启动仍待本轮后续实际验证。v2.2.0标签、公开Deb、两种Mac安装包、更新清单、生产中继升级和本机安装均尚未完成。
+2.2.0 已作为测试版发布。[标签工作流](https://github.com/AIsMovDataInfra/RackTop-Workspace/actions/runs/34340934877) 完成 Linux amd64、Mac Apple Silicon、Mac Intel 三平台原生构建与统一发布。Linux 通过桌面 325 项、Rust 172 项、中继 30 项、签名下载器 9 项检查，以及真实中继 TLS 帧重连和至少 15 秒的隔离资料原生启动。9 个公开附件均匹配 GitHub digest，`SHA256SUMS` 覆盖并匹配其余 8 个附件；标签源码对应关系与三个平台更新签名也已通过，详见[2.2.0 验证记录](VERIFICATION_2_2.md)。
+
+生产共享中继 `0.3.0` 已部署。本机已将核验过的 2.2.0 Deb 安装到用户目录，用户启动器和应用菜单已指向 2.2.0；3 个数据库与 5 个配置文件已备份且安装前后内容和权限保持一致，系统级 dpkg 仍为 `1.26.0-linux.8`。
 
 ### 上一版 2.1.1 验证记录
 

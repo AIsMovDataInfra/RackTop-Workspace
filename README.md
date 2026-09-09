@@ -2,7 +2,7 @@
 
 本项目由 **AIsMov** 维护，当前代码与 Linux / macOS 分发位于独立公开仓库 [AIsMovDataInfra/RackTop-Workspace](https://github.com/AIsMovDataInfra/RackTop-Workspace)。桌面应用继续叫 **RackTop**，在线网页为 **AIsMov RackTop 团队工作台**。项目源自 [Tongzh-SEU/RackTop](https://github.com/Tongzh-SEU/RackTop) 及 [原 AIsMov 维护仓库](https://github.com/AIsMovDataInfra/RackTop)，保留原作者 **Tongzh-SEU**、完整 Git 历史、[GPL-3.0](LICENSE) 和[来源说明](NOTICE.md)。
 
-当前源码版本为 **2.2.0 测试候选**，面向 Linux amd64、Mac Apple Silicon 和 Mac Intel。它修复共享资源及其他桌面原生下拉菜单的纵向裁切；同一邀请码在到期前可供多台设备依次加入，每台设备独立授权，撤销成员时轮换邀请码；分享者仅在访客在线时看到公网出口 IP，并明确 NAT、VPN 或代理可能让多人显示同一地址。2.2.0 的公开标签、安装包、更新清单、生产中继部署和本机安装均待后续完成。当前可下载与线上运行的版本仍为 [2.1.1](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/tag/v2.1.1)，其完整状态见[2.1.1验证记录](docs/VERIFICATION_2_1_1.md)。
+当前桌面测试版为 **2.2.0**，面向 Linux amd64、Mac Apple Silicon 和 Mac Intel。它修复共享资源及其他桌面原生下拉菜单的纵向裁切；同一邀请码在到期前可供多台设备依次加入，每台设备独立授权，撤销成员时轮换邀请码；分享者仅在访客在线时看到公网出口 IP，并明确 NAT、VPN 或代理可能让多人显示同一地址。[GitHub v2.2.0 Release](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/tag/v2.2.0) 已作为测试版发布，Linux 与两种 Mac 架构的原生构建、公开附件、更新签名和启动检查均已通过；生产共享中继已升级到 `0.3.0`，本机 Linux 已完成 2.2.0 用户级安装。完整证据与验证边界见[2.2.0 验证记录](docs/VERIFICATION_2_2.md)。
 
 <div align="right">
   🌐 Language:
@@ -44,17 +44,21 @@ RackTop 是面向个人研究者和小型团队的 GPU 服务器桌面工作台�
 
 ## 下载
 
-**2.2.0 仍是测试候选，尚无可下载的安装包。** 当前请使用已完成公开下载、GitHub digest、SHA256、源码和更新签名核验的2.1.1测试版；Mac继续提供两种架构。完整附件与SHA256见[2.1.1校验表](docs/VERIFICATION_2_1_1.md#公开附件与更新签名)。
+**2.2.0 测试版已发布。** Linux amd64、Mac Apple Silicon 和 Mac Intel 安装包均可在 [v2.2.0 Release](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/tag/v2.2.0) 匿名下载；9 个公开附件均匹配 GitHub digest，`SHA256SUMS` 覆盖并匹配其余 8 个附件，标签源码对应关系和三个平台更新签名也已核验，详见[2.2.0 验证记录](docs/VERIFICATION_2_2.md)。
 
 | 平台 | 安装包 |
 | --- | --- |
-| Linux amd64 | [RackTop_2.1.1_linux-amd64.deb](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.1.1/RackTop_2.1.1_linux-amd64.deb) |
-| Mac Apple Silicon | [RackTop_2.1.1_macos-arm64-unsigned.dmg](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.1.1/RackTop_2.1.1_macos-arm64-unsigned.dmg) |
-| Mac Intel | [RackTop_2.1.1_macos-x64-unsigned.dmg](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.1.1/RackTop_2.1.1_macos-x64-unsigned.dmg) |
+| Linux amd64 | [RackTop_2.2.0_linux-amd64.deb](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.2.0/RackTop_2.2.0_linux-amd64.deb) |
+| Mac Apple Silicon | [RackTop_2.2.0_macos-arm64-unsigned.dmg](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.2.0/RackTop_2.2.0_macos-arm64-unsigned.dmg) |
+| Mac Intel | [RackTop_2.2.0_macos-x64-unsigned.dmg](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.2.0/RackTop_2.2.0_macos-x64-unsigned.dmg) |
 
-### 上一版 2.1.0
+### 上一版 2.1.1
 
-[v2.1.0 Release](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/tag/v2.1.0)与[2.1.0验证记录](docs/VERIFICATION_2_1.md)继续保留。
+[v2.1.1 Release](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/tag/v2.1.1) 与 [2.1.1 验证记录](docs/VERIFICATION_2_1_1.md)继续保留。
+
+### 较早的 2.1.0
+
+[v2.1.0 Release](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/tag/v2.1.0) 与 [2.1.0 验证记录](docs/VERIFICATION_2_1.md)继续保留。
 
 ### 更早的历史版本
 
@@ -72,7 +76,7 @@ RackTop 是面向个人研究者和小型团队的 GPU 服务器桌面工作台�
 从旧 `1.30.0-linux.12` 或其他旧维护版迁入，下载并手动安装一次新仓库包。新分发使用专用签名密钥和新更新地址，旧更新通道不会自动迁移；应用标识与本机数据目录保持兼容。Mac 用户先退出应用，再用新 DMG 替换安装。
 
 ```bash
-sudo apt install ./RackTop_2.1.1_linux-amd64.deb
+sudo apt install ./RackTop_2.2.0_linux-amd64.deb
 racktop
 ```
 
@@ -111,7 +115,7 @@ AIsMov 维护版增加 Linux 平台识别、系统钥匙串接入、原生窗口
 - **项目资料管理**：按项目管理工作目录，并关联数据集和模型；支持跨服务器检查状态、同步副本和补齐缺失资料。
 - **启动配置与任务管理**：保存项目级启动配置，在不同服务器和 GPU 上切换工作目录、GPU 卡号、Shell 命令、超参数和日志路径，再统一启动和监测任务。
 - **运行状态与历史**：查看 RackTop 任务和外部进程、日志、资源监测、历史热力图，以及离线、高温、空闲和进程退出通知。
-- **资源共享**：通过分享者电脑跨网络使用获准的监控、终端和文件能力，不向接收者提供 SSH 私钥；2.2.0 候选支持同一码多设备独立授权，并让分享者在访客在线时查看公网出口 IP。
+- **资源共享**：通过分享者电脑跨网络使用获准的监控、终端和文件能力，不向接收者提供 SSH 私钥；2.2.0 支持同一码多设备独立授权，并让分享者在访客在线时查看公网出口 IP。
 - **安全连接**：支持 SSH Agent、密钥、密码、`~/.ssh/config`、ProxyJump 和 Host Key 指纹核验，不自动接受未知主机。
 - **本机 SSH 密钥管理**：从左下角“密钥管理”入口发现已有密钥、手动生成 Ed25519 或 RSA 4096 密钥对、导入引用、重命名和复制公钥；在服务器设置中选择对应私钥。移出列表会保留原文件。
 
