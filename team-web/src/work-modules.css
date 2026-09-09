@@ -1,0 +1,37 @@
+.work-module-grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(min(100%,310px),1fr)); gap: 14px; }
+.work-record { display: flex; flex-direction: column; gap: 14px; padding: 20px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; min-width: 0; }
+.work-record h2 { margin: 0; font-size: 1.05rem; overflow-wrap: anywhere; }
+.work-record header, .work-record footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.work-record p { margin: 0; color: var(--muted); font-size: .85rem; }
+.work-record dl, .work-request-facts { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; margin: 0; }
+.work-record dt, .work-request-facts dt { color: var(--muted); font-size: .8rem; }
+.work-record dd, .work-request-facts dd { margin: 4px 0 0; overflow-wrap: anywhere; }
+.work-module-status { padding: 3px 8px; border-radius: 5px; background: var(--subtle); color: var(--muted); font-size: .8rem; }
+.work-module-status--submitted, .work-module-status--approved { background: var(--selection); color: var(--info); }
+.work-module-status--collected { background: var(--green-bg); color: var(--green); }
+.work-module-status--rejected { background: var(--red-bg); color: var(--red); }
+.work-report-form, .work-request-form { display: grid; gap: 18px; }
+.work-request-form { max-width: 760px; }
+.work-report-form textarea, .work-request-form textarea, .work-review textarea { min-height: 90px; }
+.work-todo { padding: 16px; border: 1px solid var(--border); border-radius: 10px; display: grid; gap: 12px; }
+.work-todo legend { padding: 0 6px; margin: 0; color: var(--text); font-weight: 600; }
+.work-todo-actions { display: flex; justify-content: flex-end; }
+.work-review, .work-assignment { display: grid; gap: 14px; padding-top: 18px; border-top: 1px solid var(--border); }
+.work-review h3, .work-assignment h3 { margin: 0; font-size: 1rem; }
+.work-review p, .work-prose { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.work-report-history { display: grid; gap: 8px; padding: 0; list-style: none; font-size: .85rem; color: var(--muted); }
+.work-report-history li { display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.work-report-history p { flex-basis: 100%; margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.work-filters { display: flex; gap: 16px; align-items: end; flex-wrap: wrap; margin-bottom: 18px; }
+.work-filters label { flex: 1; min-width: 170px; }
+.work-inline-actions { display: flex; gap: 9px; align-items: center; flex-wrap: wrap; }
+.work-success { padding: 22px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); max-width: 760px; }
+.work-success h2 { font-size: 1.2rem; }
+.work-request-section { display: grid; gap: 18px; margin-top: 28px; }
+.work-request-section > h2 { margin: 0; font-size: 1.15rem; }
+@media (max-width: 640px) {
+  .work-record { padding: 16px; }
+  .work-todo { padding: 12px; }
+  .work-record dl, .work-request-facts { grid-template-columns: 1fr; }
+  .work-inline-actions > button { min-height: 42px; }
+}

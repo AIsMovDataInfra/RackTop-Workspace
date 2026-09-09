@@ -3,7 +3,7 @@ use std::{path::Path, sync::{Mutex, atomic::{AtomicBool, Ordering}}, time::Durat
 use tauri::{ipc::Channel, State};
 use tauri_plugin_updater::{Update, UpdaterExt};
 
-pub const ENDPOINT: &str = "https://raw.githubusercontent.com/AIsMovDataInfra/RackTop/updater/linux-amd64.json";
+pub const ENDPOINT: &str = "https://raw.githubusercontent.com/AIsMovDataInfra/RackTop-Workspace/updater/linux-amd64.json";
 const PUBLIC_KEY: &str = include_str!("../linux-updater.pub");
 
 /// Reject a signing-key mismatch in release automation before publication.
@@ -38,9 +38,10 @@ pub enum DownloadEvent {
 pub fn validate_release(version: &str, url: &str, current: &str) -> Result<(), String> {
     let candidate = semver::Version::parse(version).map_err(|_| "更新版本号无效")?;
     let installed = semver::Version::parse(current).map_err(|_| "当前版本号无效")?;
-    let revision = candidate.pre.as_str().strip_prefix("linux.").ok_or("更新不属于 Linux 通道")?;
-    if revision.parse::<u64>().is_err() || candidate <= installed { return Err("更新版本必须高于当前 Linux 版本".into()); }
-    let expected = format!("https://github.com/AIsMovDataInfra/RackTop/releases/download/v{version}/RackTop_{version}_amd64.deb");
+    if !candidate.pre.is_empty() || !candidate.build.is_empty() || candidate <= installed {
+        return Err("更新版本必须是高于当前版本的正式版本号".into());
+    }
+    let expected = format!("https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v{version}/RackTop_{version}_linux-amd64.deb");
     if url != expected { return Err("更新安装包地址不属于受信任的 Linux 发布".into()); }
     Ok(())
 }
@@ -91,7 +92,7 @@ pub async fn install_linux_update(state: State<'_, LinuxUpdateState>, version: S
     }, || {}).await.map_err(|error| format!("更新下载或签名校验失败：{error}"))?;
     // Tauri verifies the signature before returning bytes. No installer runs on unverified content.
     let directory = tempfile::tempdir().map_err(|error| error.to_string())?;
-    let path = directory.path().join(format!("RackTop_{version}_amd64.deb"));
+    let path = directory.path().join(format!("RackTop_{version}_linux-amd64.deb"));
     std::fs::write(&path, bytes).map_err(|error| error.to_string())?;
     validate_deb(&path, &version).await?;
     let _ = on_event.send(DownloadEvent::Finished);
@@ -121,12 +122,16 @@ pub async fn relaunch_linux_app(app: tauri::AppHandle, state: State<'_, LinuxUpd
 mod tests {
     use super::*;
     #[test]
-    fn accepts_only_newer_linux_packages_from_this_fork() {
-        let url = "https://github.com/AIsMovDataInfra/RackTop/releases/download/v1.26.0-linux.10/RackTop_1.26.0-linux.10_amd64.deb";
-        assert!(validate_release("1.26.0-linux.10", url, "1.26.0-linux.4").is_ok());
-        assert!(validate_release("1.26.0-linux.10", url, "1.26.0-linux.11").is_err());
-        assert!(validate_release("1.26.0-linux.10", &url.replace("AIsMovDataInfra", "untrusted"), "1.26.0-linux.4").is_err());
-        assert!(validate_release("1.26.0-linux.10", &url.replace("https:", "http:"), "1.26.0-linux.4").is_err());
-        assert!(validate_release("1.27.0", url, "1.26.0-linux.4").is_err());
+    fn accepts_only_newer_workspace_linux_packages() {
+        let url = "https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.0.0/RackTop_2.0.0_linux-amd64.deb";
+        assert!(validate_release("2.0.0", url, "1.30.0-linux.12").is_ok());
+        assert!(validate_release("2.0.0", url, "1.30.0").is_ok());
+        assert!(validate_release("2.0.0", url, "2.0.0").is_err());
+        assert!(validate_release("2.0.0", url, "2.0.1").is_err());
+        assert!(validate_release("2.0.0", &url.replace("RackTop-Workspace/", "RackTop/"), "1.30.0-linux.12").is_err());
+        assert!(validate_release("2.0.0", &url.replace("https:", "http:"), "1.30.0-linux.12").is_err());
+        assert!(validate_release("2.0.0", &url.replace("linux-amd64.deb", "macos-arm64.dmg"), "1.30.0-linux.12").is_err());
+        assert!(validate_release("2.0.0-linux.1", url, "1.30.0-linux.12").is_err());
+        assert!(validate_release("2.0.0+build", url, "1.30.0-linux.12").is_err());
     }
 }

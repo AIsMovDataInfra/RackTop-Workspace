@@ -1,0 +1,3 @@
+.equipment-thumbnail { width: 72px; height: 64px; flex: 0 0 72px; display: grid; place-items: center; overflow: hidden; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-muted, var(--bg)); color: var(--muted); }
+.equipment-thumbnail img { display: block; width: 100%; height: 100%; object-fit: cover; }
+@media (max-width: 600px) { .equipment-thumbnail { width: 60px; height: 60px; flex-basis: 60px; } .equipment-row-name { flex-basis: calc(100% - 72px); } }

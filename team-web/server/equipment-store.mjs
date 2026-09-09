@@ -84,7 +84,7 @@ function photoDescription(photo) {
 
 // Equipment shares the booking database file, so the existing SQLite backup
 // captures it consistently. No account IDs or authentication state are public.
-export function createEquipmentStore({ dbPath = ':memory:', now = Date.now } = {}) {
+export function createEquipmentStore({ dbPath = ':memory:', now = Date.now, enforceCompanies = false } = {}) {
   if (dbPath !== ':memory:') mkdirSync(dirname(resolve(dbPath)), { recursive: true, mode: 0o700 });
   const db = new DatabaseSync(dbPath);
   try {
@@ -122,6 +122,19 @@ export function createEquipmentStore({ dbPath = ':memory:', now = Date.now } = {
     if (!equipmentColumns.has('legacy_serial_number')) db.exec("ALTER TABLE equipment ADD COLUMN legacy_serial_number TEXT NOT NULL DEFAULT ''");
     if (!equipmentColumns.has('current_user')) db.exec("ALTER TABLE equipment ADD COLUMN current_user TEXT NOT NULL DEFAULT ''");
     if (!equipmentColumns.has('company')) db.exec("ALTER TABLE equipment ADD COLUMN company TEXT NOT NULL DEFAULT ''");
+    const historyColumns = new Set(db.prepare('PRAGMA table_info(equipment_changes)').all().map(column => column.name));
+    if (!historyColumns.has('company')) {
+      db.exec("ALTER TABLE equipment_changes ADD COLUMN company TEXT NOT NULL DEFAULT ''");
+      const scopes = new Map();
+      for (const entry of db.prepare('SELECT id,equipment_id,changes FROM equipment_changes ORDER BY id').all()) {
+        let changes; try { changes = JSON.parse(entry.changes); } catch { changes = []; }
+        const transfer = Array.isArray(changes) ? changes.find(change => change.field === 'company') : undefined;
+        const before = scopes.get(entry.equipment_id) || '';
+        const scope = transfer ? transfer.oldValue === null ? transfer.newValue : transfer.oldValue : before;
+        db.prepare('UPDATE equipment_changes SET company=? WHERE id=?').run(companies.has(scope) ? scope : '', entry.id);
+        scopes.set(entry.equipment_id, transfer ? transfer.newValue : before);
+      }
+    }
     if (!db.prepare("SELECT 1 FROM equipment_migrations WHERE name='immutable-serial-v1'").get()) {
       const existing = db.prepare('SELECT id,serial_number FROM equipment ORDER BY created_at,rowid').all();
       for (const row of existing) {
@@ -163,9 +176,23 @@ export function createEquipmentStore({ dbPath = ':memory:', now = Date.now } = {
     if (!row) throw new ApiError(404, 'NOT_FOUND', '找不到设备');
     return row;
   }
+  function companyScope(user) {
+    if (!enforceCompanies) return null;
+    actor(user);
+    if (user.isSuperAdmin === true) return null;
+    if (!companies.has(user.company)) throw new ApiError(403, 'COMPANY_REQUIRED', '请联系超级管理员分配公司');
+    return user.company;
+  }
+  function scopedRow(id, user) {
+    const scope = companyScope(user), row = rowFor(id);
+    if (scope !== null && row.company !== scope) throw new ApiError(404, 'NOT_FOUND', '找不到设备');
+    return row;
+  }
   function record(id, user, action, timestamp, changes) {
-    db.prepare('INSERT INTO equipment_changes(equipment_id,actor_id,actor_name,action,at,changes) VALUES(?,?,?,?,?,?)')
-      .run(id, user.id, user.name, action, timestamp, JSON.stringify(changes));
+    const transfer = changes.find(change => change.field === 'company' && change.oldValue !== null && change.oldValue !== change.newValue);
+    const company = transfer ? transfer.oldValue : rowFor(id).company;
+    db.prepare('INSERT INTO equipment_changes(equipment_id,actor_id,actor_name,action,at,changes,company) VALUES(?,?,?,?,?,?,?)')
+      .run(id, user.id, user.name, action, timestamp, JSON.stringify(changes), company || '');
   }
   function checkVersion(previous, version) {
     if (previous.version !== version || previous.version >= Number.MAX_SAFE_INTEGER) throw new ApiError(409, 'VERSION_CONFLICT', '设备已被其他人修改，请刷新后重新编辑');
@@ -175,11 +202,12 @@ export function createEquipmentStore({ dbPath = ':memory:', now = Date.now } = {
       .run(timestamp, editor.id, editor.name, previous.id, previous.version);
     if (!result.changes) throw new ApiError(409, 'VERSION_CONFLICT', '设备已被其他人修改，请刷新后重新编辑');
   }
-  function get(id) {
+  function get(id, user) {
     return transaction(() => {
-      const equipment = view(rowFor(id));
-      const history = db.prepare('SELECT actor_name,action,at,changes FROM equipment_changes WHERE equipment_id=? ORDER BY id DESC LIMIT 30')
-        .all(equipment.id).map(row => ({ actorName: row.actor_name, action: row.action, at: new Date(row.at).toISOString(), changes: JSON.parse(row.changes) }));
+      const equipment = view(scopedRow(id, user));
+      const scope = companyScope(user);
+      const history = db.prepare(`SELECT actor_name,action,at,changes FROM equipment_changes WHERE equipment_id=? ${scope === null ? '' : 'AND company=?'} ORDER BY id DESC LIMIT 30`)
+        .all(equipment.id, ...(scope === null ? [] : [scope])).map(row => ({ actorName: row.actor_name, action: row.action, at: new Date(row.at).toISOString(), changes: JSON.parse(row.changes) }));
       return { equipment, history };
     }, false);
   }
@@ -214,10 +242,10 @@ export function createEquipmentStore({ dbPath = ':memory:', now = Date.now } = {
   function update(id, value, user) {
     const editor = actor(user), data = input(value, true);
     return transaction(() => {
-      const previous = view(rowFor(id));
+      const previous = view(scopedRow(id, user));
       checkVersion(previous, value.version);
       if (own(data, 'company') && data.company !== previous.company) {
-        if (user.isSuperAdmin !== true) throw new ApiError(403, 'FORBIDDEN', '只有超级管理员可以修改设备所属公司');
+        if (user.isSuperAdmin !== true && (data.company !== user.company || previous.company !== user.company)) throw new ApiError(403, 'FORBIDDEN', '只能选择自己所属的公司');
         if (!companies.has(data.company)) invalid('请选择设备所属公司');
       }
       validClassification({ ...previous, ...data });
@@ -232,9 +260,9 @@ export function createEquipmentStore({ dbPath = ':memory:', now = Date.now } = {
       return view(rowFor(previous.id));
     });
   }
-  function getPhoto(id) {
+  function getPhoto(id, user) {
     return transaction(() => {
-      const equipment = view(rowFor(id));
+      const equipment = view(scopedRow(id, user));
       if (!equipment.photo) return null;
       const photo = db.prepare('SELECT bytes,width,height,updated_at FROM equipment_photos WHERE equipment_id=?').get(equipment.id);
       return { bytes: Buffer.from(photo.bytes), width: photo.width, height: photo.height,
@@ -244,7 +272,7 @@ export function createEquipmentStore({ dbPath = ':memory:', now = Date.now } = {
   function setPhoto(id, value, user) {
     const editor = actor(user); photoInput(value, true);
     return transaction(() => {
-      const previous = view(rowFor(id)); checkVersion(previous, value.version);
+      const previous = view(scopedRow(id, user)); checkVersion(previous, value.version);
       const timestamp = now();
       db.prepare(`INSERT INTO equipment_photos(equipment_id,bytes,width,height,updated_at) VALUES(?,?,?,?,?)
         ON CONFLICT(equipment_id) DO UPDATE SET bytes=excluded.bytes,width=excluded.width,height=excluded.height,updated_at=excluded.updated_at`)
@@ -258,7 +286,7 @@ export function createEquipmentStore({ dbPath = ':memory:', now = Date.now } = {
   function removePhoto(id, value, user) {
     const editor = actor(user); photoInput(value, false);
     return transaction(() => {
-      const previous = view(rowFor(id)); checkVersion(previous, value.version);
+      const previous = view(scopedRow(id, user)); checkVersion(previous, value.version);
       if (!previous.photo) return previous;
       const timestamp = now();
       db.prepare('DELETE FROM equipment_photos WHERE equipment_id=?').run(previous.id);
@@ -267,6 +295,6 @@ export function createEquipmentStore({ dbPath = ':memory:', now = Date.now } = {
       return view(rowFor(previous.id));
     });
   }
-  return { list: () => db.prepare(`${equipmentSelect} ORDER BY e.updated_at DESC,e.serial_number ASC`).all().map(view),
+  return { list: user => { const company = companyScope(user); return db.prepare(`${equipmentSelect} ${company === null ? '' : 'WHERE e.company=?'} ORDER BY e.updated_at DESC,e.serial_number ASC`).all(...(company === null ? [] : [company])).map(view); },
     get, create, update, getPhoto, setPhoto, removePhoto, close: () => db.close() };
 }

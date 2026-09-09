@@ -28,9 +28,20 @@ it('does not fetch or render the roster for ordinary admins, and erases it when 
 })
 it('supports single-character Chinese credentials, fixed company choices and clears the password after creating', async () => {
   const create = vi.spyOn(api, 'createMember').mockResolvedValue({ member: { ...employee, id: 'new', name: '名', company: 'A公司' } })
-  await mount(); await click('增加员工'); enter('username', '中'); enter('name', '名'); enter('password', '密'); select('A公司')
+  await mount(); await click('增加员工'); enter('name', '名'); enter('password', '密'); select('A公司')
   expect([...container.querySelectorAll('select[name="company"] option')].map((option) => option.textContent)).toEqual(['请选择公司', 'A公司', 'B公司', 'C公司', '西浦'])
-  await submit(); expect(create).toHaveBeenCalledWith({ username: '中', name: '名', password: '密', company: 'A公司' }); expect(container.querySelector('input[type="password"]')).toBeNull()
+  await submit(); expect(create).toHaveBeenCalledWith({ name: '名', password: '密', company: 'A公司' }); expect(container.querySelector('input[type="password"]')).toBeNull()
+})
+it('creates long Chinese and English member names without a length gate or accent normalization', async () => {
+  const create = vi.spyOn(api, 'createMember').mockImplementation(async (value) => ({ member: { ...employee, id: value.name, name: value.name, company: value.company } }))
+  await mount()
+  for (const name of ['Member中文 + @.'.repeat(100), 'Cafe\u0301员工']) {
+    await click('增加员工'); enter('name', name); enter('password', '密'); select('A公司')
+    const input = container.querySelector<HTMLInputElement>('input[name="name"]')!
+    for (const attr of ['minlength', 'maxlength', 'pattern']) expect(input.hasAttribute(attr)).toBe(false)
+    expect(container.querySelector<HTMLFormElement>('.dialog form')!.checkValidity()).toBe(true)
+    await submit(); expect(create).toHaveBeenLastCalledWith({ name, password: '密', company: 'A公司' })
+  }
 })
 it('shows recovery requests and resets with a version without exposing passwords in notices', async () => {
   const reset = vi.spyOn(api, 'resetMemberPassword').mockResolvedValue({ member: { ...employee, version: 2, recoveryRequestedAt: null } })

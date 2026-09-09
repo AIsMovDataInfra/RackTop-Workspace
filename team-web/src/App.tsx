@@ -8,6 +8,8 @@ import { SettingsDialog } from './SettingsDialog'
 import { Workspace } from './Workspace'
 import { EquipmentWorkspace } from './EquipmentWorkspace'
 import { MembersWorkspace } from './MembersWorkspace'
+import { WeeklyWorkspace } from './WeeklyWorkspace'
+import { RequestWorkspace } from './RequestWorkspace'
 import { PendingMembership } from './PendingMembership'
 import type { Session } from './types'
 
@@ -51,19 +53,22 @@ export default function App() {
   }, [])
   const pendingCompany = Boolean(session?.authMode === 'account' && session.user && !session.user.isSuperAdmin && !session.user.company)
   useEffect(() => {
-    if (!pendingCompany) return
+    if (!session?.user) return
     const refresh = () => { if (document.visibilityState !== 'hidden') void load() }
     const interval = window.setInterval(refresh, 30_000)
     window.addEventListener('focus', refresh)
     return () => { window.clearInterval(interval); window.removeEventListener('focus', refresh) }
-  }, [pendingCompany])
+  }, [Boolean(session?.user)])
+  const scopeKey = `${session?.user?.id || ''}:${session?.user?.company || ''}:${Boolean(session?.user?.isSuperAdmin)}`
   if (pendingCompany && session) return <PendingMembership session={session} state={state} error={error} refreshing={refreshing} onRefresh={() => void load()} onLogout={logout} onSessionChanged={signedIn}/>
-  if (session?.user?.isSuperAdmin && /^\/members\/?$/.test(pathname)) return <MembersWorkspace session={session} state={state} navigate={navigate} onLogout={logout} onSessionChanged={signedIn} onSessionExpired={sessionExpired}/>
+  if (session?.user && /^\/reports\/?$/.test(pathname)) return <WeeklyWorkspace key={scopeKey} session={session} state={state} navigate={navigate} onLogout={logout} onSessionChanged={signedIn} onSessionExpired={sessionExpired}/>
+  if (session?.user && /^\/requests\/?$/.test(pathname)) return <RequestWorkspace key={scopeKey} session={session} state={state} navigate={navigate} onLogout={logout} onSessionChanged={signedIn} onSessionExpired={sessionExpired}/>
+  if (session?.user?.isSuperAdmin && /^\/members\/?$/.test(pathname)) return <MembersWorkspace key={scopeKey} session={session} state={state} navigate={navigate} onLogout={logout} onSessionChanged={signedIn} onSessionExpired={sessionExpired}/>
   if (session?.user && /^\/equipment(?:\/|$)/.test(pathname)) {
     let id = pathname.replace(/^\/equipment\/?/, '').replace(/\/$/, '') || undefined
     try { if (id) id = decodeURIComponent(id) } catch { /* The API reports malformed device links as not found. */ }
-    return <EquipmentWorkspace id={id} session={session} state={state} navigate={navigate} bootstrapToken={bootstrapToken} onSessionChanged={signedIn} onSessionExpired={sessionExpired} onLogout={logout} />
+    return <EquipmentWorkspace key={scopeKey} id={id} session={session} state={state} navigate={navigate} bootstrapToken={bootstrapToken} onSessionChanged={signedIn} onSessionExpired={sessionExpired} onLogout={logout} />
   }
-  if (session?.user) return <Workspace onNavigateEquipment={() => navigate('/equipment')} onNavigateMembers={() => navigate('/members')} session={session} state={state} bootstrapToken={bootstrapToken} onSessionChanged={signedIn} onSessionExpired={sessionExpired} onLogout={logout} />
-  return <><main className="login-shell member-login-shell" inert={showSettings}><button className="login-settings icon-button" aria-label={t('设置', 'Settings')} onClick={() => setShowSettings(true)}><Settings size={19} /></button><div className="member-login"><div className="brand"><span><Activity size={24} /></span><div><strong>RackTop</strong><small>{t('团队工作台', 'Team workspace')}</small></div></div>{Boolean(error) && <div className="error" role="alert">{errorText(error, t)}<button onClick={() => void load(true)}><RefreshCw size={15} />{t('重试', 'Retry')}</button></div>}{session ? <AuthDialog embedded session={session} bootstrapToken={bootstrapToken} t={t} onClose={() => {}} onSignedIn={signedIn} /> : !error && <p role="status" className="loading-inline"><LoaderCircle size={18} />{t('正在连接服务…', 'Connecting to the service…')}</p>}</div></main>{showSettings && <SettingsDialog state={state} session={session} onClose={() => setShowSettings(false)} />}</>
+  if (session?.user) return <Workspace key={scopeKey} onNavigateEquipment={() => navigate('/equipment')} onNavigateMembers={() => navigate('/members')} session={session} state={state} bootstrapToken={bootstrapToken} onSessionChanged={signedIn} onSessionExpired={sessionExpired} onLogout={logout} />
+  return <><main className="login-shell member-login-shell" inert={showSettings}><button className="login-settings icon-button" aria-label={t('设置', 'Settings')} onClick={() => setShowSettings(true)}><Settings size={19} /></button><div className="member-login"><div className="brand"><span><Activity size={24} /></span><div><strong>AIsMov RackTop</strong><small>{t('团队工作台', 'Team workspace')}</small></div></div>{Boolean(error) && <div className="error" role="alert">{errorText(error, t)}<button onClick={() => void load(true)}><RefreshCw size={15} />{t('重试', 'Retry')}</button></div>}{session ? <AuthDialog embedded session={session} bootstrapToken={bootstrapToken} t={t} onClose={() => {}} onSignedIn={signedIn} /> : !error && <p role="status" className="loading-inline"><LoaderCircle size={18} />{t('正在连接服务…', 'Connecting to the service…')}</p>}</div></main>{showSettings && <SettingsDialog state={state} session={session} onClose={() => setShowSettings(false)} />}</>
 }

@@ -399,7 +399,7 @@ legend { margin-bottom: 10px; color: var(--muted); font-size: .88rem; }
 .equipment-print-label img { display: block; max-width: 100%; height: auto; margin: 10px 0; }
 .equipment-label-url { color: var(--info); overflow-wrap: anywhere; font-size: .78rem; }
 @media (hover: hover) and (pointer: fine) { .equipment-row:hover { background: var(--canvas); } }
-@media (max-width: 900px) { .equipment-row { flex-wrap: wrap; gap: 12px; }.equipment-row-name { flex-basis: calc(100% - 70px); }.equipment-row-meta { flex-basis: 50%; }.equipment-row > .equipment-status { margin-left: auto; } }
+@media (max-width: 900px) { .equipment-row { flex-wrap: wrap; gap: 12px; }.equipment-row-name { flex-basis: calc(100% - 84px); }.equipment-row-meta { flex-basis: 50%; }.equipment-row > .equipment-status { margin-left: auto; } }
 @media (max-width: 700px) {
   .main-nav { flex-wrap: wrap; }.main-nav button { flex-basis: calc(50% - 5px); }
   .equipment-workspace .page-header { flex-wrap: wrap; }.equipment-workspace .header-actions { max-width: none; }

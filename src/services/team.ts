@@ -3,7 +3,7 @@ export const TEAM_URL = 'https://136.0.110.161'
 export type TeamCompany = 'A公司' | 'B公司' | 'C公司' | '西浦'
 export interface TeamStatus {
   url: string; authenticated: boolean
-  user: { id: string; name: string; username: string; role: 'admin' | 'member'; company?: TeamCompany | null; isSuperAdmin?: boolean; version?: number } | null
+  user: { id: string; name: string; username: string; role: 'admin' | 'member'; company?: TeamCompany | null; isSuperAdmin?: boolean; version?: number; avatar?: string } | null
   bindings: Record<string, { resourceId: string | null; lastSyncedAt: number | null; error: string | null }>
 }
 export interface TeamResource { id: string; name: string; cluster: string; gpuModel: string; gpuCount: number; status: string; lastSeenAt: string | null; inventoryState: string; enabled: boolean }

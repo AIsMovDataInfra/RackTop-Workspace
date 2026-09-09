@@ -4,6 +4,7 @@ import { mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 
 const DAY = 86_400_000;
+const companies = new Set(['A公司', 'B公司', 'C公司', '西浦']);
 const own = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
 
 export class ApiError extends Error {
@@ -60,7 +61,7 @@ function requireAdmin(user) {
 }
 function reservationView(row) {
   return {
-    id: row.id, resourceId: row.resource_id, resourceName: row.resource_name, cluster: row.cluster,
+    id: row.id, company: row.company, resourceId: row.resource_id, resourceName: row.resource_name, cluster: row.cluster,
     ownerId: row.owner_id, ownerName: row.owner_name, scope: row.scope, gpuIndices: JSON.parse(row.gpu_indices),
     startAt: new Date(row.start_at).toISOString(), endAt: new Date(row.end_at).toISOString(),
     purpose: row.purpose, status: row.status, createdAt: new Date(row.created_at).toISOString(),
@@ -70,7 +71,7 @@ function reservationView(row) {
   };
 }
 
-export function createStore({ dbPath, now = Date.now, notificationsConfigured = false }) {
+export function createStore({ dbPath, now = Date.now, notificationsConfigured = false, enforceCompanies = false }) {
   if (!dbPath || typeof dbPath !== 'string') throw new Error('TEAM_DB_PATH is required');
   if (dbPath !== ':memory:') mkdirSync(dirname(resolve(dbPath)), { recursive: true, mode: 0o700 });
   const db = new DatabaseSync(dbPath);
@@ -124,13 +125,23 @@ export function createStore({ dbPath, now = Date.now, notificationsConfigured = 
   const reservationColumns = new Set(db.prepare('PRAGMA table_info(reservations)').all().map(column => column.name));
   if (!reservationColumns.has('gpu_ids')) db.exec("ALTER TABLE reservations ADD COLUMN gpu_ids TEXT NOT NULL DEFAULT '[]'");
   if (!reservationColumns.has('inventory_version')) db.exec('ALTER TABLE reservations ADD COLUMN inventory_version INTEGER NOT NULL DEFAULT 0');
+  const resourceColumns = new Set(db.prepare('PRAGMA table_info(resources)').all().map(column => column.name));
+  if (!resourceColumns.has('company')) db.exec("ALTER TABLE resources ADD COLUMN company TEXT NOT NULL DEFAULT ''");
+  if (!resourceColumns.has('company_version')) db.exec('ALTER TABLE resources ADD COLUMN company_version INTEGER NOT NULL DEFAULT 1');
+  if (!reservationColumns.has('company')) db.exec("ALTER TABLE reservations ADD COLUMN company TEXT NOT NULL DEFAULT ''");
+  if (!reservationColumns.has('resource_name_snapshot')) {
+    db.exec("ALTER TABLE reservations ADD COLUMN resource_name_snapshot TEXT NOT NULL DEFAULT ''");
+    db.exec("ALTER TABLE reservations ADD COLUMN cluster_snapshot TEXT NOT NULL DEFAULT ''");
+    db.exec('UPDATE reservations SET resource_name_snapshot=(SELECT name FROM resources WHERE id=resource_id),cluster_snapshot=(SELECT cluster FROM resources WHERE id=resource_id)');
+  }
   try {
-    db.exec('CREATE UNIQUE INDEX IF NOT EXISTS resources_unique_name ON resources(cluster COLLATE NOCASE,name COLLATE NOCASE)');
+    db.exec('DROP INDEX IF EXISTS resources_unique_name');
+    db.exec('CREATE UNIQUE INDEX IF NOT EXISTS resources_company_name ON resources(company,cluster COLLATE NOCASE,name COLLATE NOCASE)');
   } catch {
     db.close();
     throw new Error('无法建立资源名称唯一约束；若已有同集群重名资源，请先备份并修复重复记录。未删除或合并任何原数据。');
   }
-  const selectReservation = 'SELECT r.*, s.name AS resource_name, s.cluster FROM reservations r JOIN resources s ON s.id=r.resource_id';
+  const selectReservation = 'SELECT r.*, r.resource_name_snapshot AS resource_name, r.cluster_snapshot AS cluster FROM reservations r JOIN resources s ON s.id=r.resource_id';
   function transaction(fn) {
     let started = false;
     try {
@@ -142,10 +153,31 @@ export function createStore({ dbPath, now = Date.now, notificationsConfigured = 
       throw error;
     }
   }
+  function companyScope(user) {
+    if (!enforceCompanies) return null;
+    userIdentity(user);
+    if (user.isSuperAdmin === true) return null;
+    if (!companies.has(user.company)) throw new ApiError(403, 'COMPANY_REQUIRED', '请联系超级管理员分配公司');
+    return user.company;
+  }
+  function checkCompany(value, user, kind = '资源') {
+    const company = companyScope(user);
+    if (company !== null && value.company !== company) missing(kind);
+    return value;
+  }
+  function resourceCompany(input, user, previous) {
+    companyScope(user);
+    const desired = own(input, 'company') ? input.company : previous?.company ?? user.company ?? '';
+    if (desired !== '' && !companies.has(desired)) invalid('请选择有效公司');
+    if (typeof desired !== 'string') invalid('请选择有效公司');
+    if (enforceCompanies && !user.isSuperAdmin && desired !== user.company) throw new ApiError(403, 'FORBIDDEN', '只有超级管理员可以跨公司分配资源');
+    if (previous?.company && desired === '') invalid('已分配的资源不能清空公司');
+    return desired;
+  }
   function resourceView(row) {
     const inventory = db.prepare('SELECT * FROM resource_inventory WHERE resource_id=?').get(row.id);
     return {
-      id: row.id, cluster: row.cluster, name: row.name, gpuModel: row.gpu_model,
+      id: row.id, company: row.company, companyVersion: row.company_version, cluster: row.cluster, name: row.name, gpuModel: row.gpu_model,
       gpuCount: row.gpu_count, notes: row.notes, enabled: Boolean(row.enabled),
       gpus: inventory ? JSON.parse(inventory.gpus) : [], inventoryVersion: inventory?.revision ?? 0,
       inventoryState: inventory?.state ?? 'manual', pendingGpus: inventory?.pending_gpus ? JSON.parse(inventory.pending_gpus) : null,
@@ -157,7 +189,8 @@ export function createStore({ dbPath, now = Date.now, notificationsConfigured = 
   function viewReservation(row) {
     const result = reservationView(row);
     if (result.scope === 'gpus' && result.inventoryVersion > 0) {
-      const current = getResource(result.resourceId).gpus;
+      const resource = getResource(result.resourceId);
+      const current = resource.company === result.company ? resource.gpus : [];
       // Historical or missing GPUs keep their saved index; never remap their stable identity.
       result.gpuIndices = result.gpuIds.map((id, index) => current.find(gpu => gpu.id === id)?.index ?? result.gpuIndices[index]).sort((a, b) => a - b);
     }
@@ -173,13 +206,14 @@ export function createStore({ dbPath, now = Date.now, notificationsConfigured = 
     if (!row) missing('预约');
     return viewReservation(row);
   }
-  function checkResourceName(cluster, name, excludedId = '') {
-    if (db.prepare('SELECT 1 FROM resources WHERE cluster=? COLLATE NOCASE AND name=? COLLATE NOCASE AND id != ? LIMIT 1').get(cluster, name, excludedId)) {
+  function checkResourceName(cluster, name, excludedId = '', company = '') {
+    if (db.prepare('SELECT 1 FROM resources WHERE company=? AND cluster=? COLLATE NOCASE AND name=? COLLATE NOCASE AND id != ? LIMIT 1').get(company, cluster, name, excludedId)) {
       throw new ApiError(409, 'RESOURCE_DUPLICATE', '这个集群已有同名资源，请使用现有资源或检查资源名称');
     }
   }
   function checkPermission(reservation, user, version) {
     userIdentity(user);
+    checkCompany(reservation, user, '预约');
     if (user.role !== 'admin' && reservation.ownerId !== user.id) throw new ApiError(403, 'FORBIDDEN', '只能修改自己的预约');
     integer(version, '预约版本', 1, Number.MAX_SAFE_INTEGER);
     if (reservation.version !== version) throw new ApiError(409, 'VERSION_CONFLICT', '预约已被其他操作更新，请刷新后重试');
@@ -284,7 +318,8 @@ export function createStore({ dbPath, now = Date.now, notificationsConfigured = 
       const claimedResources = new Set(gpus.map(gpu => db.prepare('SELECT resource_id FROM gpu_identity WHERE uuid=?').get(gpu.uuid)?.resource_id).filter(Boolean));
       let id = binding?.resource_id ?? explicitId ?? (claimedResources.size === 1 ? [...claimedResources][0] : null);
       if (claimedResources.size > 1 || (id && [...claimedResources].some(owner => owner !== id))) throw new ApiError(409, 'TOPOLOGY_CONFLICT', '上报的 GPU 分属其他资源，不能合并或转移预约');
-      if (id) getResource(id);
+      if (id) checkCompany(getResource(id), user);
+      const company = id ? getResource(id).company : resourceCompany(input, user);
       const inventory = id ? db.prepare('SELECT * FROM resource_inventory WHERE resource_id=?').get(id) : null;
       const authoritative = !inventory || (inventory.authority_source === sourceId && inventory.authority_server === serverId);
       if (inventory && !authoritative) {
@@ -295,10 +330,10 @@ export function createStore({ dbPath, now = Date.now, notificationsConfigured = 
       if (!inventory) {
         if (input.status !== 'online' || timestamp - observedAt > 90_000) throw new ApiError(409, 'INVENTORY_CHANGED', '首次登记需要最近 90 秒内在线采集的完整 GPU 清单');
         if (id && hasUpcomingReservations(id, timestamp)) throw new ApiError(409, 'INVENTORY_CHANGED', '现有手工资源仍有预约，无法依据当前编号推断当时的 GPU；请先处理预约再绑定硬件');
-        checkResourceName(cluster, name, id ?? '');
+        checkResourceName(cluster, name, id ?? '', company);
         if (!id) {
           id = randomUUID();
-          db.prepare('INSERT INTO resources(id,cluster,name,gpu_model,gpu_count,notes,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)').run(id, cluster, name, '', gpus.length, notes, timestamp, timestamp);
+          db.prepare('INSERT INTO resources(id,cluster,name,gpu_model,gpu_count,notes,created_at,updated_at,company) VALUES(?,?,?,?,?,?,?,?,?)').run(id, cluster, name, '', gpus.length, notes, timestamp, timestamp, company);
         }
         const identified = assignGpuIdentities(id, gpus);
         db.prepare('INSERT INTO resource_inventory(resource_id,authority_source,authority_server,gpus,last_seen_at,observed_at,status) VALUES(?,?,?,?,?,?,?)').run(id, sourceId, serverId, JSON.stringify(identified), timestamp, observedAt, input.status);
@@ -317,7 +352,7 @@ export function createStore({ dbPath, now = Date.now, notificationsConfigured = 
           // Commit the diagnostic before reporting 409; the old inventory and every reservation stay intact.
           return { error: new ApiError(409, 'INVENTORY_CHANGED', '检测到 GPU 缺失、更换或数量变化，已保留原清单与预约；请在网页由管理员确认新清单') };
         } else {
-          checkResourceName(cluster, name, id);
+          checkResourceName(cluster, name, id, company);
           const identified = assignGpuIdentities(id, gpus);
           const changed = inventoryShape(JSON.parse(inventory.gpus)) !== inventoryShape(gpus) || inventory.state !== 'synced';
           db.prepare("UPDATE resource_inventory SET gpus=?,pending_gpus=NULL,state='synced',revision=revision+?,last_seen_at=?,observed_at=?,status=? WHERE resource_id=?").run(JSON.stringify(identified), changed ? 1 : 0, timestamp, observedAt, input.status, id);
@@ -331,23 +366,26 @@ export function createStore({ dbPath, now = Date.now, notificationsConfigured = 
   }
   function createResource(input, user) {
     requireAdmin(user);
-    object(input, ['cluster', 'name', 'gpuModel', 'gpuCount', 'notes']);
+    object(input, ['cluster', 'name', 'gpuModel', 'gpuCount', 'notes', 'company']);
+    const company = resourceCompany(input, user);
     const id = randomUUID(), timestamp = now();
     const cluster = text(input.cluster, '集群名称', 100), name = text(input.name, '资源名称', 100);
     const gpuCount = integer(input.gpuCount, 'GPU 数量', 0, 64);
     const gpuModel = text(input.gpuModel ?? '', 'GPU 型号', 100, gpuCount === 0), notes = text(input.notes, '备注', 1000, true);
     return transaction(() => {
-      checkResourceName(cluster, name);
-      db.prepare('INSERT INTO resources(id,cluster,name,gpu_model,gpu_count,notes,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)').run(id, cluster, name, gpuModel, gpuCount, notes, timestamp, timestamp);
+      checkResourceName(cluster, name, '', company);
+      db.prepare('INSERT INTO resources(id,cluster,name,gpu_model,gpu_count,notes,created_at,updated_at,company) VALUES(?,?,?,?,?,?,?,?,?)').run(id, cluster, name, gpuModel, gpuCount, notes, timestamp, timestamp, company);
       return getResource(id);
     });
   }
   function updateResource(id, input, user) {
     requireAdmin(user);
-    object(input, ['cluster', 'name', 'gpuModel', 'gpuCount', 'notes', 'enabled', 'acceptInventoryVersion']);
+    object(input, ['cluster', 'name', 'gpuModel', 'gpuCount', 'notes', 'enabled', 'acceptInventoryVersion', 'company', 'companyVersion']);
     if (!Object.keys(input).length) invalid('请提供要修改的资源字段');
     return transaction(() => {
-      let original = getResource(id);
+      let original = checkCompany(getResource(id), user);
+      const company = resourceCompany(input, user, original);
+      if (company !== original.company && input.companyVersion !== original.companyVersion) throw new ApiError(409, 'VERSION_CONFLICT', '资源公司已变化，请刷新后再分配');
       const timestamp = now();
       if (own(input, 'acceptInventoryVersion')) {
         acceptInventory(id, input.acceptInventoryVersion, timestamp);
@@ -356,14 +394,16 @@ export function createStore({ dbPath, now = Date.now, notificationsConfigured = 
       if (original.inventoryState !== 'manual' && (own(input, 'gpuCount') || own(input, 'gpuModel'))) {
         throw new ApiError(409, 'INVENTORY_CHANGED', '同步资源的 GPU 清单由 RackTop 上报，不能手动改写数量或型号');
       }
+      if (original.company && company !== original.company && hasUpcomingReservations(id, timestamp)) throw new ApiError(409, 'RESOURCE_HAS_RESERVATIONS', '资源仍有未结束的预约，结束或取消后才能调整公司');
       const merged = { ...original, ...input };
       const gpuCount = integer(merged.gpuCount, 'GPU 数量', 0, 64);
       const cluster = text(merged.cluster, '集群名称', 100), name = text(merged.name, '资源名称', 100);
-      checkResourceName(cluster, name, id);
+      checkResourceName(cluster, name, id, company);
       if (gpuCount !== original.gpuCount && db.prepare("SELECT 1 FROM reservations WHERE resource_id=? AND status='confirmed' AND end_at > ? LIMIT 1").get(id, timestamp)) throw new ApiError(409, 'RESOURCE_HAS_RESERVATIONS', '资源存在尚未结束的预约，不能修改 GPU 数量');
-      db.prepare('UPDATE resources SET cluster=?,name=?,gpu_model=?,gpu_count=?,notes=?,enabled=?,updated_at=? WHERE id=?').run(
+      db.prepare('UPDATE resources SET cluster=?,name=?,gpu_model=?,gpu_count=?,notes=?,enabled=?,updated_at=?,company=?,company_version=company_version+? WHERE id=?').run(
         cluster, name, text(merged.gpuModel, 'GPU 型号', 100, gpuCount === 0), gpuCount,
-        text(merged.notes, '备注', 1000, true), boolean(merged.enabled, '启用状态') ? 1 : 0, timestamp, id);
+        text(merged.notes, '备注', 1000, true), boolean(merged.enabled, '启用状态') ? 1 : 0, timestamp, company, company === original.company ? 0 : 1, id);
+      if (!original.company && company) db.prepare("UPDATE reservations SET company=? WHERE resource_id=? AND company=''").run(company, id);
       return getResource(id);
     });
   }
@@ -377,16 +417,17 @@ export function createStore({ dbPath, now = Date.now, notificationsConfigured = 
         const previous = db.prepare('SELECT * FROM reservation_requests WHERE owner_id=? AND request_id=?').get(user.id, requestId);
         if (previous) {
           if (previous.payload_hash !== requestHash) throw new ApiError(409, 'IDEMPOTENCY_CONFLICT', '同一预约请求不能更改内容，请刷新后重新提交');
-          return getReservation(previous.reservation_id);
+          return checkCompany(getReservation(previous.reservation_id), user, '预约');
         }
       }
-      const resource = getResource(input.resourceId), timestamp = now();
+      const resource = checkCompany(getResource(input.resourceId), user), timestamp = now();
+      if (enforceCompanies && !companies.has(resource.company)) invalid('请先为资源分配公司再预约');
       if (!resource.enabled) invalid('此资源已停用，不能新建预约');
       const booking = bookingFields(input, resource, timestamp);
       checkConflicts(resource.id, booking);
       const id = randomUUID();
-      db.prepare("INSERT INTO reservations(id,resource_id,owner_id,owner_name,scope,gpu_indices,gpu_ids,inventory_version,start_at,end_at,purpose,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,'confirmed',?,?)")
-        .run(id, resource.id, user.id, user.name, booking.scope, JSON.stringify(booking.gpuIndices), JSON.stringify(booking.gpuIds), booking.inventoryVersion, booking.start, booking.end, booking.purpose, timestamp, timestamp);
+      db.prepare("INSERT INTO reservations(id,resource_id,owner_id,owner_name,scope,gpu_indices,gpu_ids,inventory_version,start_at,end_at,purpose,status,created_at,updated_at,company,resource_name_snapshot,cluster_snapshot) VALUES (?,?,?,?,?,?,?,?,?,?,?,'confirmed',?,?,?,?,?)")
+        .run(id, resource.id, user.id, user.name, booking.scope, JSON.stringify(booking.gpuIndices), JSON.stringify(booking.gpuIds), booking.inventoryVersion, booking.start, booking.end, booking.purpose, timestamp, timestamp, resource.company, resource.name, resource.cluster);
       if (requestId) db.prepare('INSERT INTO reservation_requests(owner_id,request_id,payload_hash,reservation_id) VALUES(?,?,?,?)').run(user.id, requestId, requestHash, id);
       const reservation = getReservation(id); enqueue('created', reservation, timestamp); return reservation;
     });
@@ -396,7 +437,7 @@ export function createStore({ dbPath, now = Date.now, notificationsConfigured = 
     if (Object.keys(input).length < 2) invalid('请提供要修改的预约字段');
     return transaction(() => {
       const original = getReservation(id); checkPermission(original, user, input.version);
-      const resource = getResource(original.resourceId), timestamp = now();
+      const resource = checkCompany(getResource(original.resourceId), user), timestamp = now();
       if (Date.parse(original.endAt) <= timestamp) throw new ApiError(409, 'RESERVATION_ELAPSED', '此预约时间已结束，不能再修改');
       if (!resource.enabled) invalid('此资源已停用，不能修改预约；仍可取消或提前结束');
       const merged = { ...original, ...input };
@@ -431,7 +472,8 @@ export function createStore({ dbPath, now = Date.now, notificationsConfigured = 
     if (to <= from || to - from > 366 * DAY) invalid('查询范围必须为 1 年内的有效时间段');
     if (query.mine !== undefined && !['true', 'false', true, false].includes(query.mine)) invalid('mine 参数无效');
     const mine = query.mine === true || query.mine === 'true';
-    return db.prepare(`${selectReservation} WHERE r.start_at < ? AND r.end_at > ? ${mine ? 'AND r.owner_id=?' : ''} ORDER BY r.start_at,r.created_at LIMIT 1000`).all(...(mine ? [to, from, user.id] : [to, from])).map(viewReservation);
+    const company = companyScope(user);
+    return db.prepare(`${selectReservation} WHERE r.start_at < ? AND r.end_at > ? ${mine ? 'AND r.owner_id=?' : ''} ${company === null ? '' : 'AND r.company=?'} ORDER BY r.start_at,r.created_at LIMIT 1000`).all(to, from, ...(mine ? [user.id] : []), ...(company === null ? [] : [company])).map(viewReservation);
   }
   function enqueueEnding() {
     return transaction(() => {
@@ -490,12 +532,15 @@ export function createStore({ dbPath, now = Date.now, notificationsConfigured = 
         ['demo-orion', 'demo-zhou', '小周（演示）', 'machine', '[]', timestamp + 2 * 3_600_000, timestamp + 4 * 3_600_000, '演示 · 推理评测'],
       ];
       for (const [resourceId, ownerId, ownerName, scope, gpuIndices, start, end, purpose] of samples) db.prepare("INSERT INTO reservations(id,resource_id,owner_id,owner_name,scope,gpu_indices,start_at,end_at,purpose,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,'confirmed',?,?)").run(randomUUID(), resourceId, ownerId, ownerName, scope, gpuIndices, start, end, purpose, timestamp, timestamp);
+      db.exec("UPDATE reservations SET resource_name_snapshot=(SELECT name FROM resources WHERE id=resource_id),cluster_snapshot=(SELECT cluster FROM resources WHERE id=resource_id) WHERE resource_name_snapshot=''");
       db.prepare("INSERT INTO metadata(key,value) VALUES('demo_seeded','1')").run();
     });
   }
   return {
-    getResource, getReservation, createResource, updateResource, syncResource,
-    listResources: () => db.prepare('SELECT * FROM resources ORDER BY cluster,name,id').all().map(resourceView),
+    getResource: (id, user) => checkCompany(getResource(id), user),
+    getReservation: (id, user) => checkCompany(getReservation(id), user, '预约'),
+    createResource, updateResource, syncResource,
+    listResources: user => { const company = companyScope(user); return db.prepare(`SELECT * FROM resources ${company === null ? '' : 'WHERE company=?'} ORDER BY cluster,name,id`).all(...(company === null ? [] : [company])).map(resourceView); },
     createReservation, updateReservation, listReservations,
     cancelReservation: (id, input, user) => transition(id, input, user, false),
     finishReservation: (id, input, user) => transition(id, input, user, true),

@@ -5,7 +5,7 @@ const validUser = (value: string) => /^[a-zA-Z0-9_][a-zA-Z0-9_.-]*$/.test(value)
 const validJump = (value: string) => /^[a-zA-Z0-9_][a-zA-Z0-9_.:@,[\]-]*$/.test(value)
 
 /** Only portable connection fields are exported; never serialize a Server. */
-export function exportSshConfig(servers: Server[]): string {
+export function exportSshConfig(servers: Server[], knownServers: Server[] = servers): string {
   const aliases = new Set<string>()
   return '# RackTop SSH Config\n# Passwords and private keys are not included. Configure your own credentials.\n\n' + servers.map((server, index) => {
     if (!validHost(server.host) || !validUser(server.username) || !Number.isInteger(server.port) || server.port < 1 || server.port > 65535) throw new Error(`${server.name} 的连接地址、账号或端口格式无效，请先编辑配置。`)
@@ -18,8 +18,8 @@ export function exportSshConfig(servers: Server[]): string {
       if (!validJump(proxy)) throw new Error(`${server.name} 的跳板机配置包含无法导出的字符。`)
       proxy = proxy.split(',').map((hop) => {
         if (hop.includes('@') || hop.includes(':')) return hop
-        const jump = servers.find((candidate) => candidate.sshAlias === hop || candidate.name === hop)
-        if (!jump || !validHost(jump.host) || !validUser(jump.username)) throw new Error(`跳板机别名 ${hop} 缺少可共享的地址，请改为 用户名@主机:端口 后导出。`)
+        const jump = knownServers.find((candidate) => candidate.sshAlias === hop || candidate.name === hop)
+        if (!jump || !validHost(jump.host) || !validUser(jump.username) || !Number.isInteger(jump.port) || jump.port < 1 || jump.port > 65535) throw new Error(`跳板机别名 ${hop} 缺少可共享的地址，请改为 用户名@主机:端口 后导出。`)
         return `${jump.username}@${jump.host.includes(':') ? `[${jump.host}]` : jump.host}:${jump.port}`
       }).join(',')
     }

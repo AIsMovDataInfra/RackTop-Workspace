@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { randomBytes, createHash } from 'node:crypto';
+import { randomBytes, createHash, scryptSync } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { mkdtempSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -39,6 +39,17 @@ async function setup(t, config = {}) {
 async function employee(admin, username = '员工') {
   return (await admin.call('/api/admin/members', 'POST', { username, name: username, password: '密', company: '西浦' })).payload.member;
 }
+
+test('super administrator creates long and decomposed member names that can sign in unchanged', async t => {
+  const { auth, admin } = await setup(t);
+  for (const name of ['Member中文 + @.'.repeat(100), 'Cafe\u0301员工']) {
+    const created = await admin.call('/api/admin/members', 'POST', { name: ` ${name} `, password: '密', company: '西浦' });
+    assert.equal(created.status, 201);
+    assert.equal(created.payload.member.name, name); assert.equal(created.payload.member.username, name);
+    const login = await browser(auth).login(name, '密');
+    assert.equal(login.payload.user.id, created.payload.member.id); assert.equal(login.payload.user.name, name);
+  }
+});
 function temporary(t) {
   const directory = mkdtempSync(join(tmpdir(), 'racktop-members-'));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
@@ -60,7 +71,7 @@ test('only the single super administrator sees member profiles; ordinary admin c
   assert.equal(listed.length, 3); assert.equal(listed.filter(row => row.isSuperAdmin).length, 1);
   assert.equal(listed.find(row => row.id === seeded.id).isSuperAdmin, true);
   assert.equal(listed.find(row => row.username === '员工').company, null);
-  const keys = ['id', 'username', 'name', 'role', 'isSuperAdmin', 'company', 'version', 'createdAt', 'recoveryRequestedAt'].sort();
+  const keys = ['id', 'username', 'name', 'role', 'isSuperAdmin', 'company', 'version', 'createdAt', 'recoveryRequestedAt','avatar'].sort();
   for (const row of listed) assert.deepEqual(Object.keys(row).sort(), keys);
   await assert.rejects(admin.call('/api/admin/members?all=true'), { status: 422 });
   await assert.rejects(admin.call('/api/admin/members', 'POST', { username: '伪造', name: '伪造', password: '密', company: '西浦', role: 'admin' }), { status: 422 });
@@ -169,7 +180,9 @@ test('old database migration preserves identity, password hash and existing gran
     name_key TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, role TEXT NOT NULL CHECK(role IN ('admin','member')), created_at INTEGER NOT NULL);
     CREATE TABLE account_sessions (token_hash TEXT PRIMARY KEY, user_id TEXT REFERENCES account_users(id) ON DELETE CASCADE,
       kind TEXT NOT NULL, device_name TEXT, remember_me INTEGER NOT NULL DEFAULT 0, expires_at INTEGER NOT NULL, created_at INTEGER NOT NULL);`);
-  db.prepare('INSERT INTO account_users VALUES(?,?,?,?,?,?,?)').run('retained-id', 'admin', '原成员', '原成员', 'preserved-hash', 'member', 1000);
+  const salt = randomBytes(16).toString('base64url');
+  const passwordHash = `scrypt-32768-8-3$${salt}$${scryptSync(SECRET, salt, 32, { N: 32768, r: 8, p: 3, maxmem: 64 * 1024 * 1024 }).toString('base64url')}`;
+  db.prepare('INSERT INTO account_users VALUES(?,?,?,?,?,?,?)').run('retained-id', 'admin', '原成员', '原成员', passwordHash, 'member', 1000);
   db.prepare('INSERT INTO account_sessions VALUES(?,?,?,NULL,0,?,?)').run(createHash('sha256').update(token).digest('base64url'), 'retained-id', 'browser', Date.now() + 60_000, 1000);
   db.close();
   const auth = createAccountAuth({ ...BASE, dbPath }); t.after(() => auth.close());
@@ -177,7 +190,11 @@ test('old database migration preserves identity, password hash and existing gran
   assert.equal(view.user.id, 'retained-id'); assert.equal(view.user.company, null); assert.equal(view.user.version, 1); assert.equal(view.user.isSuperAdmin, false);
   await assert.rejects(auth.provisionSuperAdmin({ mode: 'create', password: SECRET }), { code: 'ADMIN_NAME_IN_USE' });
   const reopened = new DatabaseSync(dbPath); t.after(() => reopened.close());
-  assert.equal(reopened.prepare('SELECT password_hash FROM account_users').get().password_hash, 'preserved-hash');
+  assert.equal(reopened.prepare('SELECT password_hash FROM account_users').get().password_hash, passwordHash);
+  assert.equal(reopened.prepare('SELECT username_key FROM account_users').get().username_key, 'admin');
+  assert.equal(view.user.avatar, 'user');
+  const signed = (await browser(auth).login('ADMIN', SECRET)).payload.user;
+  assert.equal(signed.id, 'retained-id'); assert.equal(signed.username, 'admin'); assert.equal(signed.name, '原成员');
   assert.equal(statSync(dbPath).mode & 0o777, 0o600);
 });
 
@@ -203,4 +220,16 @@ test('deployment CLI creates once, explicit reset revokes sessions, and no passw
   assert.equal(auth.resolve(prior), null); await admin.login('admin', '新');
   const empty = await cli(['create', ...args], '\n'); assert.equal(empty.code, 1);
   const duplicate = await cli(['create', ...args, '--username', 'another-admin'], SECRET); assert.equal(duplicate.code, 1); assert.match(duplicate.err, /SUPER_ADMIN_EXISTS/);
+});
+
+test('super administrator creates employees from one fixed name and preserves case with canonical uniqueness', async t => {
+  const { admin, auth } = await setup(t);
+  const row = (await admin.call('/api/admin/members', 'POST', { name: 'Alex 实验员', password: '密', company: 'B公司' })).payload.member;
+  assert.equal(row.username, 'Alex 实验员'); assert.equal(row.name, 'Alex 实验员'); assert.equal(row.avatar, 'user');
+  await assert.rejects(admin.call('/api/admin/members', 'POST', { name: 'alex 实验员', password: '密', company: '西浦' }), { code: 'ACCOUNT_EXISTS' });
+  assert.equal((await browser(auth).login('ALEX 实验员', '密')).payload.user.id, row.id);
+  await admin.call(`/api/admin/members/${row.id}`, 'DELETE', { version: row.version });
+  assert.equal(auth.getMemberIdentity(row.id), null);
+  const replacement = (await admin.call('/api/admin/members', 'POST', { name: 'Alex 实验员', password: '新', company: '西浦' })).payload.member;
+  assert.notEqual(replacement.id, row.id);
 });

@@ -60,7 +60,7 @@ test('registration yields a stable member UUID, normalized unique identity and n
   const { payload, res } = await client.register({ username: ' Member ', name: '  小林  ' });
   assert.equal(res.statusCode, 201);
   assert.match(payload.user.id, /^[0-9a-f-]{36}$/);
-  assert.deepEqual({ ...payload.user, id: undefined }, { id: undefined, name: '小林', username: 'member', role: 'member', isSuperAdmin: false, company: null, version: 1 });
+  assert.deepEqual({ ...payload.user, id: undefined }, { id: undefined, name: '小林', username: 'member', role: 'member', isSuperAdmin: false, company: null, version: 1, avatar: 'user' });
   assert.equal(payload.authMode, 'account');
   assert.equal(Object.hasOwn(payload.user, 'email'), false);
   assert.equal(payload.accountRegistration, true);
@@ -133,12 +133,25 @@ test('new passwords reject only empty or whitespace-only input and preserve surr
   const client = browser(auth);
   await client.call('/api/session');
   for (const value of ['', '   ', '\t\n', null, 123]) await assert.rejects(client.register({ password: value }), { code: 'INVALID_PASSWORD' });
-  await assert.rejects(client.register({ name: 'hidden\u202ename' }), { code: 'INVALID_NAME' });
   const spaced = '  preserve these spaces  ';
   await client.register({ password: spaced });
   await client.call('/api/auth/logout', { method: 'POST', body: {} });
   await assert.rejects(client.call('/api/auth/login', { method: 'POST', body: { username: 'member', password: spaced.trim() } }), { code: 'INVALID_CREDENTIALS' });
   assert.equal((await client.call('/api/auth/login', { method: 'POST', body: { username: 'member', password: spaced } })).payload.user.role, 'member');
+});
+
+test('single member name rejects only a non-string or blank value and preserves embedded characters', async t => {
+  const auth = createAccountAuth(BASE); t.after(() => auth.close());
+  const client = browser(auth); await client.call('/api/session');
+  for (const value of ['', '   ', '\t\n', null, 123]) {
+    await assert.rejects(client.call('/api/auth/register', { method: 'POST', body: { name: value, password: '密' } }), { code: 'INVALID_NAME' });
+  }
+  const name = 'Member\u200b中文\u0001';
+  const registered = await client.call('/api/auth/register', { method: 'POST', body: { name: `  ${name}  `, password: '密' } });
+  assert.equal(registered.payload.user.name, name); assert.equal(registered.payload.user.username, name);
+  await client.call('/api/auth/logout', { method: 'POST', body: {} });
+  const login = await client.call('/api/auth/login', { method: 'POST', body: { username: name, password: '密' } });
+  assert.equal(login.payload.user.id, registered.payload.user.id);
 });
 
 test('device grants require origin, contain no cookie, validate bearer and revoke independently', async t => {
@@ -263,24 +276,24 @@ test('anonymous session rate limiting uses actual peer IP unless an explicit loc
   assert.equal((await browser(proxied, { 'x-real-ip': '198.51.100.2' }).call('/api/session')).payload.user, null);
 });
 
-test('remember-me issues a 30-day session, survives the default expiry and stays enabled after a password change', async t => {
+test('remember-me issues a 360-day session, survives the default expiry and stays enabled after a password change', async t => {
   let timestamp = Date.now();
   const auth = createAccountAuth({ ...BASE, now: () => timestamp }); t.after(() => auth.close());
   const client = browser(auth);
   const registered = await client.register({ rememberMe: true });
   assert.equal(registered.payload.rememberMe, true);
-  assert.match(registered.res.getHeader('Set-Cookie')[0], /Max-Age=2592000;/);
+  assert.match(registered.res.getHeader('Set-Cookie')[0], /Max-Age=31104000;/);
   timestamp += 8 * 60 * 60_000 + 1;
   assert.ok(auth.resolve(client.request()));
   const changed = await client.call('/api/auth/change-password', { method: 'POST', body: { oldPassword: PASSWORD, newPassword: 'a replacement remembered password' } });
   assert.equal(changed.payload.rememberMe, true);
-  assert.match(changed.res.getHeader('Set-Cookie')[0], /Max-Age=2592000;/);
-  timestamp += 30 * 24 * 60 * 60_000;
+  assert.match(changed.res.getHeader('Set-Cookie')[0], /Max-Age=31104000;/);
+  timestamp += 360 * 24 * 60 * 60_000;
   assert.equal(auth.resolve(client.request()), null);
   await client.call('/api/session');
   const login = await client.call('/api/auth/login', { method: 'POST', body: { username: 'member', password: 'a replacement remembered password', rememberMe: true } });
   assert.equal(login.payload.rememberMe, true);
-  assert.match(login.res.getHeader('Set-Cookie')[0], /Max-Age=2592000;/);
+  assert.match(login.res.getHeader('Set-Cookie')[0], /Max-Age=31104000;/);
   await client.call('/api/auth/logout', { method: 'POST', body: {} });
   const short = await client.call('/api/auth/login', { method: 'POST', body: { username: 'member', password: 'a replacement remembered password', rememberMe: false } });
   assert.equal(short.payload.rememberMe, false);
@@ -356,4 +369,63 @@ test('500 anonymous sessions cannot consume the capacity reserved for member and
   const response = await waiting.call('/api/auth/login', { method: 'POST', body: { username: 'member', password: PASSWORD } });
   assert.equal(response.payload.user.username, 'member');
   assert.equal((await browser(auth, { 'x-real-ip': '203.0.113.2' }).call('/api/session')).payload.user, null);
+});
+
+test('one member name preserves display case, supports canonical login and recovery without changing legacy identities', async t => {
+  const auth = createAccountAuth(BASE); t.after(() => auth.close());
+  const client = browser(auth); await client.call('/api/session');
+  const created = await client.call('/api/auth/register', { method: 'POST', body: { name: ' Alice 小林 ', password: '密', rememberMe: true } });
+  assert.equal(created.payload.user.name, 'Alice 小林'); assert.equal(created.payload.user.username, 'Alice 小林');
+  assert.equal(created.payload.user.avatar, 'user'); assert.equal(created.payload.rememberMe, true);
+  await client.call('/api/auth/logout', { method: 'POST', body: {} });
+  const signed = await client.call('/api/auth/login', { method: 'POST', body: { username: ' ALICE 小林 ', password: '密' } });
+  assert.equal(signed.payload.user.id, created.payload.user.id);
+  const rival = browser(auth); await rival.call('/api/session');
+  await assert.rejects(rival.call('/api/auth/register', { method: 'POST', body: { name: 'alice 小林', password: '密' } }), { code: 'ACCOUNT_EXISTS' });
+  await rival.call('/api/auth/recovery-request', { method: 'POST', body: { username: 'ALICE 小林' } });
+  assert.equal(auth.getMemberIdentity(created.payload.user.id).version, 2);
+  const legacy = await browser(auth).register({ username: 'old-login', name: '原来的姓名' });
+  assert.equal(auth.getMemberIdentity(legacy.payload.user.id).username, 'old-login');
+  assert.equal(auth.getMemberIdentity(legacy.payload.user.id).name, '原来的姓名');
+  assert.equal(auth.getMemberIdentity('not-found'), null); assert.equal(auth.getMemberIdentity(undefined), null);
+});
+
+test('a member can change only their own allowlisted avatar with CAS, including before company assignment', async t => {
+  const auth = createAccountAuth(BASE); t.after(() => auth.close());
+  const client = browser(auth); const { payload } = await client.register();
+  const anonymous = browser(auth); await anonymous.call('/api/session');
+  await assert.rejects(anonymous.call('/api/auth/profile', { method: 'POST', body: { version: 1, avatar: 'cat' } }), { status: 401 });
+  await assert.rejects(client.call('/api/auth/profile', { method: 'POST', body: { version: 1, avatar: 'cat' }, headers: { 'x-csrf-token': undefined } }), { code: 'CSRF_REJECTED' });
+  for (const body of [{ version: 1, avatar: 'https://example.test/image.png' }, { version: 1, avatar: '<svg>' }]) {
+    await assert.rejects(client.call('/api/auth/profile', { method: 'POST', body }), { code: 'INVALID_AVATAR' });
+  }
+  for (const body of [{ version: 1, avatar: 'cat', company: '西浦' }, { version: 1, avatar: 'cat', id: 'someone-else' }, { version: 1, avatar: 'cat', name: '改名' }]) {
+    await assert.rejects(client.call('/api/auth/profile', { method: 'POST', body }), { code: 'INVALID_INPUT' });
+  }
+  const updated = await client.call('/api/auth/profile', { method: 'POST', body: { version: 1, avatar: 'robot' } });
+  assert.equal(updated.payload.user.avatar, 'robot'); assert.equal(updated.payload.user.company, null); assert.equal(updated.payload.user.version, 2);
+  assert.equal(updated.payload.user.id, payload.user.id);
+  assert.equal(updated.payload.csrfToken, client.csrfToken);
+  await assert.rejects(client.call('/api/auth/profile', { method: 'POST', body: { version: 1, avatar: 'cat' } }), { code: 'VERSION_CONFLICT' });
+  const grant = (await device(native(auth))).payload;
+  const nativeClient = native(auth, { authorization: `Bearer ${grant.token}` });
+  const nativeUpdated = await nativeClient.call('/api/auth/profile', { method: 'POST', body: { version: 2, avatar: 'star' } });
+  assert.equal(nativeUpdated.payload.user.avatar, 'star'); assert.equal(nativeUpdated.payload.csrfToken, null);
+  const safe = auth.getMemberIdentity(payload.user.id);
+  assert.deepEqual(Object.keys(safe).sort(), ['id', 'name', 'role', 'username', 'isSuperAdmin', 'company', 'version', 'avatar'].sort());
+  assert.equal(auth.resolve(client.request()).user.avatar, 'star');
+});
+
+test('remembered browser sessions remain valid after thirty days while desktop device grants still expire', async t => {
+  let now = Date.now();
+  const auth = createAccountAuth({ ...BASE, now: () => now }); t.after(() => auth.close());
+  const client = browser(auth); await client.register({ rememberMe: true });
+  const grant = (await device(native(auth))).payload;
+  assert.equal(new Date(grant.expiresAt).getTime(), now + 30 * 24 * 60 * 60_000);
+  now += 31 * 24 * 60 * 60_000;
+  assert.ok(auth.resolve(client.request()));
+  assert.equal(auth.resolve(native(auth).request('GET', { authorization: `Bearer ${grant.token}` })), null);
+  const prior = client.request();
+  await client.call('/api/auth/logout', { method: 'POST', body: {} });
+  assert.equal(auth.resolve(prior), null);
 });

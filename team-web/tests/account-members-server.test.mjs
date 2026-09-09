@@ -52,7 +52,7 @@ async function fixture(t) {
   return { app, call, anonymous, sessionOf, login, register, admin, bootstrapToken };
 }
 const equipmentDraft = (extra = {}) => ({ name: '设备管理隐私验收', category: '摄像头模组', location: '上海', ...extra });
-const resourceDraft = { name: '预约隐私验收', cluster: '训练集群', gpuModel: 'A100', gpuCount: 1, notes: '已登录成员业务备注' };
+const resourceDraft = { company: '西浦', name: '预约隐私验收', cluster: '训练集群', gpuModel: 'A100', gpuCount: 1, notes: '已登录成员业务备注' };
 
 async function seedBusiness(call, admin) {
   const resource = await call('/api/resources', { method: 'POST', session: admin, body: resourceDraft });
@@ -107,7 +107,9 @@ test('company assignment gates every business path and photo buffering; session,
   assert.equal(assigned.status, 200, assigned.text);
   assert.equal((await call('/api/session', { session: pending })).body.user.company, 'A公司');
   assert.equal((await call('/api/resources', { token: pendingDevice.body.token })).status, 200, 'existing device sessions observe company assignment');
-  for (const path of ['/api/resources', '/api/reservations', '/api/equipment', `/api/equipment/${equipment.id}`, equipment.photo.url]) assert.equal((await call(path, { session: pending })).status, 200, path);
+  for (const path of ['/api/resources', '/api/reservations', '/api/equipment']) assert.equal((await call(path, { session: pending })).status, 200, path);
+  for (const path of [`/api/equipment/${equipment.id}`, equipment.photo.url]) assert.equal((await call(path, { session: pending })).status, 404, 'Other company records are not accessible');
+  assert.deepEqual((await call('/api/resources', { session: pending })).body.resources, []);
   const own = await call('/api/equipment', { method: 'POST', session: pending, body: equipmentDraft({ name: '已分配成员设备' }) });
   assert.equal(own.status, 201); assert.equal(own.body.equipment.company, 'A公司');
   assert.equal((await call('/api/equipment', { method: 'POST', session: pending, body: equipmentDraft({ company: 'B公司' }) })).status, 403);
@@ -130,7 +132,7 @@ test('real HTTP member administration protects the directory, recovers access an
   const beforeEquipment = (await call(`/api/equipment/${equipment.id}`, { session: admin })).body;
   const beforeReservation = (await call(`/api/reservations/${reservation.id}`, { session: admin })).body;
   const directory = await call('/api/admin/members', { session: admin });
-  for (const row of directory.body.members) assert.deepEqual(Object.keys(row).sort(), ['id','username','name','role','isSuperAdmin','company','version','createdAt','recoveryRequestedAt'].sort());
+  for (const row of directory.body.members) assert.deepEqual(Object.keys(row).sort(), ['id','username','name','role','isSuperAdmin','company','version','createdAt','recoveryRequestedAt','avatar'].sort());
   assert.equal(directory.headers['cache-control'], 'no-store');
   const denied = await call('/api/admin/members', { session: employee });
   assert.equal(denied.status, 403); assert.equal(denied.text.includes('设备使用者'), false);
@@ -157,10 +159,85 @@ test('real HTTP member administration protects the directory, recovers access an
   assert.deepEqual((await call(`/api/equipment/${equipment.id}`, { session: admin })).body, beforeEquipment);
   assert.deepEqual((await call(`/api/reservations/${reservation.id}`, { session: admin })).body, beforeReservation);
   assert.equal((await call('/api/admin/members', { session: admin })).body.members.some(row => row.id === member.id), false);
-  const replacement = await call('/api/admin/members', { method: 'POST', session: admin, body: { username: '短', name: '设备使用者', password: '新', company: 'B公司' } });
+  const replacement = await call('/api/admin/members', { method: 'POST', session: admin, body: { username: '短', name: '设备使用者', password: '新', company: '西浦' } });
   assert.equal(replacement.status, 201); assert.notEqual(replacement.body.member.id, member.id);
   const newSession = (await login('短', '新')).session;
   assert.equal((await call(`/api/reservations/${reservation.id}/cancel`, { method: 'POST', session: newSession, body: { version: reservation.version } })).status, 403, 'same username must not inherit old UUID ownership');
   const selfRegister = await call('/api/auth/register', { method: 'POST', session: await anonymous(), body: { username: '自选公司', name: '自选公司', password: '密', company: '西浦' } });
   assert.equal(selfRegister.status, 422, 'self registration cannot assign company');
+});
+
+test('company isolation hides resources, reservations, equipment, photos and mutations from other companies immediately', async t => {
+  const { call, admin, login } = await fixture(t);
+  const add = async (name, company) => {
+    const result = await call('/api/admin/members', { method: 'POST', session: admin, body: { name, password: '密', company } });
+    assert.equal(result.status, 201, result.text);
+    return { member: result.body.member, session: (await login(name, '密')).session };
+  };
+  const a = await add('甲成员', 'A公司'), b = await add('乙成员', 'B公司');
+  const resourceA = (await call('/api/resources', { method: 'POST', session: admin, body: { ...resourceDraft, company: 'A公司' } })).body.resource;
+  const resourceB = await call('/api/resources', { method: 'POST', session: admin, body: { ...resourceDraft, company: 'B公司' } });
+  assert.equal(resourceB.status, 201, 'Different companies may use identical resource names');
+  const reservation = await call('/api/reservations', { method: 'POST', session: a.session, body: { resourceId: resourceA.id, scope: 'machine', gpuIndices: [], startAt: iso(10), endAt: iso(70), purpose: '甲公司的计划' } });
+  assert.equal(reservation.status, 201, reservation.text);
+  const created = await call('/api/equipment', { method: 'POST', session: a.session, body: equipmentDraft({ company: 'A公司', notes: '甲公司的旧备注' }) });
+  assert.equal(created.status, 201, created.text);
+  const equipment = created.body.equipment;
+  const jpeg = await sharp({ create: { width: 16, height: 16, channels: 3, background: '#ffffff' } }).jpeg().toBuffer();
+  const uploaded = await call(`/api/equipment/${equipment.id}/photo`, { method: 'POST', session: a.session, body: { version: 1, dataUrl: `data:image/jpeg;base64,${jpeg.toString('base64')}` } });
+  assert.equal(uploaded.status, 200, uploaded.text);
+  assert.deepEqual((await call('/api/equipment', { session: b.session })).body.equipment, []);
+  assert.deepEqual((await call('/api/reservations', { session: b.session })).body.reservations, []);
+  assert.equal((await call('/api/resources', { session: b.session })).body.resources[0].company, 'B公司');
+  for (const path of [`/api/equipment/${equipment.id}`, `/api/equipment/${equipment.id}/photo`, `/api/reservations/${reservation.body.reservation.id}`]) {
+    const response = await call(path, { session: b.session });
+    assert.equal(response.status, 404, path); assert.equal(response.text.includes('甲公司的计划'), false);
+  }
+  for (const [path, body, method] of [
+    [`/api/equipment/${equipment.id}`, { version: 2, currentUser: '伪造领用' }, 'PATCH'],
+    [`/api/equipment/${equipment.id}/photo`, { version: 2 }, 'DELETE'],
+    ['/api/reservations', { resourceId: resourceA.id, scope: 'machine', gpuIndices: [], startAt: iso(80), endAt: iso(90), purpose: '跨公司' }, 'POST'],
+  ]) assert.equal((await call(path, { method, session: b.session, body })).status, 404, path);
+  const move = await call(`/api/equipment/${equipment.id}`, { method: 'PATCH', session: admin, body: { version: 2, company: 'B公司', notes: '乙公司的新备注' } });
+  assert.equal(move.status, 200, move.text); assert.equal(move.body.equipment.serialNumber, equipment.serialNumber);
+  assert.equal((await call(`/api/equipment/${equipment.id}/photo`, { session: a.session })).status, 404);
+  assert.equal((await call(`/api/equipment/${equipment.id}/photo`, { session: b.session })).status, 200);
+  const transferred = await call(`/api/equipment/${equipment.id}`, { session: b.session });
+  assert.deepEqual(transferred.body.history, []);
+  assert.equal(transferred.text.includes('甲公司的旧备注'), false);
+  assert.equal((await call(`/api/equipment/${equipment.id}`, { session: admin })).text.includes('甲公司的旧备注'), true);
+  assert.equal((await call(`/api/equipment/${equipment.id}`, { method: 'PATCH', session: b.session, body: { version: 3, company: 'B公司' } })).status, 200);
+  assert.equal((await call(`/api/equipment/${equipment.id}`, { method: 'PATCH', session: b.session, body: { version: 3, company: 'A公司' } })).status, 403);
+  const change = await call(`/api/admin/members/${a.member.id}`, { method: 'PATCH', session: admin, body: { version: a.member.version, company: 'B公司' } });
+  assert.equal(change.status, 200, change.text);
+  assert.equal((await call(`/api/reservations/${reservation.body.reservation.id}`, { session: a.session })).status, 404, 'Existing session immediately loses old-company access');
+  assert.equal((await call('/api/resources', { session: a.session })).body.resources[0].company, 'B公司');
+  const resourceMove = await call(`/api/resources/${resourceA.id}`, { method: 'PATCH', session: admin, body: { company: 'B公司', companyVersion: resourceA.companyVersion } });
+  assert.equal(resourceMove.status, 409, 'Future reservations prevent a cross-company resource move');
+});
+
+test('workspace HTTP saves private requests and approved collection atomically updates the actual equipment ledger', async t => {
+  const { call, admin, login } = await fixture(t);
+  const employee = await call('/api/admin/members', { method: 'POST', session: admin, body: { name: '领用成员', password: '密', company: 'A公司' } });
+  assert.equal(employee.status, 201, employee.text);
+  const session = (await login('领用成员', '密')).session;
+  const equipment = (await call('/api/equipment', { method: 'POST', session, body: equipmentDraft({ company: 'A公司' }) })).body.equipment;
+  const result = await call('/api/workspace/requests', { method: 'POST', session, body: { category: equipment.category, quantity: 1, purpose: '测试设备领取', equipmentId: equipment.id } });
+  assert.equal(result.status, 201, result.text); assert.deepEqual(Object.keys(result.body).sort(), ['id','submitted']);
+  const id = result.body.id;
+  for (const path of ['/api/workspace/requests', `/api/workspace/requests/${id}`]) assert.equal((await call(path, { session })).status, 403);
+  const approved = await call(`/api/workspace/requests/${id}`, { method: 'PATCH', session: admin, body: { version: 1, status: 'approved', comment: '已批准' } });
+  assert.equal(approved.status, 200, approved.text);
+  const collected = await call(`/api/workspace/requests/${id}`, { method: 'PATCH', session: admin, body: { version: 2, status: 'collected', comment: '当面交付' } });
+  assert.equal(collected.status, 200, collected.text); assert.equal(collected.body.request.equipmentUpdated, true);
+  const updated = (await call(`/api/equipment/${equipment.id}`, { session })).body;
+  assert.equal(updated.equipment.currentUser, '领用成员'); assert.equal(updated.equipment.status, 'in_use');
+  assert.equal(updated.equipment.version, 2); assert.equal(updated.history[0].changes.length, 2);
+  const duplicate = await call(`/api/workspace/requests/${id}`, { method: 'PATCH', session: admin, body: { version: 2, status: 'collected', comment: '重试' } });
+  assert.equal(duplicate.status, 409);
+  assert.equal((await call(`/api/equipment/${equipment.id}`, { session })).body.equipment.version, 2);
+  const report = await call('/api/workspace/reports', { method: 'POST', session, body: { weekStart: '2026-09-07', todos: [{ text: '完成接线', completion: 80, unfinishedReason: '待校准', effect: '已联调' }], nextPlan: '完成校准', status: 'submitted' } });
+  assert.equal(report.status, 201, report.text);
+  assert.equal((await call(`/api/workspace/reports/${report.body.report.id}`, { session })).status, 200);
+  assert.equal((await call('/api/workspace/reports', { session })).body.reports.length, 1);
 });

@@ -6,10 +6,11 @@ import { isIP } from 'node:net';
 
 const TOKEN = /^[A-Za-z0-9_-]{43}$/;
 const SESSION_MS = 8 * 60 * 60_000;
-const REMEMBERED_SESSION_MS = 30 * 24 * 60 * 60_000;
+const REMEMBERED_SESSION_MS = 360 * 24 * 60 * 60_000;
 const ANONYMOUS_MS = 10 * 60_000;
 const DEVICE_MS = 30 * 24 * 60 * 60_000;
 export const ACCOUNT_COMPANIES = Object.freeze(['A公司', 'B公司', 'C公司', '西浦']);
+export const ACCOUNT_AVATARS = Object.freeze(['user', 'cat', 'dog', 'rocket', 'robot', 'flower', 'star']);
 // OWASP Password Storage Cheat Sheet: equivalent 32 MiB scrypt configuration.
 // https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html#scrypt
 const SCRYPT = Object.freeze({ N: 32768, r: 8, p: 3, maxmem: 64 * 1024 * 1024 });
@@ -34,6 +35,16 @@ function username(value) {
   const normalized = value.trim().toLowerCase();
   if (!normalized) throw fail(422, 'INVALID_USERNAME', '请输入用户名。');
   return normalized;
+}
+function accountIdentity(body) {
+  const displayName = memberName(body.name);
+  // New clients use one visible identity; old clients retain their two fields.
+  return { username: body.username === undefined ? displayName : username(body.username), name: displayName };
+}
+function memberName(value) {
+  if (typeof value !== 'string' || !value.trim()) throw fail(422, 'INVALID_NAME', '请输入成员名称。');
+  // Preserve the same characters used at login; do not normalize the identity.
+  return value.trim();
 }
 function remember(value) {
   if (value === undefined) return false;
@@ -108,12 +119,18 @@ export function createAccountAuth(config) {
   try {
     const columns = new Set(db.prepare('PRAGMA table_info(account_users)').all().map(column => column.name));
     for (const [column, definition] of Object.entries({
+      username_key: 'TEXT',
       is_super_admin: 'INTEGER NOT NULL DEFAULT 0 CHECK(is_super_admin IN (0,1))',
       company: "TEXT CHECK(company IS NULL OR company IN ('A公司','B公司','C公司','西浦'))",
       version: 'INTEGER NOT NULL DEFAULT 1 CHECK(version > 0)',
       recovery_requested_at: 'INTEGER', deleted_at: 'INTEGER',
+      avatar: "TEXT NOT NULL DEFAULT 'user' CHECK(avatar IN ('user','cat','dog','rocket','robot','flower','star'))",
     })) if (!columns.has(column)) db.exec(`ALTER TABLE account_users ADD COLUMN ${column} ${definition}`);
-    db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS account_unique_super_admin ON account_users(is_super_admin) WHERE is_super_admin = 1;
+    for (const row of db.prepare('SELECT id,username FROM account_users WHERE username_key IS NULL').all()) {
+      db.prepare('UPDATE account_users SET username_key = ? WHERE id = ?').run(username(row.username), row.id);
+    }
+    db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS account_unique_username_key ON account_users(username_key);
+      CREATE UNIQUE INDEX IF NOT EXISTS account_unique_super_admin ON account_users(is_super_admin) WHERE is_super_admin = 1;
       CREATE TABLE IF NOT EXISTS account_admin_audit (
         id INTEGER PRIMARY KEY AUTOINCREMENT, actor_id TEXT, target_id TEXT NOT NULL,
         action TEXT NOT NULL, old_version INTEGER, new_version INTEGER NOT NULL,
@@ -189,14 +206,14 @@ export function createAccountAuth(config) {
   }
   function userView(row) {
     return row?.id && row.deleted_at == null ? { id: row.id, name: row.name, role: row.role, username: row.username,
-      isSuperAdmin: Boolean(row.is_super_admin), company: row.company ?? null, version: row.version ?? 1 } : null;
+      isSuperAdmin: Boolean(row.is_super_admin), company: row.company ?? null, version: row.version ?? 1, avatar: row.avatar ?? 'user' } : null;
   }
   function recordFor(req, browserOnly = false) {
     purge();
     const hasBearer = !browserOnly && req.headers?.authorization !== undefined;
     const token = hasBearer ? bearerToken(req) : browserToken(req);
     if (!token) return null;
-    const row = db.prepare(`SELECT s.token_hash, s.kind, s.expires_at, s.remember_me, a.id, a.name, a.username, a.role, a.is_super_admin, a.company, a.version, a.deleted_at
+    const row = db.prepare(`SELECT s.token_hash, s.kind, s.expires_at, s.remember_me, a.id, a.name, a.username, a.role, a.is_super_admin, a.company, a.version, a.deleted_at, a.avatar
       FROM account_sessions s LEFT JOIN account_users a ON a.id = s.user_id
       WHERE s.token_hash = ? AND s.kind = ? AND s.expires_at > ?`).get(digest(token), hasBearer ? 'device' : 'browser', now());
     return row ? { user: userView(row), csrfToken: row.kind === 'browser' ? csrfFor(token) : null,
@@ -247,7 +264,7 @@ export function createAccountAuth(config) {
     const normalizedUsername = username(body.username);
     const supplied = password(body.password, { existing: true });
     credentialRate(req, normalizedUsername);
-    const account = db.prepare('SELECT * FROM account_users WHERE username = ? AND deleted_at IS NULL').get(normalizedUsername);
+    const account = db.prepare('SELECT * FROM account_users WHERE username_key = ? AND deleted_at IS NULL').get(normalizedUsername);
     const matched = await verifyPassword(supplied, account?.password_hash);
     // Another request may change the password while scrypt runs. Never issue a stale grant.
     const fresh = !closed && account ? db.prepare('SELECT * FROM account_users WHERE id = ? AND deleted_at IS NULL').get(account.id) : null;
@@ -302,10 +319,10 @@ export function createAccountAuth(config) {
   function insertMember(normalizedUsername, displayName, passwordHash, selectedCompany, actorId, superAdmin = false) {
     const nameKey = displayName.normalize('NFKC').toLowerCase();
     if (db.prepare('SELECT COUNT(*) AS n FROM account_users WHERE deleted_at IS NULL').get().n >= 500) throw fail(403, 'ACCOUNT_LIMIT', '本站成员数量已达上限，请联系管理员。');
-    if (db.prepare('SELECT id FROM account_users WHERE username = ? OR name_key = ?').get(normalizedUsername, nameKey)) throw fail(409, 'ACCOUNT_EXISTS', '用户名或名字已被使用。');
+    if (db.prepare('SELECT id FROM account_users WHERE username_key = ? OR name_key = ?').get(username(normalizedUsername), nameKey)) throw fail(409, 'ACCOUNT_EXISTS', '用户名或名字已被使用。');
     const id = randomUUID();
-    db.prepare(`INSERT INTO account_users(id,username,name,name_key,password_hash,role,created_at,is_super_admin,company)
-      VALUES(?,?,?,?,?,?,?,?,?)`).run(id, normalizedUsername, displayName, nameKey, passwordHash, superAdmin ? 'admin' : 'member', now(), superAdmin ? 1 : 0, selectedCompany);
+    db.prepare(`INSERT INTO account_users(id,username,name,name_key,password_hash,role,created_at,is_super_admin,company,username_key)
+      VALUES(?,?,?,?,?,?,?,?,?,?)`).run(id, normalizedUsername, displayName, nameKey, passwordHash, superAdmin ? 'admin' : 'member', now(), superAdmin ? 1 : 0, selectedCompany, username(normalizedUsername));
     const row = activeMember(id);
     audit(actorId, { ...row, version: null, company: null }, superAdmin ? 'super-admin-created' : 'member-created', row.version, selectedCompany);
     return row;
@@ -318,7 +335,7 @@ export function createAccountAuth(config) {
     }
     if (path === '/api/admin/members' && req.method === 'POST') {
       fields(body, ['username', 'name', 'password', 'company']);
-      const normalizedUsername = username(body.username), displayName = name(body.name), supplied = password(body.password), selectedCompany = company(body.company);
+      const { username: normalizedUsername, name: displayName } = accountIdentity(body), supplied = password(body.password), selectedCompany = company(body.company);
       rate(`admin-write:${actor.user.id}`, 60, 15 * 60_000);
       const passwordHash = await hashPassword(supplied);
       const fresh = requireSuperAdmin(req, true);
@@ -367,9 +384,9 @@ export function createAccountAuth(config) {
       const expectedVersion = version(body.version);
       transaction(() => {
         const previous = editableMember(id, expectedVersion, actor.user.id);
-        db.prepare(`UPDATE account_users SET username = ?, name = '已删除成员', name_key = ?, password_hash = '!deleted',
+        db.prepare(`UPDATE account_users SET username = ?, username_key = ?, name = '已删除成员', name_key = ?, password_hash = '!deleted',
           company = NULL, recovery_requested_at = NULL, deleted_at = ?, version = version + 1 WHERE id = ?`)
-          .run(`deleted-${randomUUID()}`, `deleted:${randomUUID()}`, now(), id);
+          .run(`deleted-${randomUUID()}`, `deleted-${randomUUID()}`, `deleted:${randomUUID()}`, now(), id);
         db.prepare('DELETE FROM account_sessions WHERE user_id = ?').run(id);
         audit(actor.user.id, previous, 'member-deleted', previous.version + 1, null);
       });
@@ -383,12 +400,12 @@ export function createAccountAuth(config) {
     fields(options, ['mode', 'username', 'name', 'password', 'company']);
     if (!['create', 'reset'].includes(options.mode)) throw fail(422, 'INVALID_INPUT', '必须明确指定 create 或 reset 模式。');
     const normalizedUsername = username(options.username ?? 'admin');
-    const displayName = name(options.name ?? '超级管理员');
+    const displayName = memberName(options.name ?? '超级管理员');
     const selectedCompany = options.company === undefined ? null : company(options.company);
     const supplied = password(options.password);
     function check() {
       const superAdmin = db.prepare('SELECT * FROM account_users WHERE is_super_admin = 1').get();
-      const existing = db.prepare('SELECT * FROM account_users WHERE username = ?').get(normalizedUsername);
+      const existing = db.prepare('SELECT * FROM account_users WHERE username_key = ?').get(normalizedUsername);
       if (existing && !existing.is_super_admin) throw fail(409, 'ADMIN_NAME_IN_USE', '同名普通账号已存在；拒绝抢占或提升权限。请先核实并处理该账号。');
       if (superAdmin && superAdmin.username !== normalizedUsername) throw fail(409, 'SUPER_ADMIN_EXISTS', '超级管理员已存在。');
       if (options.mode === 'reset' && !superAdmin) throw fail(404, 'SUPER_ADMIN_NOT_FOUND', '超级管理员不存在，请先执行 create。');
@@ -437,21 +454,21 @@ export function createAccountAuth(config) {
       verifyCsrf(req);
       fields(body, ['username', 'name', 'password', 'bootstrapToken', 'rememberMe']);
       const rememberMe = remember(body.rememberMe);
-      const normalizedUsername = username(body.username), displayName = name(body.name), supplied = password(body.password);
+      const { username: normalizedUsername, name: displayName } = accountIdentity(body), supplied = password(body.password);
       const nameKey = displayName.normalize('NFKC').toLowerCase();
       rate(`register:${address(req)}`, 10, 60 * 60_000);
-      const admin = bootstrapAllowed(body, normalizedUsername);
+      const admin = bootstrapAllowed(body, username(normalizedUsername));
       const passwordHash = await hashPassword(supplied);
       verifyCsrf(req);
       db.exec('BEGIN IMMEDIATE');
       let account;
       try {
         // Recheck after the asynchronous password hash and within the transaction.
-        if (admin) bootstrapAllowed(body, normalizedUsername);
+        if (admin) bootstrapAllowed(body, username(normalizedUsername));
         if (db.prepare('SELECT COUNT(*) AS n FROM account_users WHERE deleted_at IS NULL').get().n >= 500) throw fail(403, 'ACCOUNT_LIMIT', '本站成员数量已达上限，请联系管理员。');
-        if (db.prepare('SELECT id FROM account_users WHERE username = ? OR name_key = ?').get(normalizedUsername, nameKey)) throw fail(409, 'ACCOUNT_EXISTS', '用户名或名字已被使用，请登录或使用其他名字。');
+        if (db.prepare('SELECT id FROM account_users WHERE username_key = ? OR name_key = ?').get(username(normalizedUsername), nameKey)) throw fail(409, 'ACCOUNT_EXISTS', '用户名或名字已被使用，请登录或使用其他名字。');
         account = { id: randomUUID(), username: normalizedUsername, name: displayName, role: admin ? 'admin' : 'member' };
-        db.prepare('INSERT INTO account_users(id,username,name,name_key,password_hash,role,created_at) VALUES(?,?,?,?,?,?,?)').run(account.id, normalizedUsername, displayName, nameKey, passwordHash, account.role, now());
+        db.prepare('INSERT INTO account_users(id,username,name,name_key,password_hash,role,created_at,username_key) VALUES(?,?,?,?,?,?,?,?)').run(account.id, normalizedUsername, displayName, nameKey, passwordHash, account.role, now(), username(normalizedUsername));
         if (admin) db.prepare("INSERT INTO account_auth_meta(key,value) VALUES('admin_claimed',?)").run(account.id);
         db.exec('COMMIT');
       } catch (error) { db.exec('ROLLBACK'); throw error; }
@@ -500,6 +517,24 @@ export function createAccountAuth(config) {
       json(res, 200, { ok: true });
       return true;
     }
+    if (path === '/api/auth/profile') {
+      const current = resolve(req);
+      if (!current?.user) throw fail(401, 'AUTH_REQUIRED', '请先登录。');
+      verifyWrite(req, current);
+      fields(body, ['version', 'avatar']);
+      const expectedVersion = version(body.version);
+      if (!ACCOUNT_AVATARS.includes(body.avatar)) throw fail(422, 'INVALID_AVATAR', '请选择列表中的头像。');
+      transaction(() => {
+        const previous = activeMember(current.user.id);
+        if (previous.version !== expectedVersion) throw fail(409, 'VERSION_CONFLICT', '账号信息已变化，请刷新后重试。');
+        if (previous.avatar !== body.avatar) {
+          db.prepare('UPDATE account_users SET avatar = ?, version = version + 1 WHERE id = ?').run(body.avatar, previous.id);
+          audit(previous.id, previous, 'avatar-changed', previous.version + 1);
+        }
+      });
+      json(res, 200, payload(recordFor(req)));
+      return true;
+    }
     if (path === '/api/auth/recovery-request') {
       verifyCsrf(req);
       fields(body, ['username']);
@@ -507,7 +542,7 @@ export function createAccountAuth(config) {
       rate(`recovery-ip:${address(req)}`, 10, 15 * 60_000);
       rate(`recovery-user:${digest(normalizedUsername)}`, 3, 60 * 60_000);
       db.prepare(`UPDATE account_users SET recovery_requested_at = ?, version = version + 1
-        WHERE username = ? AND deleted_at IS NULL AND recovery_requested_at IS NULL`).run(now(), normalizedUsername);
+        WHERE username_key = ? AND deleted_at IS NULL AND recovery_requested_at IS NULL`).run(now(), normalizedUsername);
       json(res, 200, { ok: true });
       return true;
     }
@@ -534,6 +569,8 @@ export function createAccountAuth(config) {
     }
     throw fail(404, 'NOT_FOUND', '没有此认证接口。');
   }
-  return { handle, resolve, verifyWrite, provisionSuperAdmin, sessionPayload(req) { validateRequest(req); return payload(recordFor(req)); },
+  return { handle, resolve, verifyWrite, provisionSuperAdmin,
+    getMemberIdentity(id) { if (typeof id !== 'string') return null; return userView(db.prepare('SELECT * FROM account_users WHERE id = ? AND deleted_at IS NULL').get(id)); },
+    sessionPayload(req) { validateRequest(req); return payload(recordFor(req)); },
     close() { if (!closed) { closed = true; rates.clear(); db.close(); } } };
 }

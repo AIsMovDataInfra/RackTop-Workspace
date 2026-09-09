@@ -57,7 +57,6 @@ import {
   TerminalSquare,
   Trash2,
   UserRound,
-  Upload,
   WifiOff,
   X,
   Zap,
@@ -71,7 +70,7 @@ import { popupServerContextMenu } from './services/serverContextMenu'
 import type { AppSettings, DetailTab, GpuMemoryStallWarning, HistoryHeatmapPoint, HistoryPoint, HostKeyInfo, IdleReservation, IdleReservationFilters, InteractionLogSummary, LinkedProjectResourcePlan, Project, ProjectDraft, ProjectSyncProgress, RemoteHistorySyncResult, Server, ServerDraft, ServerNotificationCategory, ServerNotificationSettings, Snapshot } from './types/models'
 import { isRackTopManagedIdentity } from './utils/sshSetup'
 import { DeleteServerDialog } from './components/DeleteServerDialog'
-import { SshExportSheet, SshImportSourceSheet } from './components/SshTransferSheet'
+import { SshConfigSheet, SshExportSheet, SshImportSourceSheet } from './components/SshTransferSheet'
 import { AppUpdateDialog } from './components/AppUpdateDialog'
 import { HistoryHeatmaps, StorageWaffleList } from './components/HistoryHeatmap'
 import { MetricBar } from './components/MetricBar'
@@ -85,6 +84,7 @@ import { ResourceTrend } from './components/ResourceTrend'
 import { ServerForm } from './components/ServerForm'
 import { SshTerminal } from './components/SshTerminal'
 import { TeamWorkspace } from './components/TeamWorkspace'
+import { TeamWorkspaceMenu } from './components/TeamWorkspaceMenu'
 import './components/team.css'
 import { SharingWorkspace } from './components/SharingWorkspace'
 import './components/sharing.css'
@@ -231,14 +231,15 @@ function serverToDraft(server: Server): Partial<ServerDraft> {
   }
 }
 
-function evaluateAlerts(server: Server | undefined, snapshot: Snapshot, previous: Snapshot | undefined, settings: AppSettings, notificationSettings: ServerNotificationSettings | undefined, since: Record<string, number>, notified: Set<string>) {
+function evaluateAlerts(server: Server | undefined, snapshot: Snapshot, previous: Snapshot | undefined, settings: AppSettings, notificationSettings: () => ServerNotificationSettings | undefined, since: Record<string, number>, notified: Set<string>) {
   const serverName = serverDisplayName(server?.name ?? snapshot.hostname)
   const accelerator = acceleratorLabel(snapshot)
   const now = snapshot.timestamp
   const notifyCondition = (category: ServerNotificationCategory, key: string, title: string, body: string) => {
     if (notified.has(key)) return
     notified.add(key)
-    if (allowsServerNotification(notificationSettings, category)) void api.notify(title, body)
+    const allowed = () => allowsServerNotification(notificationSettings(), category)
+    if (allowed()) void api.notify(title, body, undefined, allowed)
   }
   const clearCondition = (key: string) => {
     delete since[key]
@@ -321,6 +322,7 @@ function App() {
   const [updateCheckError, setUpdateCheckError] = useState<string | null>(null)
   const [ignoredUpdateVersion, setIgnoredUpdateVersion] = useState(loadIgnoredUpdateVersion)
   const [importingConfig, setImportingConfig] = useState(false)
+  const [showSshConfig, setShowSshConfig] = useState(false)
   const [showSshExport, setShowSshExport] = useState(false)
   const [showImportSource, setShowImportSource] = useState(false)
   const [importDrafts, setImportDrafts] = useState<ServerDraft[] | null>(null)
@@ -347,6 +349,10 @@ function App() {
   const [idleFilters, setIdleFilters] = useState<IdleFilters>(loadIdleFilters)
   const [idleReservations, setIdleReservations] = useState<IdleReservation[]>([])
   const [serverNotificationSettings, setServerNotificationSettings] = useState<Record<string, ServerNotificationSettings>>({})
+  const notificationSettingsRef = useRef<Record<string, ServerNotificationSettings>>({})
+  const savedNotificationSettingsRef = useRef<Record<string, ServerNotificationSettings>>({})
+  const notificationSaveQueues = useRef(new Map<string, Promise<void>>())
+  const notificationSaveRevisions = useRef(new Map<string, number>())
   const [gpuMemoryStallWarnings, setGpuMemoryStallWarnings] = useState<GpuMemoryStallWarning[]>([])
   const [showReservationCenter, setShowReservationCenter] = useState(false)
   const [reservationEditor, setReservationEditor] = useState<{ filters: IdleReservationFilters; reservation?: IdleReservation } | null>(null)
@@ -504,7 +510,7 @@ function App() {
       failureCounts.current[serverId] = 0
       delete nextRetryAt.current[serverId]
       notifiedConditions.current.delete(`offline:${serverId}`)
-      if (settings) evaluateAlerts(servers.find((server) => server.id === serverId), snapshot, previous, settings, serverNotificationSettings[serverId], conditionSince.current, notifiedConditions.current)
+      if (settings) evaluateAlerts(servers.find((server) => server.id === serverId), snapshot, previous, settings, () => notificationSettingsRef.current[serverId], conditionSince.current, notifiedConditions.current)
       const retainedNvidiaWarnings = clearResolvedNvidiaWarningId(ignoredNvidiaWarningsRef.current, serverId, snapshot.nvidiaSmi)
       if (retainedNvidiaWarnings !== ignoredNvidiaWarningsRef.current) {
         ignoredNvidiaWarningsRef.current = retainedNvidiaWarnings
@@ -533,7 +539,8 @@ function App() {
         if (!notifiedConditions.current.has(key)) {
           notifiedConditions.current.add(key)
           const name = serverDisplayName(servers.find((server) => server.id === serverId)?.name ?? serverId)
-          if (allowsServerNotification(serverNotificationSettings[serverId], 'system')) void api.notify(`${name} 已离线`, `连续 ${failureCounts.current[serverId]} 次采集失败：${message}`)
+          const allowed = () => allowsServerNotification(notificationSettingsRef.current[serverId], 'system')
+          if (allowed()) void api.notify(`${name} 已离线`, `连续 ${failureCounts.current[serverId]} 次采集失败：${message}`, undefined, allowed)
         }
       }
       setServers((current) => current.map((server) => server.id === serverId ? {
@@ -621,23 +628,41 @@ function App() {
       idleReservationsRef.current = loadedReservations
       setIdleReservations(loadedReservations)
       setProjects(loadedProjects)
-      setServerNotificationSettings(Object.fromEntries(loadedNotificationSettings.map((item) => [item.serverId, item])))
+      const restoredNotifications = Object.fromEntries(loadedNotificationSettings.map((item) => [item.serverId, item]))
+      notificationSettingsRef.current = restoredNotifications
+      savedNotificationSettingsRef.current = restoredNotifications
+      setServerNotificationSettings(restoredNotifications)
       setSelectedServerId((current) => current ?? loadedServers[0]?.id ?? null)
     })
   }, [])
 
   const updateServerNotificationSettings = useCallback(async (next: ServerNotificationSettings) => {
     const normalized = normalizeServerNotificationSettings(next)
-    const previous = serverNotificationSettings[next.serverId] ?? defaultServerNotificationSettings(next.serverId)
-    setServerNotificationSettings((current) => ({ ...current, [next.serverId]: normalized }))
-    try {
-      const saved = await api.saveServerNotificationSettings(normalized)
-      setServerNotificationSettings((current) => ({ ...current, [next.serverId]: saved }))
-    } catch (error) {
-      setServerNotificationSettings((current) => ({ ...current, [next.serverId]: previous }))
-      setToast(`通知设置保存失败：${String(error)}`)
-    }
-  }, [serverNotificationSettings])
+    const id = next.serverId
+    const revision = (notificationSaveRevisions.current.get(id) ?? 0) + 1
+    notificationSaveRevisions.current.set(id, revision)
+    notificationSettingsRef.current = { ...notificationSettingsRef.current, [id]: normalized }
+    setServerNotificationSettings(notificationSettingsRef.current)
+    // Keep disk writes in click order and never let an old response undo a newer choice.
+    const saved = (notificationSaveQueues.current.get(id) ?? Promise.resolve()).then(async () => {
+      try {
+        const result = await api.saveServerNotificationSettings(normalized)
+        savedNotificationSettingsRef.current = { ...savedNotificationSettingsRef.current, [id]: result }
+        if (notificationSaveRevisions.current.get(id) !== revision) return
+        notificationSettingsRef.current = { ...notificationSettingsRef.current, [id]: result }
+        setServerNotificationSettings(notificationSettingsRef.current)
+      } catch (error) {
+        if (notificationSaveRevisions.current.get(id) !== revision) return
+        const previous = savedNotificationSettingsRef.current[id] ?? defaultServerNotificationSettings(id)
+        notificationSettingsRef.current = { ...notificationSettingsRef.current, [id]: previous }
+        setServerNotificationSettings(notificationSettingsRef.current)
+        setToast(`通知设置保存失败：${String(error)}`)
+      }
+    })
+    notificationSaveQueues.current.set(id, saved)
+    await saved
+    if (notificationSaveQueues.current.get(id) === saved) notificationSaveQueues.current.delete(id)
+  }, [])
 
   const checkForUpdates = useCallback(async (manual: boolean) => {
     if (checkingUpdate) return
@@ -883,8 +908,8 @@ function App() {
       else if (payload === 'menu-view-idle') setMainView('idle')
       else if (payload === 'menu-view-mine') setMainView('mine')
       else if (payload === 'menu-view-logs') setShowActivityLog(true)
-      else if (payload === 'menu-help-guide') void openExternalUrl('https://github.com/AIsMovDataInfra/RackTop/blob/main/README.md')
-      else if (payload === 'menu-help-project') void openExternalUrl('https://github.com/AIsMovDataInfra/RackTop')
+      else if (payload === 'menu-help-guide') void openExternalUrl('https://github.com/AIsMovDataInfra/RackTop-Workspace/blob/main/README.md')
+      else if (payload === 'menu-help-project') void openExternalUrl('https://github.com/AIsMovDataInfra/RackTop-Workspace')
     })
     return () => {
       void unlistenTray.then((dispose) => dispose())
@@ -1019,6 +1044,8 @@ function App() {
       for (const key of evaluation.notificationGpuKeys) {
         const item = matchingItems.find(({ server, gpu }) => idleReservationGpuKey(server.id, gpu.uuid) === key)
         if (!item) continue
+        const allowed = () => allowsServerNotification(notificationSettingsRef.current[item.server.id], 'system')
+        if (!allowed()) continue
         const snapshot = snapshots[item.server.id]
         const accelerator = snapshot ? acceleratorLabel(snapshot) : 'GPU'
         const freeGpuGb = displayedFreeMemoryGb(item.gpu.memoryTotalMb - item.gpu.memoryUsedMb)
@@ -1028,6 +1055,7 @@ function App() {
           `${serverDisplayName(item.server.name)} · ${accelerator} ${item.gpu.index} 预约条件已满足`,
           `可用显存 ${freeGpuGb.toFixed(1)} GB，系统内存 ${freeCpuGb.toFixed(1)} GB${location}`,
           { serverId: item.server.id, gpuUuid: item.gpu.uuid, reservationId: reservation.id },
+          allowed,
         )
       }
       return evaluation.reservation
@@ -1060,7 +1088,8 @@ function App() {
     for (const warning of result.warnings) {
       if (notifiedGpuMemoryStalls.current.has(warning.id)) continue
       notifiedGpuMemoryStalls.current.add(warning.id)
-      if (!allowsServerNotification(serverNotificationSettings[warning.serverId], 'zombie')) continue
+      const allowed = () => allowsServerNotification(notificationSettingsRef.current[warning.serverId], 'zombie')
+      if (!allowed()) continue
       const defunct = warning.defunctProcesses[0]
       const accelerator = snapshots[warning.serverId] ? acceleratorLabel(snapshots[warning.serverId]) : 'GPU'
       void api.notify(
@@ -1069,6 +1098,7 @@ function App() {
           ? `${accelerator} ${warning.gpuIndex} 的 ${defunct.username}（PID ${defunct.pid}）已成为僵尸进程，仍占用 ${(warning.memoryUsedMb / 1024).toFixed(1)} GB`
           : `${accelerator} ${warning.gpuIndex} 占用 ${(warning.memoryUsedMb / 1024).toFixed(1)} GB，但 UTL 持续为 0`,
         { serverId: warning.serverId, gpuUuid: warning.gpuUuid },
+        allowed,
       )
     }
     for (const id of notifiedGpuMemoryStalls.current) {
@@ -1643,10 +1673,9 @@ function App() {
         </div>
         <div className="sidebar__footer">
           <button onClick={() => { setEditingServer(null); setShowServerForm(true) }}><Plus size={16} />添加服务器</button>
-          <button onClick={importConfig} disabled={importingConfig}><Download size={16} />{importingConfig ? '正在读取 SSH Config…' : '导入 SSH Config'}</button>
-          <button onClick={() => setShowSshExport(true)} disabled={servers.length === 0}><Upload size={16} />导出 SSH Config</button>
+          <button onClick={() => setShowSshConfig(true)}><FolderGit2 size={16} />SSH 配置</button>
           <button onClick={() => setShowKeyManager(true)}><KeyRound size={16} />密钥管理</button>
-          <button onClick={() => { void openExternalUrl(`${TEAM_URL}/equipment`).catch(() => setToast(`打开设备管理失败，请在浏览器访问 ${TEAM_URL}/equipment`)) }} title="在浏览器打开设备管理"><HardDrive size={16} />设备管理</button>
+          <TeamWorkspaceMenu onOpen={path => { void openExternalUrl(`${TEAM_URL}${path}`).catch(() => setToast(`打开团队工作台失败，请在浏览器访问 ${TEAM_URL}${path}`)) }}/>
           <button onClick={() => setShowActivityLog(true)}><ScrollText size={16} />日志</button>
           <button onClick={() => setShowSettings(true)}><Settings size={16} />设置</button>
         </div>
@@ -1734,6 +1763,7 @@ function App() {
       {showSettings && settings && <SettingsSheet settings={settings} onboardingVisible={!onboardingDismissed} onClose={() => setShowSettings(false)} onSave={async (value, showOnboarding) => { setSettings(await api.saveSettings(value)); if (showOnboarding) { localStorage.removeItem(ONBOARDING_DISMISSED_KEY); setOnboardingDismissed(false); setOnboardingUseActualState(true); setOnboardingCollapsed(false); if (onboardingDismissed) setMainView('fleet') } else { localStorage.setItem(ONBOARDING_DISMISSED_KEY, 'true'); setOnboardingDismissed(true) } setShowSettings(false); setToast('设置已保存') }} />}
       {showActivityLog && <ActivityLogSheet servers={servers} snapshots={snapshots} onClose={() => setShowActivityLog(false)} />}
       {showKeyManager && <SshKeyManager onClose={() => setShowKeyManager(false)} />}
+      {showSshConfig && <SshConfigSheet serverCount={servers.length} importing={importingConfig} onClose={() => setShowSshConfig(false)} onImport={() => { setShowSshConfig(false); importConfig() }} onExport={() => { setShowSshConfig(false); setShowSshExport(true) }}/>}
       {showSshExport && <SshExportSheet servers={servers} onClose={() => setShowSshExport(false)} />}
       {showImportSource && <SshImportSourceSheet onClose={() => setShowImportSource(false)} onReadLocal={readLocalConfig} onParsed={(drafts) => { setImportDrafts(drafts); setShowImportSource(false) }} />}
       {showAbout && <AboutSheet latestRelease={latestRelease} onInstallUpdate={() => { setShowAbout(false); void startAppUpdate() }} checkingUpdate={checkingUpdate} updateError={updateCheckError} ignoredVersion={ignoredUpdateVersion} onIgnoreUpdate={(version) => { saveIgnoredUpdateVersion(version); setIgnoredUpdateVersion(version); setToast(`已忽略 v${version} 的更新提示`) }} onCheckUpdate={() => void checkForUpdates(true)} onClose={() => setShowAbout(false)} onNotice={setToast} />}
@@ -2162,14 +2192,10 @@ export function ServerNotificationSettingsMenu({ settings, onChange, openRequest
   const menuRef = useRef<HTMLDivElement>(null)
   const popoverRef = useRef<HTMLDivElement>(null)
   const items = SERVER_NOTIFICATION_CATEGORY_ITEMS
-  const enabledCount = items.filter((item) => draft[item.key]).length
   const displayedMode = open ? draft.mode : settings.mode
   const modeLabel = displayedMode === 'all' ? '打开' : displayedMode === 'partial' ? '部分' : '关闭'
   const subtitle = settings.mode === 'all' ? '接收此服务器的全部系统通知' : settings.mode === 'partial' ? `已保留 ${items.filter((item) => settings[item.key]).length} / ${items.length} 类通知` : '此服务器的系统通知已关闭'
-  const closeMenu = () => {
-    setOpen(false)
-    onChange(normalizeServerNotificationSettings(draft))
-  }
+  const closeMenu = () => setOpen(false)
   useEffect(() => {
     if (!openRequested) return
     setDraft({ ...settings, mode: 'partial' })
@@ -2208,11 +2234,17 @@ export function ServerNotificationSettingsMenu({ settings, onChange, openRequest
     setDraft(next)
     if (mode !== 'partial') { setOpen(false); onChange(next) }
   }
+  const toggleCategory = (category: ServerNotificationCategory) => {
+    const next = normalizeServerNotificationSettings({ ...draft, [category]: !draft[category] })
+    setDraft(next.mode === 'all' ? { ...next, mode: 'partial' } : next)
+    onChange(next)
+    if (next.mode === 'off') setOpen(false)
+  }
   const toggleMenu = () => {
     if (open) closeMenu()
     else { setDraft(settings); setOpen(true) }
   }
-  return <section className="server-notifications" ref={sectionRef} style={menuOverflow ? { marginBottom: menuOverflow } : undefined} aria-labelledby="server-notifications-title"><div className="server-notifications__copy"><h2 id="server-notifications-title">服务器通知</h2><p>{subtitle}</p></div><div className="notification-menu" ref={menuRef}><button className={`button button--secondary notification-menu__trigger ${settings.mode === 'off' ? 'notification-menu__trigger--off' : ''}`} type="button" aria-haspopup="menu" aria-expanded={open} onClick={toggleMenu}><Bell size={16} /><span>{modeLabel}</span></button>{open && <div className="notification-menu__popover" ref={popoverRef} role="menu" aria-label="服务器通知模式"><div className="notification-menu__modes">{([['all', '打开'], ['off', '关闭'], ['partial', '部分']] as const).map(([value, label]) => <button type="button" role="menuitemradio" aria-checked={draft.mode === value} onClick={() => chooseMode(value)} key={value}><span className="notification-menu__check">{draft.mode === value && <Check size={14} />}</span><span>{label}</span></button>)}</div>{draft.mode === 'partial' && <div className="notification-menu__categories"><p>保留的通知</p>{items.map((item) => { const isLastEnabled = draft[item.key] && enabledCount === 1; return <button type="button" role="menuitemcheckbox" aria-checked={draft[item.key]} disabled={isLastEnabled} title={isLastEnabled ? '部分通知至少保留一项' : undefined} onClick={() => setDraft((current) => ({ ...current, [item.key]: !current[item.key] }))} key={item.key}><span className="notification-menu__check">{draft[item.key] && <Check size={14} />}</span><span>{item.title}</span></button> })}</div>}</div>}</div></section>
+  return <section className="server-notifications" ref={sectionRef} style={menuOverflow ? { marginBottom: menuOverflow } : undefined} aria-labelledby="server-notifications-title"><div className="server-notifications__copy"><h2 id="server-notifications-title">服务器通知</h2><p>{subtitle}</p></div><div className="notification-menu" ref={menuRef}><button className={`button button--secondary notification-menu__trigger ${settings.mode === 'off' ? 'notification-menu__trigger--off' : ''}`} type="button" aria-haspopup="menu" aria-expanded={open} onClick={toggleMenu}><Bell size={16} /><span>{modeLabel}</span></button>{open && <div className="notification-menu__popover" ref={popoverRef} role="menu" aria-label="服务器通知模式"><div className="notification-menu__modes">{([['all', '打开'], ['off', '关闭'], ['partial', '部分']] as const).map(([value, label]) => <button type="button" role="menuitemradio" aria-checked={draft.mode === value} onClick={() => chooseMode(value)} key={value}><span className="notification-menu__check">{draft.mode === value && <Check size={14} />}</span><span>{label}</span></button>)}</div>{draft.mode === 'partial' && <div className="notification-menu__categories"><p>保留的通知</p>{items.map((item) => <button type="button" role="menuitemcheckbox" aria-checked={draft[item.key]} onClick={() => toggleCategory(item.key)} key={item.key}><span className="notification-menu__check">{draft[item.key] && <Check size={14} />}</span><span>{item.title}</span></button>)}</div>}</div>}</div></section>
 }
 
 function ConnectionView({ server, snapshot, nvidiaWarningIgnored, ignoredGpuMemoryStallWarningIds, onRestoreNvidiaWarning, onRestoreGpuMemoryStallWarning, onRefresh, onDelete, onEdit, isRefreshing, notificationSettings, onNotificationSettingsChange, notificationMenuRequested, onNotificationMenuRequestHandled }: { server: Server; snapshot: Snapshot; nvidiaWarningIgnored: boolean; ignoredGpuMemoryStallWarningIds: Set<string>; onRestoreNvidiaWarning: () => void; onRestoreGpuMemoryStallWarning: (warningId: string) => void; onRefresh: () => void; onDelete: () => void; onEdit: () => void; isRefreshing: boolean; notificationSettings: ServerNotificationSettings; onNotificationSettingsChange: (settings: ServerNotificationSettings) => void; notificationMenuRequested: boolean; onNotificationMenuRequestHandled: () => void }) {
@@ -2632,7 +2664,7 @@ function AboutSheet({ latestRelease, onInstallUpdate, checkingUpdate, updateErro
   }
   const ignored = Boolean(latestRelease && latestRelease.version === ignoredVersion)
   const updateStatus = checkingUpdate ? '正在检查 GitHub Releases…' : updateError ? `检查失败：${updateError}` : latestRelease ? `发现新版本 v${latestRelease.version}${ignored ? ' · 已忽略此版本提醒' : ''}` : '当前已是最新版本'
-  return <div className="scrim" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="sheet about-sheet" role="dialog" aria-modal="true" aria-labelledby="about-title"><header className="sheet__header"><div><p className="eyebrow">About</p><h2 id="about-title">RackTop</h2></div><button className="icon-button" onClick={onClose} aria-label="关闭"><X size={18} /></button></header><div className="about-body"><div className="about-product"><span className="about-product__mark"><Activity size={28} /></span><div><strong>当前版本：v{packageInfo.version}</strong><p>{packageInfo.version.includes('-linux.') ? 'Linux 社区版 · AIsMovDataInfra/RackTop' : '面向共享算力服务器的资源监控与 SSH 工作台'}</p></div></div><div className="about-update" role="status"><span className={latestRelease && !ignored ? 'is-new' : ''}>{checkingUpdate ? <RefreshCw className="spin" size={17} /> : <CircleArrowUp size={17} />}</span><div><strong>版本更新</strong><small>{updateStatus}</small></div><div className="about-update__actions">{latestRelease && !checkingUpdate ? <><button className="button button--primary button--small" onClick={onInstallUpdate}>更新到 v{latestRelease.version}</button><button className="button button--secondary button--small" onClick={() => openExternal(latestRelease.url)}>查看版本<ExternalLink size={11} /></button>{!ignored && <button className="button button--quiet button--small" onClick={() => onIgnoreUpdate(latestRelease.version)}>忽略此版本</button>}</> : <><button className="button button--secondary button--small" onClick={() => openExternal(releaseUrl(packageInfo.version))}>版本说明</button><button className="button button--secondary button--small" disabled={checkingUpdate} onClick={onCheckUpdate}>{checkingUpdate ? '检查中…' : '重新检查'}</button></>}</div></div><section className="about-author about-maintainer" aria-label="当前维护者"><span className="about-maintainer__mark"><UserRound size={23} /></span><div><strong>AIsMov</strong><small>当前维护者 · AIsMovDataInfra</small><div className="about-author__links"><button className="about-external-link" onClick={() => openExternal('https://github.com/AIsMovDataInfra')}><Github size={13} />GitHub @AIsMovDataInfra<ExternalLink size={11} /></button></div></div></section><section className="about-author" aria-label="原作者"><img src={authorAvatar} alt="原作者 Tongzh-SEU 头像" /><div><strong>Tongzh-SEU</strong><small>原作者 · 上游项目</small><div className="about-author__links"><button className="about-external-link" onClick={() => openExternal('https://github.com/Tongzh-SEU')}><Github size={13} />GitHub @Tongzh-SEU<ExternalLink size={11} /></button><button className="about-external-link" onClick={() => openExternal('https://xhslink.cn/o/AsgFqJMZfR5')}>小红书 @tooongtooong<ExternalLink size={11} /></button><button className="about-external-link" onClick={() => openExternal('https://github.com/Tongzh-SEU/RackTop')}>上游项目<ExternalLink size={11} /></button></div></div></section><div className="about-links"><button onClick={() => openExternal('https://github.com/AIsMovDataInfra/RackTop')}><Github size={15} /><span><strong>GitHub 仓库</strong><small>AIsMovDataInfra/RackTop</small></span><ExternalLink size={13} /></button><button onClick={() => openExternal('https://github.com/AIsMovDataInfra/RackTop/blob/main/README.md')}><ScrollText size={15} /><span><strong>使用说明</strong><small>查看当前社区版文档</small></span><ExternalLink size={13} /></button><button onClick={() => openExternal('https://github.com/AIsMovDataInfra/RackTop/issues')}><AlertCircle size={15} /><span><strong>问题反馈</strong><small>向当前维护仓库提交问题和建议</small></span><ExternalLink size={13} /></button><button aria-expanded={licenses} aria-controls="about-licenses" onClick={() => setLicenses((value) => !value)}><Database size={15} /><span><strong>第三方许可</strong><small>{licenses ? '收起开源组件' : '查看主要运行时依赖'}</small></span><ChevronRight className={`disclosure-icon${licenses ? ' disclosure-icon--expanded' : ''}`} size={13} /></button></div>{licenses && <div className="about-licenses" id="about-licenses"><p><strong>React、Tauri、xterm.js、ECharts、Lucide</strong></p><p>各组件版权归其贡献者所有，并按各自开源许可证分发。完整版本与传递依赖记录见应用包内的 npm 与 Cargo 锁文件。</p></div>}<small className="about-contact">RackTop 采用 GPL-3.0 许可证，保留原作者及贡献者署名。本社区版本由 AIsMov 维护。</small></div><footer className="sheet__footer"><button className="button button--primary" onClick={onClose}>完成</button></footer></section></div>
+  return <div className="scrim" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="sheet about-sheet" role="dialog" aria-modal="true" aria-labelledby="about-title"><header className="sheet__header"><div><p className="eyebrow">About</p><h2 id="about-title">RackTop</h2></div><button className="icon-button" onClick={onClose} aria-label="关闭"><X size={18} /></button></header><div className="about-body"><div className="about-product"><span className="about-product__mark"><Activity size={28} /></span><div><strong>当前版本：v{packageInfo.version}</strong><p>{packageInfo.version.includes('-linux.') ? 'Linux 社区版 · AIsMovDataInfra/RackTop-Workspace' : '面向共享算力服务器的资源监控与 SSH 工作台'}</p></div></div><div className="about-update" role="status"><span className={latestRelease && !ignored ? 'is-new' : ''}>{checkingUpdate ? <RefreshCw className="spin" size={17} /> : <CircleArrowUp size={17} />}</span><div><strong>版本更新</strong><small>{updateStatus}</small></div><div className="about-update__actions">{latestRelease && !checkingUpdate ? <><button className="button button--primary button--small" onClick={onInstallUpdate}>更新到 v{latestRelease.version}</button><button className="button button--secondary button--small" onClick={() => openExternal(latestRelease.url)}>查看版本<ExternalLink size={11} /></button>{!ignored && <button className="button button--quiet button--small" onClick={() => onIgnoreUpdate(latestRelease.version)}>忽略此版本</button>}</> : <><button className="button button--secondary button--small" onClick={() => openExternal(releaseUrl(packageInfo.version))}>版本说明</button><button className="button button--secondary button--small" disabled={checkingUpdate} onClick={onCheckUpdate}>{checkingUpdate ? '检查中…' : '重新检查'}</button></>}</div></div><section className="about-author about-maintainer" aria-label="当前维护者"><span className="about-maintainer__mark"><UserRound size={23} /></span><div><strong>AIsMov</strong><small>当前维护者 · AIsMovDataInfra</small><div className="about-author__links"><button className="about-external-link" onClick={() => openExternal('https://github.com/AIsMovDataInfra')}><Github size={13} />GitHub @AIsMovDataInfra<ExternalLink size={11} /></button></div></div></section><section className="about-author" aria-label="原作者"><img src={authorAvatar} alt="原作者 Tongzh-SEU 头像" /><div><strong>Tongzh-SEU</strong><small>原作者 · 上游项目</small><div className="about-author__links"><button className="about-external-link" onClick={() => openExternal('https://github.com/Tongzh-SEU')}><Github size={13} />GitHub @Tongzh-SEU<ExternalLink size={11} /></button><button className="about-external-link" onClick={() => openExternal('https://xhslink.cn/o/AsgFqJMZfR5')}>小红书 @tooongtooong<ExternalLink size={11} /></button><button className="about-external-link" onClick={() => openExternal('https://github.com/Tongzh-SEU/RackTop')}>上游项目<ExternalLink size={11} /></button></div></div></section><div className="about-links"><button onClick={() => openExternal('https://github.com/AIsMovDataInfra/RackTop-Workspace')}><Github size={15} /><span><strong>GitHub 仓库</strong><small>AIsMovDataInfra/RackTop-Workspace</small></span><ExternalLink size={13} /></button><button onClick={() => openExternal('https://github.com/AIsMovDataInfra/RackTop-Workspace/blob/main/README.md')}><ScrollText size={15} /><span><strong>使用说明</strong><small>查看当前社区版文档</small></span><ExternalLink size={13} /></button><button onClick={() => openExternal('https://github.com/AIsMovDataInfra/RackTop-Workspace/issues')}><AlertCircle size={15} /><span><strong>问题反馈</strong><small>向当前维护仓库提交问题和建议</small></span><ExternalLink size={13} /></button><button aria-expanded={licenses} aria-controls="about-licenses" onClick={() => setLicenses((value) => !value)}><Database size={15} /><span><strong>第三方许可</strong><small>{licenses ? '收起开源组件' : '查看主要运行时依赖'}</small></span><ChevronRight className={`disclosure-icon${licenses ? ' disclosure-icon--expanded' : ''}`} size={13} /></button></div>{licenses && <div className="about-licenses" id="about-licenses"><p><strong>React、Tauri、xterm.js、ECharts、Lucide</strong></p><p>各组件版权归其贡献者所有，并按各自开源许可证分发。完整版本与传递依赖记录见应用包内的 npm 与 Cargo 锁文件。</p></div>}<small className="about-contact">RackTop 采用 GPL-3.0 许可证，保留原作者及贡献者署名。本社区版本由 AIsMov 维护。</small></div><footer className="sheet__footer"><button className="button button--primary" onClick={onClose}>完成</button></footer></section></div>
 }
 
 function SshImportSheet({ drafts, servers, onClose, onImport }: { drafts: ServerDraft[]; servers: Server[]; onClose: () => void; onImport: (drafts: ServerDraft[]) => Promise<void> }) {

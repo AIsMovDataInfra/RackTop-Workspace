@@ -614,7 +614,11 @@ fn login_user(value: Option<&Value>) -> Result<Value, String> {
             .filter(|s| !s.is_empty() && s.len() <= max)
     };
     let id = valid("id", 100).ok_or("账号标识无效")?;
-    let name = valid("name", 200).ok_or("账号姓名无效")?;
+    let name = value
+        .get("name")
+        .and_then(Value::as_str)
+        .filter(|s| !s.trim().is_empty())
+        .ok_or("账号姓名无效")?;
     let username = value
         .get("username")
         .and_then(Value::as_str)
@@ -637,6 +641,9 @@ fn login_user(value: Option<&Value>) -> Result<Value, String> {
     if let Some(version) = value.get("version") {
         if !version.as_u64().is_some_and(|number| number > 0) { return Err("账号版本无效".into()); }
         projected["version"] = version.clone();
+    }
+    if let Some(avatar) = value.get("avatar").and_then(Value::as_str).filter(|value| value.len() <= 64) {
+        projected["avatar"] = json!(avatar);
     }
     Ok(projected)
 }
@@ -992,6 +999,11 @@ mod tests {
         let mut waiting = account.clone();
         waiting["company"] = Value::Null;
         assert!(login_user(Some(&waiting)).is_ok());
+        let mut with_avatar = account.clone();
+        with_avatar["avatar"] = json!("robot");
+        assert_eq!(login_user(Some(&with_avatar)).unwrap()["avatar"], "robot");
+        with_avatar["avatar"] = json!("a".repeat(65));
+        assert!(login_user(Some(&with_avatar)).unwrap().get("avatar").is_none());
     }
 
     #[test]
@@ -1038,20 +1050,25 @@ mod tests {
 
     #[test]
     fn team_login_accepts_short_unicode_and_long_credentials_without_trimming_passwords() {
-        for username in ["中".to_owned(), "a".to_owned(), " A.+ @ 中文 ! ".repeat(80)] {
+        for username in ["中".to_owned(), "a".to_owned(), " A.+ @ 中文 ! ".repeat(80), "Cafe\u{301}".to_owned()] {
             for password in ["密".to_owned(), " ".repeat(12), "中文密码 ! ".repeat(100)] {
                 assert!(validate_login_input(&username, &password).is_ok());
             }
             let projected = login_user(Some(
-                &json!({"id":"member-1","name":"成员","username":username,"role":"member"}),
+                &json!({"id":"member-1","name":username,"username":username,"role":"member"}),
             ))
             .unwrap();
             assert_eq!(projected["username"], username);
+            assert_eq!(projected["name"], username);
         }
         assert!(validate_login_input(" \t ", "密").is_err());
         assert!(validate_login_input("中", "").is_err());
         assert!(login_user(Some(
             &json!({"id":"member-1","name":"成员","username":"   ","role":"member"})
+        ))
+        .is_err());
+        assert!(login_user(Some(
+            &json!({"id":"member-1","name":"   ","username":"成员","role":"member"})
         ))
         .is_err());
     }

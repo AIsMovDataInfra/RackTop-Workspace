@@ -6,6 +6,7 @@ import { normalizeIdleFilters } from '../utils/idleFilters'
 import { RACKTOP_MANAGED_IDENTITY_PATH } from '../utils/sshSetup'
 import type { ReleaseInfo } from '../utils/updateCheck'
 import { detectAppPlatform } from '../utils/platform'
+import packageInfo from '../../package.json'
 
 const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
 
@@ -531,23 +532,17 @@ export const api = {
     return settings
   },
   async getLatestRelease(): Promise<ReleaseInfo> {
-    if (!isTauri) return { version: '1.25.2', url: 'https://github.com/Tongzh-SEU/RackTop/releases/tag/v1.25.2', publishedAt: new Date().toISOString() }
-    const isMac = detectAppPlatform(isTauri, navigator.userAgent) === 'macos'
-    const response = await fetch(isMac
-      ? 'https://raw.githubusercontent.com/AIsMovDataInfra/RackTop/updater/macos.json'
-      : 'https://api.github.com/repos/Tongzh-SEU/RackTop/releases/latest', {
+    const repository = 'AIsMovDataInfra/RackTop-Workspace'
+    if (!isTauri) return { version: packageInfo.version, url: `https://github.com/${repository}/releases/tag/v${packageInfo.version}` }
+    const platform = detectAppPlatform(isTauri, navigator.userAgent)
+    const feed = platform === 'macos' ? 'macos.json' : platform === 'linux' ? 'linux-amd64.json' : 'latest.json'
+    const response = await fetch(`https://raw.githubusercontent.com/${repository}/updater/${feed}`, {
       headers: { Accept: 'application/vnd.github+json' },
     })
     if (!response.ok) throw new Error(`GitHub Release 检查失败（HTTP ${response.status}）`)
-    if (isMac) {
-      const manifest = await response.json() as { version?: unknown; pub_date?: unknown } | null
-      if (typeof manifest?.version !== 'string' || !/^v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(manifest.version)) throw new Error('Mac 更新清单返回内容不完整')
-      const version = manifest.version.replace(/^v/i, '')
-      return { version, url: `https://github.com/AIsMovDataInfra/RackTop/releases/tag/v${version}`, publishedAt: typeof manifest.pub_date === 'string' ? manifest.pub_date : undefined }
-    }
-    const release = await response.json() as { tag_name?: string; html_url?: string; published_at?: string }
-    if (!release.tag_name || !release.html_url) throw new Error('GitHub Release 返回内容不完整')
-    return { version: release.tag_name.replace(/^v/i, ''), url: release.html_url, publishedAt: release.published_at }
+    const manifest = await response.json() as { version?: unknown; pub_date?: unknown } | null
+    if (typeof manifest?.version !== 'string' || !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(manifest.version)) throw new Error('更新清单返回内容不完整')
+    return { version: manifest.version, url: `https://github.com/${repository}/releases/tag/v${manifest.version}`, publishedAt: typeof manifest.pub_date === 'string' ? manifest.pub_date : undefined }
   },
   async retryNvidia(serverId: string): Promise<Snapshot> {
     return this.collectServer(serverId, true, true, true, true)
@@ -580,11 +575,12 @@ export const api = {
     if (isTauri) return invoke('get_managed_run_status', { serverId, runId, pid })
     return { status: 'running', exitCode: null }
   },
-  async notify(title: string, body: string, extra?: Record<string, unknown>): Promise<void> {
-    if (!isTauri) return
+  async notify(title: string, body: string, extra?: Record<string, unknown>, shouldSend: () => boolean = () => true): Promise<void> {
+    if (!isTauri || !shouldSend()) return
     let granted = await isPermissionGranted()
+    if (!shouldSend()) return
     if (!granted) granted = (await requestPermission()) === 'granted'
-    if (granted) sendNotification({ title, body, extra, autoCancel: true })
+    if (granted && shouldSend()) sendNotification({ title, body, extra, autoCancel: true })
   },
   async onNotificationAction(callback: (extra: Record<string, unknown>) => void): Promise<() => void> {
     if (!isTauri) return () => {}

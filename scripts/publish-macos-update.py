@@ -1,17 +1,13 @@
 #!/usr/bin/env python3
-"""Publish both verified Mac installers, then advance the independent Mac feed."""
+"""Mac package validation shared by the unified Workspace release publisher."""
 import base64
-from datetime import datetime, timezone
-import hashlib
 import json
-import os
 from pathlib import Path
 import re
 import subprocess
-import sys
 import tempfile
 
-REPO = 'AIsMovDataInfra/RackTop'
+REPO = 'AIsMovDataInfra/RackTop-Workspace'
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -33,7 +29,7 @@ def api(path, method='GET', payload=None, optional=False):
 
 
 def version_tuple(version):
-    if not re.fullmatch(r'\d+\.\d+\.\d+', version):
+    if not re.fullmatch(r'(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)', version):
         raise ValueError('Mac releases require a neutral x.y.z version')
     return tuple(map(int, version.split('.')))
 
@@ -78,7 +74,7 @@ def verify_signatures(packages, platforms):
     with tempfile.TemporaryDirectory(prefix='racktop-mac-signatures-') as temporary:
         key = Path(temporary) / 'public.key'
         key.write_bytes(public_key)
-        for archive in (path for path in packages if path.name.endswith('.app.tar.gz')):
+        for archive in (path for path in packages if path.name.endswith(('.app.tar.gz', '.deb'))):
             signature = Path(temporary) / 'archive.sig'
             entry = next(item for item in platforms.values() if item['url'].endswith('/' + archive.name))
             signature.write_bytes(base64.b64decode(entry['signature'], validate=True))
@@ -86,76 +82,9 @@ def verify_signatures(packages, platforms):
 
 
 def main():
-    version = json.loads((ROOT / 'package.json').read_text())['version']
-    tag = f'v{version}'
-    assets = Path(sys.argv[1]).resolve()
-    if os.environ.get('GITHUB_REPOSITORY') != REPO or os.environ.get('GITHUB_REF') != f'refs/tags/{tag}':
-        raise SystemExit('Publication requires a version tag in the RackTop fork')
-    run('git', 'fetch', 'origin', 'main')
-    commit = run('git', 'rev-parse', f'{tag}^{{commit}}')
-    subprocess.run(['git', 'merge-base', '--is-ancestor', commit, 'origin/main'], check=True)
-    packages, platforms, signing = collect_packages(assets, version)
-    verify_signatures(packages, platforms)
-    feed = api('contents/macos.json?ref=updater', optional=True)
-    if feed:
-        previous = json.loads(base64.b64decode(feed['content']))
-        if version_tuple(previous['version']) >= version_tuple(version):
-            raise SystemExit('Refusing to overwrite or roll the Mac update channel backwards')
-    if api(f'releases/tags/{tag}', optional=True):
-        raise SystemExit('This release already exists; published update assets are immutable')
-
-    source = assets / f'RackTop_{version}_source.tar.gz'
-    run('git', 'archive', '--format=tar.gz', f'--prefix=RackTop-{version}/', '-o', str(source), commit)
-    for name in ['LICENSE', 'NOTICE.md']:
-        (assets / name).write_bytes((ROOT / name).read_bytes())
-    files = packages + [source, assets / 'LICENSE', assets / 'NOTICE.md']
-    checksums = assets / 'SHA256SUMS'
-    checksums.write_text(''.join(f'{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.name}\n' for path in files))
-    files.append(checksums)
-    overview = (ROOT / 'docs/Version_overview.md').read_text()
-    section = overview.split(f'## {version}\n', 1)[1].split('\n## ', 1)[0]
-    bullets = [line for line in section.splitlines() if line.startswith('- ')]
-    body = '## 主要更新\n\n' + '\n'.join(bullets) + '\n\n## 下载\n\n'
-    for path in packages:
-        if path.suffix == '.dmg':
-            label = 'Apple Silicon（M 系列）' if 'macos-arm64' in path.name else 'Intel Mac'
-            body += f'- [{label} DMG](https://github.com/{REPO}/releases/download/{tag}/{path.name})\n'
-    body += f'- [{source.name}](https://github.com/{REPO}/releases/download/{tag}/{source.name})：对应源码，GPL-3.0。\n'
-    body += '\n打开 DMG，将 RackTop 拖入「应用程序」。'
-    if signing:
-        body += '本次 Mac 测试包未通过 Apple 公证；首次启动被阻止时，请在「系统设置 → 隐私与安全性」允许打开。'
-    body += '\n\n`.app.tar.gz` 为应用自动更新附件，手动安装请选择对应芯片的 DMG。\n'
-    notes = assets / 'release-notes.md'
-    notes.write_text(body)
-    run('gh', 'release', 'create', tag, '--repo', REPO, '--verify-tag', '--prerelease',
-        '--title', f'RackTop {tag} Mac 测试版（Apple Silicon / Intel）', '--notes-file', str(notes), *map(str, files))
-    release = api(f'releases/tags/{tag}')
-    for path in files:
-        asset = next(item for item in release['assets'] if item['name'] == path.name)
-        expected = 'sha256:' + hashlib.sha256(path.read_bytes()).hexdigest()
-        if asset.get('digest') != expected:
-            raise SystemExit(f'GitHub asset digest mismatch: {path.name}; feed was not advanced')
-    manifest = {
-        'version': version,
-        'notes': '\n'.join(bullets),
-        'pub_date': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
-        'platforms': platforms,
-    }
-    content = json.dumps(manifest, ensure_ascii=False, indent=2) + '\n'
-    branch = api('git/ref/heads/updater', optional=True)
-    if not branch:
-        tree = api('git/trees', 'POST', {'tree': [{'path': 'macos.json', 'mode': '100644', 'type': 'blob', 'content': content}]})
-        created = api('git/commits', 'POST', {'message': f'{tag} Mac updater', 'tree': tree['sha'], 'parents': []})
-        api('git/refs', 'POST', {'ref': 'refs/heads/updater', 'sha': created['sha']})
-    else:
-        payload = {'message': f'{tag} Mac updater', 'branch': 'updater', 'content': base64.b64encode(content.encode()).decode()}
-        if feed:
-            payload['sha'] = feed['sha']
-        api('contents/macos.json', 'PUT', payload)
-    verified = api('contents/macos.json?ref=updater')
-    if json.loads(base64.b64decode(verified['content'])) != manifest:
-        raise SystemExit('Published Mac manifest did not verify')
-    print(f'Published and verified {release["html_url"]}; Mac updater manifest advanced')
+    # Keep old operator entry points safe: publication always requires all platforms.
+    import runpy
+    runpy.run_path(str(ROOT / 'scripts/publish-workspace-update.py'), run_name='__main__')
 
 
 if __name__ == '__main__':

@@ -7,6 +7,8 @@ import { createAuth } from './auth.mjs';
 import { ACCOUNT_COMPANIES, createAccountAuth } from './account-auth.mjs';
 import { createNotifier } from './notifier.mjs';
 import { createEquipmentStore } from './equipment-store.mjs';
+import { createWorkspaceStore } from './workspace-store.mjs';
+import { validateEquipmentTarget, collectRequestedEquipment } from './equipment-workflow.mjs';
 import { compressEquipmentPhoto, validatePhotoBody } from './equipment-photo.mjs';
 
 const directory = dirname(fileURLToPath(import.meta.url));
@@ -88,8 +90,10 @@ export function createTeamServer(overrides = {}) {
   const publicUrl = validateConfig(config);
   const auth = config.auth || (config.mode === 'account' ? createAccountAuth(config) : createAuth(config));
   const notifier = config.notifier || createNotifier(config);
-  const store = config.store || createStore({ dbPath: config.dbPath, now: config.now, notificationsConfigured: config.notificationsConfigured });
-  const equipmentStore = createEquipmentStore({ dbPath: config.dbPath, now: config.now });
+  const store = config.store || createStore({ dbPath: config.dbPath, now: config.now, notificationsConfigured: config.notificationsConfigured, enforceCompanies: config.mode === 'account' });
+  const equipmentStore = createEquipmentStore({ dbPath: config.dbPath, now: config.now, enforceCompanies: config.mode === 'account' });
+  const workspaceStore = createWorkspaceStore({ dbPath: config.dbPath, now: config.now, resolveMember: id => auth.getMemberIdentity?.(id),
+    validateEquipmentTarget, onCollectEquipment: value => collectRequestedEquipment({ ...value, resolveMember: id => auth.getMemberIdentity?.(id) }) });
   if (config.mode === 'demo' && config.seedDemo !== false) store.seedDemo();
   let timer, closing = false, notificationRun = null, closeRun = null;
   const handlers = new Set();
@@ -154,7 +158,8 @@ export function createTeamServer(overrides = {}) {
       // Reject unauthenticated uploads before buffering image data.
       if (photoMatch && ['POST', 'DELETE'].includes(req.method)) {
         const candidate = auth.resolve(req);
-        requireBusinessMember(candidate);
+        const candidateUser = requireBusinessMember(candidate);
+        equipmentStore.get(photoMatch[1], candidateUser);
         auth.verifyWrite(req, candidate);
       }
       const body = await readBody(req, photoMatch && req.method === 'POST' ? 2 * 1024 * 1024 : 64 * 1024);
@@ -164,13 +169,39 @@ export function createTeamServer(overrides = {}) {
       // Every business route, including equipment and photos, requires membership.
       const user = requireBusinessMember(session);
       if (['POST', 'PATCH', 'PUT', 'DELETE'].includes(req.method)) auth.verifyWrite(req, session);
+      const reportMatch = /^\/api\/workspace\/reports\/([^/]+)(?:\/(reviewer|review))?$/.exec(url.pathname);
+      const requestMatch = /^\/api\/workspace\/requests\/([^/]+)$/.exec(url.pathname);
+      if (url.pathname.startsWith('/api/workspace/')) {
+        if (config.mode !== 'account') throw new ApiError(403, 'ACCOUNT_REQUIRED', '请使用团队账号登录此功能');
+        if ([...url.searchParams].length) throw new ApiError(422, 'INVALID_INPUT', '工作台接口不支持查询参数');
+        if (url.pathname === '/api/workspace/reports') {
+          if (req.method === 'GET') { json(res, 200, { reports: workspaceStore.listReports(user) }); return; }
+          if (req.method === 'POST') { json(res, 201, { report: workspaceStore.createReport(body, user) }); return; }
+        }
+        if (reportMatch) {
+          const [, id, action] = reportMatch;
+          if (!action && req.method === 'GET') { json(res, 200, workspaceStore.getReport(id, user)); return; }
+          if (!action && req.method === 'PATCH') { json(res, 200, { report: workspaceStore.updateReport(id, body, user) }); return; }
+          if (action === 'reviewer' && req.method === 'POST') { json(res, 200, { report: workspaceStore.assignReviewer(id, body, user) }); return; }
+          if (action === 'review' && req.method === 'POST') { json(res, 200, { report: workspaceStore.reviewReport(id, body, user) }); return; }
+        }
+        if (url.pathname === '/api/workspace/requests') {
+          if (req.method === 'GET') { json(res, 200, { requests: workspaceStore.listRequests(user) }); return; }
+          if (req.method === 'POST') { json(res, 201, workspaceStore.createRequest(body, user)); return; }
+        }
+        if (requestMatch) {
+          if (req.method === 'GET') { json(res, 200, workspaceStore.getRequest(requestMatch[1], user)); return; }
+          if (req.method === 'PATCH') { json(res, 200, { request: workspaceStore.updateRequest(requestMatch[1], body, user) }); return; }
+        }
+        throw new ApiError(404, 'NOT_FOUND', '工作台接口不存在');
+      }
       if (photoMatch) {
         for (const key of url.searchParams.keys()) {
           if (key !== 'v' || url.searchParams.getAll(key).length !== 1 || !/^[1-9][0-9]{0,15}$/.test(url.searchParams.get(key))) throw new ApiError(422, 'INVALID_INPUT', '照片查询参数无效');
         }
         const id = photoMatch[1];
         if (req.method === 'GET') {
-          const photo = equipmentStore.getPhoto(id);
+          const photo = equipmentStore.getPhoto(id, user);
           if (!photo) throw new ApiError(404, 'PHOTO_NOT_FOUND', '设备尚未上传照片');
           res.statusCode = 200;
           res.setHeader('Content-Type', 'image/jpeg');
@@ -180,7 +211,7 @@ export function createTeamServer(overrides = {}) {
         }
         if (req.method === 'POST') {
           validatePhotoBody(body);
-          const current = equipmentStore.get(id).equipment;
+          const current = equipmentStore.get(id, user).equipment;
           if (current.version !== body.version) throw new ApiError(409, 'VERSION_CONFLICT', '设备已被其他人修改，请刷新后重新编辑');
           const photo = await compressEquipmentPhoto(body.dataUrl);
           if (closing || res.destroyed) {
@@ -206,7 +237,7 @@ export function createTeamServer(overrides = {}) {
       if (url.pathname === '/api/equipment' || equipmentMatch) {
         if ([...url.searchParams].length) throw new ApiError(422, 'INVALID_INPUT', '设备接口不支持查询参数');
         if (req.method === 'GET') {
-          json(res, 200, equipmentMatch ? equipmentStore.get(equipmentMatch[1]) : { equipment: equipmentStore.list() }); return;
+          json(res, 200, equipmentMatch ? equipmentStore.get(equipmentMatch[1], user) : { equipment: equipmentStore.list(user) }); return;
         }
         if (!equipmentMatch && req.method === 'POST') { json(res, 201, { equipment: equipmentStore.create(body, session.user) }); return; }
         if (equipmentMatch && req.method === 'PATCH') { json(res, 200, { equipment: equipmentStore.update(equipmentMatch[1], body, session.user) }); return; }
@@ -216,7 +247,7 @@ export function createTeamServer(overrides = {}) {
         json(res, 200, { resource: store.syncResource(body, user) }); return;
       }
       if (url.pathname === '/api/resources') {
-        if (req.method === 'GET') { json(res, 200, { resources: store.listResources() }); return; }
+        if (req.method === 'GET') { json(res, 200, { resources: store.listResources(user) }); return; }
         if (req.method === 'POST') { json(res, 201, { resource: store.createResource(body, user) }); return; }
       }
       const resourceMatch = /^\/api\/resources\/([a-zA-Z0-9_-]{1,100})$/.exec(url.pathname);
@@ -231,7 +262,7 @@ export function createTeamServer(overrides = {}) {
       const reservationMatch = /^\/api\/reservations\/([a-zA-Z0-9_-]{1,100})(?:\/(cancel|finish))?$/.exec(url.pathname);
       if (reservationMatch) {
         const [, id, action] = reservationMatch;
-        if (!action && req.method === 'GET') { json(res, 200, { reservation: store.getReservation(id) }); return; }
+        if (!action && req.method === 'GET') { json(res, 200, { reservation: store.getReservation(id, user) }); return; }
         if (!action && req.method === 'PATCH') { json(res, 200, { reservation: store.updateReservation(id, body, user) }); return; }
         if (action && req.method === 'POST') {
           const reservation = action === 'cancel' ? store.cancelReservation(id, body, user) : store.finishReservation(id, body, user);
@@ -295,7 +326,7 @@ export function createTeamServer(overrides = {}) {
       // disconnected. Keep auth and SQLite alive until those handlers settle.
       while (handlers.size) await Promise.allSettled([...handlers]);
       if (notificationRun) await notificationRun.catch(() => {});
-      auth.close(); equipmentStore.close(); store.close();
+      workspaceStore.close(); auth.close(); equipmentStore.close(); store.close();
     })();
     return closeRun;
   }

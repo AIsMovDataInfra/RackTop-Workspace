@@ -1,4 +1,20 @@
-## Linux 社区 fork 的发布目标
+## RackTop Workspace 当前分发与版本规则（2.0.0 起）
+
+本项目当前独立公开仓库为 [`AIsMovDataInfra/RackTop-Workspace`](https://github.com/AIsMovDataInfra/RackTop-Workspace)，GitHub 上不是 fork。桌面应用保留 **RackTop** 名称，在线产品为 **AIsMov RackTop 团队工作台**。保留源自 `Tongzh-SEU/RackTop` 与原维护仓库 `AIsMovDataInfra/RackTop` 的完整 Git 历史、原作者署名、GPL-3.0、NOTICE 和全部历史版本说明；“独立仓库”不改变来源或许可证义务。
+
+用户明确指定新分发首版为 **2.0.0**，Linux 与 macOS 共用同一 `x.y.z` 版本、`vX.Y.Z` 标签和同一 Release。此要求覆盖旧 `x.y.z-linux.N` 递增规则、Mac/Linux 分支各自发版及仅向旧 fork 发布的要求。此后版本仍需先核对远程引用、已安装版本、功能分支、标签和 Releases，避免复用编号或遗漏已交付功能；不得因为旧 linux.N 序号推导出另一个本轮版本。
+
+- 当前源码、PR、标签、安装包、Release 和更新清单以 `AIsMovDataInfra/RackTop-Workspace` 为目标。旧 `AIsMovDataInfra/RackTop` 仓库及其更新清单不修改，上游也不推送。
+- Linux 包命名为 `RackTop_X.Y.Z_linux-amd64.deb`；Mac 两架构使用 `RackTop_X.Y.Z_macos-arm64-unsigned.dmg` / `macos-x64-unsigned.dmg` 及对应 `.app.tar.gz`，文件名必须区分平台和架构。未有 Developer ID 与公证时明确说明 ad-hoc 签名、未公证。Windows 沿用上游历史下载，不要求新分发构建 Windows。
+- `package.json`、`package-lock.json` 顶层与根包、Cargo manifest/lock 和 Tauri 主配置版本保持一致；平台配置不得残留另一个版本。CI 先用 `scripts/check-release-version.py` 校验，再构建 Linux 和两种 Mac 包。
+- 当前发布使用 `.github/workflows/build.yml` 与 `scripts/publish-workspace-update.py`。只有全部安装包、源码、许可证、NOTICE、校验文件上传并核验后，才推进新仓库 `updater` 分支中的 `linux-amd64.json` 和 `macos.json`；清单不合并到 main，`.sig` 不公开为 Release 附件。
+- 新仓库使用专用签名密钥，不使用旧仓库发布私钥。首次从旧 Linux linux.12 迁入时手动安装新 Deb；旧 Mac 用户手动安装本机架构的新 DMG。保留 `com.racktop.desktop` 与原应用数据兼容；不能声称旧更新通道会自动迁移到新仓库。
+- 只报告实际通过的自动化、原生启动、浏览器交互、公开下载和更新验签。尚在构建/部署/验收的部分明确标为待验证，历史验收不能代替本轮验收。
+- 遵守当前任务的修改范围及“不要提交/推送/部署”等明确指令。以下旧流程中要求每轮强制发布、固定工具路径或固定平台组合的内容，均不能覆盖用户本轮授权范围和此节的新分发规则。
+
+## 历史参考：旧 Linux 社区 fork 发布规则（不适用于当前分发）
+
+以下至“0 固定工作区与工具路径”前的段落保留原文，记录旧维护仓库的发布方式，**不再约束 RackTop-Workspace 的版本、仓库和分发目标**。后文上游规范中的固定本机路径与旧 Mac/Windows 四附件、`latest.json` 发布流程同样仅作历史参考；一般代码、验证、来源保留和文档规范继续适用。
 
 本仓库为 `AIsMovDataInfra/RackTop`，Linux 社区移植基于 `Tongzh-SEU/RackTop`。用户已指定在组织内公开分发 Linux；发布操作必须以本 fork 为目标，未经明确授权不得推送到上游。保留原作者信息、Git 历史、GPL-3.0 许可证与上游下载链接。
 

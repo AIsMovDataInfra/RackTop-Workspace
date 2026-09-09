@@ -3,7 +3,7 @@ import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { invoke } from '@tauri-apps/api/core'
-import { SshExportSheet, SshImportSourceSheet } from './SshTransferSheet'
+import { SshConfigSheet, SshExportSheet, SshImportSourceSheet } from './SshTransferSheet'
 import type { Server } from '../types/models'
 
 vi.mock('../services/api', () => ({ api: { isDesktop: true } }))
@@ -47,4 +47,36 @@ describe('SSH transfer dialogs', () => {
     expect(onParsed).toHaveBeenCalledWith([expect.objectContaining({ host: 'test.example', username: 'tester', port: 22 })])
     expect(container.querySelector('[role="alert"]')).toBeNull()
   })
+  it('exports only checked servers and disables both export actions for an empty selection',async()=>{
+    const second={...server,id:'second',name:'Second',host:'second.example',identityFile:'/secret/key',password:'password-secret'} as Server
+    const container=document.createElement('div');document.body.append(container);root=createRoot(container)
+    act(()=>root.render(<SshExportSheet servers={[server,second]} onClose={vi.fn()}/>))
+    const boxes=[...container.querySelectorAll<HTMLInputElement>('input[type=checkbox]')]
+    await act(async()=>boxes[1].click())
+    const preview=container.querySelector('textarea')!
+    expect(preview.value).toContain('HostName test.example')
+    expect(preview.value).not.toContain('second.example')
+    expect(preview.value).not.toContain('password-secret')
+    expect(preview.value).not.toContain('/secret/key')
+    vi.mocked(invoke).mockResolvedValueOnce('/downloads/selected.conf')
+    const save=[...container.querySelectorAll<HTMLButtonElement>('button')].find(button=>button.textContent?.includes('保存配置文件'))!
+    await act(async()=>save.click())
+    expect(invoke).toHaveBeenLastCalledWith('save_ssh_export',{content:preview.value})
+    await act(async()=>boxes[0].click())
+    expect(preview.value).toBe('')
+    expect(save.disabled).toBe(true)
+    expect([...container.querySelectorAll<HTMLButtonElement>('button')].find(button=>button.textContent?.includes('复制配置'))!.disabled).toBe(true)
+    expect(container.textContent).toContain('请至少选择一台服务器')
+  })
+
+  it('groups import and export under one accessible SSH settings dialog',async()=>{
+    const onImport=vi.fn(),onExport=vi.fn()
+    const container=document.createElement('div');document.body.append(container);root=createRoot(container)
+    act(()=>root.render(<SshConfigSheet serverCount={1} importing={false} onClose={vi.fn()} onImport={onImport} onExport={onExport}/>))
+    expect(container.querySelector('h2')?.textContent).toBe('SSH 配置')
+    await act(async()=>[...container.querySelectorAll('button')].find(button=>button.textContent?.includes('导入配置'))!.click())
+    await act(async()=>[...container.querySelectorAll('button')].find(button=>button.textContent?.includes('导出配置'))!.click())
+    expect(onImport).toHaveBeenCalledOnce();expect(onExport).toHaveBeenCalledOnce()
+  })
+
 })

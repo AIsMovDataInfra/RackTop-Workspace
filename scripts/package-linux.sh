@@ -17,13 +17,13 @@ pkg-config --exists gtk+-3.0 webkit2gtk-4.1 ayatana-appindicator3-0.1 dbus-1 ope
 
 npm run tauri -- build --bundles deb -- "$@"
 bundle_dir="${CARGO_TARGET_DIR:-src-tauri/target}/release/bundle/deb"
-shopt -s nullglob
-packages=("$bundle_dir"/*.deb)
-if ((${#packages[@]} == 0)); then
-  echo "No Debian package found in $bundle_dir" >&2
+version="$(node -p 'require("./package.json").version')"
+package="$bundle_dir/RackTop_${version}_amd64.deb"
+release_package="$bundle_dir/RackTop_${version}_linux-amd64.deb"
+if [[ ! -f "$package" ]]; then
+  echo "Expected Debian package was not built: $package" >&2
   exit 1
 fi
-for package in "${packages[@]}"; do
-  dpkg-deb --info "$package"
-  (cd "$(dirname "$package")" && sha256sum "$(basename "$package")" > "$(basename "$package").sha256")
-done
+mv -f -- "$package" "$release_package"
+dpkg-deb --info "$release_package"
+(cd "$bundle_dir" && sha256sum "$(basename "$release_package")" > "$(basename "$release_package").sha256")
