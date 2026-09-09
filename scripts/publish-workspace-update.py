@@ -135,12 +135,17 @@ def main():
     bullets = [line for line in section.splitlines() if line.startswith('- ')]
     if not bullets:
         raise ValueError('Release notes must contain the current version changes')
-    body = '## 主要更新\n\n' + '\n'.join(bullets) + '\n\n## 安装包\n\n'
+    body = '## 主要更新\n\n' + '\n'.join(bullets) + '\n\n## 下载\n\n'
     for path in packages:
         if path.suffix in ('.dmg', '.deb'):
             label = 'Linux amd64 DEB' if path.suffix == '.deb' else ('Mac Apple Silicon（M 系列）DMG' if 'macos-arm64' in path.name else 'Mac Intel DMG')
             body += f'- [{label}](https://github.com/{REPO}/releases/download/{tag}/{path.name})\n'
+        elif path.name.endswith('.app.tar.gz'):
+            label = 'Mac Apple Silicon 自动更新附件' if 'macos-arm64' in path.name else 'Mac Intel 自动更新附件'
+            body += f'- [{label}](https://github.com/{REPO}/releases/download/{tag}/{path.name})\n'
     body += f'- [对应源码（GPL-3.0）](https://github.com/{REPO}/releases/download/{tag}/{source.name})\n'
+    for name, label in [('LICENSE', 'GPL-3.0 许可证'), ('NOTICE.md', '项目来源与署名'), ('SHA256SUMS', '文件校验清单')]:
+        body += f'- [{label}](https://github.com/{REPO}/releases/download/{tag}/{name})\n'
     body += '\nLinux：用系统软件安装器打开 DEB；Mac：打开对应芯片的 DMG，将 RackTop 拖入「应用程序」。\n'
     body += '\n旧仓库的 1.x 客户端首次迁移需下载安装此版本，本地应用标识和数据保持兼容；后续更新使用独立仓库。\n'
     if signing:
