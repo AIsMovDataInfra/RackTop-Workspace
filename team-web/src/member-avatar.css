@@ -1,13 +1,16 @@
-.member-avatar { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; vertical-align: middle; color: inherit; }
+.member-avatar { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; vertical-align: middle; width: var(--avatar-size); height: var(--avatar-size); border-radius: 28%; background: var(--avatar-background); color: var(--avatar-ink); }
+.member-avatar > svg { flex: none; }
 .member-avatar-picker { border: 0; padding: 0; margin: 0; min-width: 0; }
 .member-avatar-picker legend { padding: 0; margin-bottom: 8px; font-size: inherit; font-weight: 500; }
-.member-avatar-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(70px, 1fr)); gap: 8px; }
-.member-avatar-options button { min-height: 62px; display: flex; flex-direction: column; justify-content: center; gap: 5px; padding: 8px 4px; }
-.member-avatar-options button[aria-pressed="true"] { border-color: var(--info); color: var(--info); background: var(--selection); }
-.member-avatar-options button span:last-child { font-size: .85em; }
+.member-avatar-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(74px, 100%), 1fr)); gap: 8px; }
+.member-avatar-options button { min-width: 0; min-height: 80px; display: flex; flex-direction: column; justify-content: center; gap: 6px; padding: 8px 4px; }
+.member-avatar-options button[aria-pressed="true"] { border-color: var(--info); color: var(--info); background: var(--selection); box-shadow: inset 0 0 0 1px var(--info); }
+.member-avatar-options button > span:last-child { font-size: .85em; line-height: 1.35; overflow-wrap: anywhere; }
+.member-avatar-options button:focus-visible { outline: 2px solid var(--info); outline-offset: 2px; }
 .member-account-summary { display: flex; align-items: center; gap: 12px; padding-bottom: 4px; }
-.member-account-summary > .member-avatar { width: 44px; height: 44px; border: 1px solid var(--border); border-radius: 10px; background: var(--subtle); }
+.member-account-summary > .member-avatar { width: 44px; height: 44px; }
 .member-account-summary div { min-width: 0; display: grid; gap: 3px; overflow-wrap: anywhere; }
 .member-account-summary small { color: var(--muted); }
 .member-company-readonly { margin: 0; color: var(--muted); overflow-wrap: anywhere; }
 .member-table .member-avatar { margin-right: 7px; }
+@media (max-width: 420px) { .member-avatar-options { grid-template-columns: repeat(3, minmax(0, 1fr)); } }

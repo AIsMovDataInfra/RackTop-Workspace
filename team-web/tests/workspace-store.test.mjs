@@ -77,8 +77,113 @@ test('super administrators create reports for any assigned company and drafts va
   const next = store.updateReport(report.id, { version: 1, todos: reportInput().todos, nextPlan: '新计划', status: 'submitted' }, outsider);
   assert.equal(next.version, 2);
   assert.equal(store.reviewReport(report.id, { version: 2, score: 88, comment: '跨公司超管评审' }, admin).score, 88);
-  for (const bad of ['2026-09-08', '2026-02-30', 'bad']) assert.throws(() => store.createReport({ ...reportInput(), weekStart: bad }, author), { status: 422 });
+  for (const bad of ['2026-02-30', 'bad']) assert.throws(() => store.createReport({ ...reportInput(), weekStart: bad }, author), { status: 422 });
   assert.throws(() => store.createReport({ ...reportInput(), company: 'B公司' }, author), { status: 422 });
+});
+
+test('any valid calendar date selects its Monday week, including month, year and leap-day boundaries', t => {
+  const { store } = fixture(t);
+  for (const [selected, monday] of [['2021-01-01', '2020-12-28'], ['2026-05-01', '2026-04-27'],
+    ['2024-02-29', '2024-02-26'], ['2026-09-13', '2026-09-07']]) {
+    const report = store.createReport({ ...reportInput(), weekStart: selected }, author);
+    assert.equal(report.weekStart, monday);
+    assert.throws(() => store.createReport({ ...reportInput(), weekStart: monday }, author), { status: 409, code: 'REPORT_EXISTS' });
+  }
+  for (const selected of ['2026-02-29', '2024-02-30', '2026-13-01', '2026-09-08T00:00:00Z', '2026-9-8', '0000-01-01', '9999-12-31', '', null]) {
+    assert.throws(() => store.createReport({ ...reportInput(), weekStart: selected }, author), { status: 422 });
+  }
+});
+
+function statisticsFixture(t, options = {}) {
+  const result = fixture(t, { now: () => Date.parse('2026-09-09T04:00:00Z'), ...options });
+  const users = Object.fromEntries([...result.members].map(([key, value]) => [key, { ...value, id: randomUUID() }]));
+  result.members.clear(); Object.values(users).forEach(value => result.members.set(value.id, value));
+  const db = new DatabaseSync(result.dbPath); t.after(() => db.close());
+  db.exec('CREATE TABLE account_users(id TEXT PRIMARY KEY,name TEXT,company TEXT,created_at INTEGER,deleted_at INTEGER)');
+  const addMember = (user, createdAt = '2026-01-01T00:00:00Z') => {
+    result.members.set(user.id, user);
+    db.prepare('INSERT INTO account_users VALUES(?,?,?,?,NULL)').run(user.id, user.name, user.company, Date.parse(createdAt));
+    return user;
+  };
+  Object.values(users).forEach(user => addMember(user));
+  return { ...result, users, db, addMember };
+}
+
+test('superadmin statistics distinguish missing, draft, submitted and reviewed with explicit filtered averages', t => {
+  const { store, users } = statisticsFixture(t);
+  const submitted = store.createReport({ ...reportInput(), status: 'submitted', todos: [
+    { text: '完成工作', completion: 100, unfinishedReason: '', effect: '' },
+    { text: '未开始工作', completion: 0, unfinishedReason: '等待设备', effect: '' },
+  ] }, users.author);
+  store.assignReviewer(submitted.id, { version: 1, reviewerId: users.reviewer.id }, users.super);
+  store.reviewReport(submitted.id, { version: 2, score: 0, comment: '' }, users.reviewer);
+  store.createReport({ ...reportInput(), status: 'submitted', todos: [{ text: '实验', completion: 100, unfinishedReason: '', effect: '' }] }, users.outsider);
+  store.createReport({ ...reportInput(), todos: [] }, users.peer);
+  const result = store.reportStatistics({ weekStart: '2026-09-11' }, users.super);
+  assert.equal(result.weekStart, '2026-09-07'); assert.equal(result.weekEnd, '2026-09-13'); assert.equal(result.timezone, 'Asia/Shanghai');
+  assert.deepEqual(result.summary, { expectedCount: 5, submittedCount: 2, unsubmittedCount: 3, reviewedCount: 1, averageCompletion: 75, averageScore: 0 });
+  const row = result.rows.find(value => value.authorId === users.author.id);
+  assert.deepEqual(row, { authorId: users.author.id, name: users.author.name, company: 'A公司', weekStart: '2026-09-07', weekEnd: '2026-09-13',
+    status: 'reviewed', reportId: submitted.id, todoCount: 2, completedCount: 1, unfinishedCount: 1, averageCompletion: 50, score: 0, reviewerName: users.reviewer.name });
+  for (const [user, status] of [[users.reviewer, 'missing'], [users.peer, 'draft'], [users.outsider, 'submitted']]) {
+    assert.equal(result.rows.find(value => value.authorId === user.id).status, status);
+  }
+  assert.equal(result.rows.find(value => value.authorId === users.peer.id).averageCompletion, null);
+  const company = store.reportStatistics({ company: 'A公司' }, users.super);
+  assert.deepEqual(company.summary, { expectedCount: 4, submittedCount: 1, unsubmittedCount: 3, reviewedCount: 1, averageCompletion: 50, averageScore: 0 });
+  assert.equal(store.reportStatistics({ memberId: users.author.id }, users.super).rows.length, 1);
+  const noMatch = store.reportStatistics({ memberId: users.author.id, company: 'B公司' }, users.super);
+  assert.deepEqual(noMatch.summary, { expectedCount: 0, submittedCount: 0, unsubmittedCount: 0, reviewedCount: 0, averageCompletion: null, averageScore: null });
+  for (const user of [users.author, users.reviewer, users.peer, { ...users.peer, isSuperAdmin: true }]) {
+    assert.throws(() => store.reportStatistics({ memberId: 'invalid' }, user), { status: 403, code: 'SUPERADMIN_REQUIRED' });
+  }
+  assert.throws(() => store.reportStatistics({}, null), { status: 401 });
+  for (const query of [{ extra: 'secret' }, { company: '' }, { company: 'D公司' }, { memberId: 'bad' }, { weekStart: '2026-02-30' }, { weekStart: '0000-01-01' }, { weekStart: '9999-12-31' }]) {
+    assert.throws(() => store.reportStatistics(query, users.super), { status: 422 });
+  }
+});
+
+test('statistics use Beijing week boundaries, registration cutoff and historical author/company snapshots', t => {
+  let instant = Date.parse('2026-09-13T15:59:59.999Z');
+  const { store, users, members, db, addMember } = statisticsFixture(t, { now: () => instant });
+  const pending = addMember({ id: randomUUID(), name: '待分配', company: null, role: 'member' });
+  const sunday = addMember({ id: randomUUID(), name: '周日新成员', company: 'A公司', role: 'member' }, '2026-09-13T15:59:59.999Z');
+  const monday = addMember({ id: randomUUID(), name: '下周注册', company: 'B公司', role: 'member' }, '2026-09-13T16:00:00Z');
+  const backfilled = addMember({ id: randomUUID(), name: '补写报告者', company: 'A公司', role: 'member' }, '2026-09-13T16:00:00Z');
+  store.createReport(reportInput(), users.author);
+  store.createReport(reportInput(), users.outsider);
+  store.createReport({ ...reportInput(), authorId: backfilled.id }, users.super);
+  // Soft-deleted identities remain only in actual report snapshots; reassignment never rewrites a report.
+  db.prepare('UPDATE account_users SET name=?,company=NULL,deleted_at=? WHERE id=?').run('已删除成员', instant, users.author.id);
+  members.delete(users.author.id);
+  members.get(users.outsider.id).company = 'A公司';
+  db.prepare("UPDATE account_users SET company='A公司' WHERE id=?").run(users.outsider.id);
+  const rawBefore = db.prepare('SELECT * FROM weekly_reports ORDER BY id').all();
+  const result = store.reportStatistics({}, users.super);
+  assert.equal(result.weekStart, '2026-09-07'); assert.equal(result.weekEnd, '2026-09-13');
+  assert.equal(result.summary.expectedCount, 8);
+  assert.ok(result.rows.some(row => row.authorId === sunday.id));
+  assert.equal(result.rows.some(row => row.authorId === monday.id), false);
+  assert.equal(result.rows.find(row => row.authorId === users.author.id).name, users.author.name);
+  assert.equal(result.rows.find(row => row.authorId === users.outsider.id).company, 'B公司');
+  assert.deepEqual(store.reportStatistics({ company: 'unassigned' }, users.super).rows.map(row => row.authorId), [pending.id]);
+  assert.ok(store.reportStatistics({ company: 'B公司' }, users.super).rows.some(row => row.authorId === users.outsider.id));
+  instant++;
+  const next = store.reportStatistics({}, users.super);
+  assert.equal(next.weekStart, '2026-09-14'); assert.equal(next.weekEnd, '2026-09-20');
+  assert.equal(next.rows.some(row => row.authorId === users.author.id), false, 'deleted authors do not acquire later missing reports');
+  assert.ok(next.rows.some(row => row.authorId === monday.id));
+  assert.deepEqual(db.prepare('SELECT * FROM weekly_reports ORDER BY id').all(), rawBefore, 'statistics never migrate or rewrite reports');
+  assert.equal(store.reportStatistics({ weekStart: '2025-12-31' }, users.super).weekEnd, '2026-01-04');
+  assert.equal(store.reportStatistics({ weekStart: '2024-02-29' }, users.super).weekEnd, '2024-03-03');
+});
+
+test('a failed statistics read rolls back its transaction and accepts the next read', t => {
+  const { store, users, db } = statisticsFixture(t);
+  db.exec('ALTER TABLE account_users RENAME TO temporarily_unavailable');
+  assert.throws(() => store.reportStatistics({}, users.super), /no such table/);
+  db.exec('ALTER TABLE temporarily_unavailable RENAME TO account_users');
+  assert.equal(store.reportStatistics({}, users.super).summary.expectedCount, 5);
 });
 
 test('requests reveal only submission acknowledgement to ordinary employees and preserve immutable original contents', t => {

@@ -6,11 +6,11 @@ button, .button { display: inline-flex; align-items: center; justify-content: ce
 button:disabled, .disabled { opacity: .5; cursor: default; pointer-events: none; }
 button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px solid var(--info); outline-offset: 3px; }
 .primary { border-color: var(--blue); color: #fff; background: var(--blue); font-weight: 600; }
-.brand { display: flex; align-items: center; gap: 11px; }
+.brand { display: flex; align-items: center; gap: 11px; min-width: 0; }
 .brand > span { display: grid; flex: none; place-items: center; width: 40px; height: 40px; border-radius: 10px; color: #fff; background: var(--blue); }
-.brand > div { display: grid; gap: 3px; }
-.brand strong { font-size: 18px; letter-spacing: -.03em; }
-.brand small { color: var(--muted); font-size: 11px; }
+.brand > div { display: grid; gap: 3px; min-width: 0; }
+.brand strong { font-size: 1.45rem; letter-spacing: -.03em; line-height: 1.2; }
+.brand small { color: var(--muted); font-size: .8rem; line-height: 1.45; overflow-wrap: anywhere; }
 .login-shell { display: grid; place-items: center; min-height: 100dvh; padding: 24px; }
 .login-card { width: min(440px, 100%); padding: 32px; border: 1px solid var(--border); border-radius: 16px; background: var(--surface); box-shadow: 0 16px 48px rgba(28,32,40,.06); }
 .login-card h1 { margin: 36px 0 10px; font-size: 25px; letter-spacing: -.03em; }
@@ -251,8 +251,8 @@ legend { margin-bottom: 10px; color: var(--muted); font-size: .88rem; }
   .sidebar { position: static; height: auto; padding: 16px; border-right: 0; border-bottom: 1px solid var(--border); overflow: visible; }
   .sidebar .brand { padding: 0; }
   .sidebar .brand > span { width: 34px; height: 34px; }
-  .sidebar .brand strong { font-size: 17px; }
-  .sidebar .brand small { font-size: .7rem; }
+  .sidebar .brand strong { font-size: 1.4rem; }
+  .sidebar .brand small { font-size: .8rem; }
   .demo-badge { margin: 13px 0 0; }
   .main-nav { display: flex; gap: 5px; margin: 15px -5px 0; }
   .main-nav button { flex: 1; justify-content: center; gap: 6px; padding: 9px 6px; min-height: 42px; font-size: .78rem; }

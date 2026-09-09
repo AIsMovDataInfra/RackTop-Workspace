@@ -29,9 +29,42 @@
 .work-success h2 { font-size: 1.2rem; }
 .work-request-section { display: grid; gap: 18px; margin-top: 28px; }
 .work-request-section > h2 { margin: 0; font-size: 1.15rem; }
+.weekly-view-switch { margin-bottom: 20px; }
+.weekly-period-title { margin: 0; font-size: 1rem; line-height: 1.6; overflow-wrap: anywhere; }
+.weekly-period-title > span { display: block; color: var(--muted); font-size: .85rem; font-weight: 400; }
+.weekly-statistics { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; min-width: 0; }
+.weekly-statistics > * { min-width: 0; }
+.weekly-statistics > .field-help { margin: 0; }
+.weekly-statistics-filters { display: grid; grid-template-columns: minmax(240px, 1.4fr) repeat(2, minmax(140px, 1fr)); align-items: end; gap: 16px; }
+.weekly-statistics-filters label { min-width: 0; }
+.weekly-week-picker { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; min-width: 0; }
+.weekly-statistics-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 0; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+.weekly-statistics-summary > div { padding: 16px; min-width: 0; }
+.weekly-statistics-summary dt { color: var(--muted); font-size: .8rem; line-height: 1.5; }
+.weekly-statistics-summary dd { margin: 8px 0 0; font-size: 1.5rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+.weekly-statistics-averages { display: flex; gap: 8px; flex-wrap: wrap; align-items: baseline; font-size: .85rem; }
+.weekly-statistics-averages > span { color: var(--muted); }
+.weekly-statistics-scroll { overflow-x: auto; max-width: 100%; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+.weekly-statistics-scroll:focus-visible { outline: 2px solid var(--info); outline-offset: 3px; }
+.weekly-statistics-table { width: 100%; min-width: 860px; border-collapse: collapse; font-size: .85rem; font-variant-numeric: tabular-nums; }
+.weekly-statistics-table caption { padding: 14px 16px; text-align: start; color: var(--muted); font-size: .8rem; }
+.weekly-statistics-table th, .weekly-statistics-table td { padding: 12px 14px; text-align: start; vertical-align: middle; border-top: 1px solid var(--border); }
+.weekly-statistics-table thead th { background: var(--subtle); font-size: .8rem; font-weight: 500; }
+.weekly-statistics-table tbody th { min-width: 120px; max-width: 240px; overflow-wrap: anywhere; font-weight: 500; }
+.weekly-statistics-table td { white-space: nowrap; }
+.weekly-company-help { display: block; margin-top: 4px; color: var(--muted); }
+.work-module-status--reviewed { background: var(--green-bg); color: var(--green); }
+@media (max-width: 1000px) {
+  .weekly-statistics-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .weekly-week-picker { grid-column: 1 / -1; }
+}
 @media (max-width: 640px) {
   .work-record { padding: 16px; }
   .work-todo { padding: 12px; }
   .work-record dl, .work-request-facts { grid-template-columns: 1fr; }
   .work-inline-actions > button { min-height: 42px; }
+  .weekly-statistics-filters { grid-template-columns: minmax(0, 1fr); }
+  .weekly-statistics-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .weekly-view-switch { display: flex; }
+  .weekly-view-switch button { min-height: 42px; }
 }

@@ -56,13 +56,28 @@ it('saves only an allowlisted icon while showing the member company as read-only
   await act(async () => root.render(<SettingsDialog state={state} session={account} onClose={vi.fn()} onSessionChanged={onSessionChanged} />))
   expect(container.textContent).toContain('公司：西浦（由超级管理员管理）')
   expect(container.querySelector('select[name="company"],input[name="company"],input[type="file"]')).toBeNull()
-  expect(container.querySelectorAll('.member-avatar-picker button')).toHaveLength(7)
+  expect(container.querySelectorAll('.member-avatar-picker button')).toHaveLength(24)
   await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="猫"]')!.click())
   await act(async () => [...container.querySelectorAll('button')].find(button => button.textContent === '保存头像')!.click())
   expect(save).toHaveBeenCalledWith({ version: 1, avatar: 'cat' })
   expect(onSessionChanged).toHaveBeenCalledWith(updated)
   expect(container.querySelector('button[aria-label="猫"]')?.getAttribute('aria-pressed')).toBe('true')
   expect(container.textContent).toContain('头像已保存')
+})
+
+it('saves a new colorful avatar and restores it when account settings reopen', async () => {
+  const account = { ...session, user: { ...session.user!, version: 1, avatar: 'robot' } }
+  const updated = { ...account, user: { ...account.user, version: 2, avatar: 'satellite' } }
+  const save = vi.spyOn(api, 'updateProfile').mockResolvedValue(updated)
+  await act(async () => root.render(<SettingsDialog state={state} session={account} onClose={vi.fn()} />))
+  await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="卫星"]')!.click())
+  await act(async () => [...container.querySelectorAll('button')].find(button => button.textContent === '保存头像')!.click())
+  expect(save).toHaveBeenCalledWith({ version: 1, avatar: 'satellite' })
+  await act(async () => root.render(null))
+  await act(async () => root.render(<SettingsDialog state={state} session={updated} onClose={vi.fn()} />))
+  expect(container.querySelector('button[aria-label="卫星"]')?.getAttribute('aria-pressed')).toBe('true')
+  expect(container.querySelector('.member-account-summary [data-avatar="satellite"]')).not.toBeNull()
+  expect([...container.querySelectorAll('button')].find(button => button.textContent === '保存头像')).toHaveProperty('disabled', true)
 })
 
 it('retains the chosen avatar after a profile conflict and uses the refreshed version on an explicit retry', async () => {

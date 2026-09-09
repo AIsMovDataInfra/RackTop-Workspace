@@ -1,4 +1,4 @@
-# AIsMov RackTop 团队工作台 API（2.0.0）
+# AIsMov RackTop 团队工作台 API（2.1.0）
 
 接口实现位于 `team-web/server/`，使用 Node.js 24+、单服务进程和本地 SQLite。正式默认模式为 `account`（用户名＋密码），另保留本机 `demo` 与可选 `feishu`。已部署的公网入口是 `https://136.0.110.161`，路径均以根级 `/api` 开始。
 
@@ -22,7 +22,7 @@
 
 ## 数据结构
 
-- `User`：account 模式返回 `{id,username,name,role:'admin'|'member',isSuperAdmin:boolean,company:Company|null,version:number,avatar:Avatar}`；demo／feishu 仍可省略账号专有字段。`Company` 只能为 `A公司`、`B公司`、`C公司`、`西浦`，null 表示尚未分配。`role:'admin'` 是资源管理员身份，只有 `isSuperAdmin:true` 才能管理成员。`Avatar` 为 `user|cat|dog|rocket|robot|flower|star`，旧记录默认 user。没有邮箱字段；客户端不能自报 `role`、`isSuperAdmin` 或 `ownerId`。
+- `User`：account 模式返回 `{id,username,name,role:'admin'|'member',isSuperAdmin:boolean,company:Company|null,version:number,avatar:Avatar}`；demo／feishu 仍可省略账号专有字段。`Company` 只能为 `A公司`、`B公司`、`C公司`、`西浦`，null 表示尚未分配。`role:'admin'` 是资源管理员身份，只有 `isSuperAdmin:true` 才能管理成员。`Avatar` 为 `user|cat|dog|rocket|robot|flower|star|engineer|explorer|rabbit|bird|fish|turtle|squirrel|bug|satellite|planet|moon|sun|computer|circuit|headphones|sprout|gem`，旧记录默认user，原7个ID保持兼容。新增nullable `avatar_choice`用于扩展选择，不重建账号表或改写旧头像；公开User仍只有 `avatar` 字段，优先返回新选择。没有邮箱字段；客户端不能自报 `role`、`isSuperAdmin` 或 `ownerId`。
 - `Member`：仅超级管理员成员接口返回 `{...User,createdAt,recoveryRequestedAt}`；后两项为 UTC ISO8601，尚无找回申请时 `recoveryRequestedAt=null`。只含账号业务信息，不返回密码、密码哈希、会话／设备令牌或内部管理审计记录。
 - `Gpu`：`{id,uuid,index,model,memoryTotalMb}`。`id` 是服务端稳定 ID，`uuid` 是规范化为小写的真实 NVIDIA 完整硬件 UUID，`index` 是当前显示编号；预约不要用编号代替稳定身份。
 - `Resource`：`{id,company,companyVersion,cluster,name,gpuModel,gpuCount,notes,enabled,gpus,inventoryVersion,inventoryState,lastSeenAt,observedAt,status,pendingGpus}`。`company` 为 Company 或旧未分配记录的空串，`companyVersion` 为正整数。清单状态为 `manual|synced|conflict`，在线状态为 `online|offline|unknown`；超过 90 秒的采集显示 unknown。手工资源 `gpus=[]`，CPU 资源 `gpuCount=0`。待确认清单的 GPU 没有已确认的稳定 ID。
@@ -211,7 +211,7 @@ account 资源创建时普通管理员公司由会话确定，不能指定别家
 
 ## 周报与绩效接口
 
-`/api/workspace/*` 仅 account 模式提供，拒绝全部查询参数，使用普通 64 KiB JSON 与同源写入校验。服务端重新解析当前有效成员身份，不能在请求中伪造角色、公司、作者身份或评审权限。工作台记录 ID 为 UUID，写入版本为正整数。
+`/api/workspace/*` 仅 account 模式提供；除下述周报统计 GET 接口外，拒绝全部查询参数。使用普通 64 KiB JSON 与同源写入校验。服务端重新解析当前有效成员身份，不能在请求中伪造角色、公司、作者身份或评审权限。工作台记录 ID 为 UUID，写入版本为正整数。
 
 `Report` 字段：`{id,authorId,authorName,company,weekStart,todos,nextPlan,status,reviewerId,reviewerName,score,reviewComment,reviewedBy,reviewedName,reviewedAt,submittedAt,version,createdAt,updatedAt}`。`weekStart` 为有效周一 `YYYY-MM-DD`；日期时间为 UTC ISO8601，未设置的评审人、评分与提交/评审时间为 null。`status=draft|submitted`。
 
@@ -220,15 +220,36 @@ account 资源创建时普通管理员公司由会话确定，不能指定别家
 | 请求 | 输入／权限与返回 |
 | --- | --- |
 | `GET /api/workspace/reports` | `{reports:Report[]}`；仅作者、同公司指定评审人可见其对应记录，超管可见全部，普通同事不因 role=admin 获得访问。 |
-| `POST /api/workspace/reports` | `{authorId?,weekStart,todos,nextPlan,status?}` → `201 {report}`；默认作者为自己、状态 draft，只有超管可指定其他已分配公司成员。 |
+| `POST /api/workspace/reports` | `{authorId?,weekStart,todos,nextPlan,status?}` → `201 {report}`；weekStart 可传所选周的任意有效 `YYYY-MM-DD` 日期，服务器以 UTC 纯日期运算归到该周周一；默认作者为自己、状态 draft，只有超管可指定其他已分配公司成员。 |
 | `GET /api/workspace/reports/:id` | `{report,history}`；遵守同一读取权限，草稿也受保护，越权返回 404。 |
 | `PATCH /api/workspace/reports/:id` | `{version,todos?,nextPlan?,status?}` → `{report}`；仅作者或超管，且记录须仍为 draft。 |
 | `POST /api/workspace/reports/:id/reviewer` | `{version,reviewerId}` → `{report}`；reviewerId 为 UUID 或 null，仅超管，非超管评审人须与周报同公司且不能为作者。 |
 | `POST /api/workspace/reports/:id/review` | `{version,score,comment}` → `{report}`；仅指定同公司评审人或超管，对已提交记录手工评分。 |
 
-每位作者每个 weekStart 唯一，重复创建返回 `409 REPORT_EXISTS`。提交后正文锁定，修改返回 `409 REPORT_LOCKED`；草稿评分返回 `409 REPORT_NOT_SUBMITTED`。评分为 0–100 有限数字，comment 最多 4000 字符，允许空串。换评审人会清空当前评分、评语与评审人记录，历史仍留存；相同评审人重复提交不递增版本。
+每位作者每个自然周（周一至周日）唯一，同周不同日期重复创建也返回 `409 REPORT_EXISTS`，旧记录的日期、版本与审计不改写。所选日期对应的周一与周日均须能以四位年份表示，否则返回 422。提交后正文锁定，修改返回 `409 REPORT_LOCKED`；草稿评分返回 `409 REPORT_NOT_SUBMITTED`。评分为 0–100 有限数字，comment 最多 4000 字符，允许空串。换评审人会清空当前评分、评语与评审人记录，历史仍留存；相同评审人重复提交不递增版本。
 
 读权限要求用户当前公司与报告公司一致（超管例外），作者或评审人调离公司即失去旧公司报告访问；公司字段不随账号变更自动改写。写入在事务中校验版本并记录审计，旧版本返回 `409 VERSION_CONFLICT`。`history` 为 `{actorName,action,at,details}[]`，最多 100 项，包含原内容或旧评分，因此同样受报告读取权限约束。
+
+### 超级管理员周报统计
+
+`GET /api/workspace/reports/statistics?weekStart=2026-09-09&company=A公司&memberId=<UUID>` 仅超级管理员可读；普通成员、资源管理员和指定评审人均返回 403，不能通过公司或成员筛选绕过权限。只支持 GET；未知、重复、空值或格式错误的查询参数返回 422。三个参数均可省略：
+
+- `weekStart`：任意有效 `YYYY-MM-DD` 日期，归到所在周的周一至周日。省略时以服务器当前北京时间（`Asia/Shanghai`）所在日期选周，不取访问者设备时区。
+- `company`：四个公司枚举之一，或 `unassigned` 表示待分配；省略则包含全部公司。
+- `memberId`：成员 UUID，省略则包含全部成员。不存在或不匹配当前筛选的 UUID 返回空统计。
+
+返回 `{weekStart,weekEnd,timezone:'Asia/Shanghai',rows,summary}`，其中每行：
+
+```text
+{authorId,name,company,weekStart,weekEnd,status,reportId,
+ todoCount,completedCount,unfinishedCount,averageCompletion,score,reviewerName}
+```
+
+`status` 为 `missing|draft|submitted|reviewed`：分别表示缺报、草稿、已提交待评分、已评分。`reportId` 缺报时为 null；完成项按 completion=100 计数，其余为未完成项；`averageCompletion` 为本报告各工作项完成度的算术平均，缺报或无工作项的草稿为 null。未评分的 score 为 null，0 分仍是有效已评分；未指定评审人时 reviewerName 为 null。
+
+应报名册包含该周结束前已注册的**当前活跃账号**，以及该周已有报告的全部作者（含补写报告和已删除的历史作者），每位作者一行。注册时间以北京时间下周一 00:00 为排除边界；此后注册且没有当周报告的成员不算该周应报。待分配公司的账号也可列入名册，但仍须先分配公司才能提交周报。已删除作者只在实际有报告的周次保留，不为后续周次制造缺报。已有报告使用报告创建时的姓名、公司快照；缺报行使用当前账号资料。公司筛选遵从行上的公司，不改写历史记录。
+
+`summary` 为 `{expectedCount,submittedCount,unsubmittedCount,reviewedCount,averageCompletion,averageScore}`，全部在公司／成员筛选之后计算。应报数等于行数；已提交数包含 submitted 与 reviewed，未提交数包含 missing 与 draft；已评分数仅 reviewed。汇总完成度只对**已提交报告**的各自平均完成度再按报告等权平均，草稿与缺报不计入；平均分只计算已评分报告，没有已评分报告时为 null。无报告、无评分都不会自动记成 0 分，也不标逾期或自动生成绩效结论。统计只读同一数据库事务快照，不返回账号密码、令牌或其他账号安全字段。
 
 ## 设备申请与领取接口
 

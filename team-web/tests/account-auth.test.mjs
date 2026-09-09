@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes, scryptSync } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
-import { createAccountAuth } from '../server/account-auth.mjs';
+import { createAccountAuth, ACCOUNT_AVATARS } from '../server/account-auth.mjs';
 
 const BASE = { mode: 'account', publicUrl: 'https://team.example.test', host: '127.0.0.1', dbPath: ':memory:', nodeEnv: 'test' };
 const PASSWORD = 'a sufficiently long passphrase';
@@ -396,7 +396,8 @@ test('a member can change only their own allowlisted avatar with CAS, including 
   const anonymous = browser(auth); await anonymous.call('/api/session');
   await assert.rejects(anonymous.call('/api/auth/profile', { method: 'POST', body: { version: 1, avatar: 'cat' } }), { status: 401 });
   await assert.rejects(client.call('/api/auth/profile', { method: 'POST', body: { version: 1, avatar: 'cat' }, headers: { 'x-csrf-token': undefined } }), { code: 'CSRF_REJECTED' });
-  for (const body of [{ version: 1, avatar: 'https://example.test/image.png' }, { version: 1, avatar: '<svg>' }]) {
+  for (const avatar of ['https://example.test/image.png', '<svg>', '', null, 123, ['cat'], { id: 'cat' }]) {
+    const body = { version: 1, avatar };
     await assert.rejects(client.call('/api/auth/profile', { method: 'POST', body }), { code: 'INVALID_AVATAR' });
   }
   for (const body of [{ version: 1, avatar: 'cat', company: '西浦' }, { version: 1, avatar: 'cat', id: 'someone-else' }, { version: 1, avatar: 'cat', name: '改名' }]) {
@@ -414,6 +415,62 @@ test('a member can change only their own allowlisted avatar with CAS, including 
   const safe = auth.getMemberIdentity(payload.user.id);
   assert.deepEqual(Object.keys(safe).sort(), ['id', 'name', 'role', 'username', 'isSuperAdmin', 'company', 'version', 'avatar'].sort());
   assert.equal(auth.resolve(client.request()).user.avatar, 'star');
+});
+
+test('all 24 built-in avatars save through the same profile and session contract', async t => {
+  const auth = createAccountAuth(BASE); t.after(() => auth.close());
+  const client = browser(auth); const { payload } = await client.register();
+  assert.equal(ACCOUNT_AVATARS.length, 24); assert.equal(new Set(ACCOUNT_AVATARS).size, 24);
+  let version = payload.user.version;
+  for (const avatar of ACCOUNT_AVATARS) {
+    const saved = await client.call('/api/auth/profile', { method: 'POST', body: { version, avatar } });
+    version = saved.payload.user.version;
+    assert.equal(saved.payload.user.avatar, avatar);
+    assert.equal(auth.resolve(client.request()).user.avatar, avatar);
+    assert.equal(auth.getMemberIdentity(payload.user.id).avatar, avatar);
+    assert.equal(Object.hasOwn(saved.payload.user, 'avatar_choice'), false);
+  }
+});
+
+test('legacy seven-avatar database migrates without changing old fields and retains a new choice across restart', async t => {
+  const directory = mkdtempSync(join(tmpdir(), 'racktop-avatar-migration-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const config = { ...BASE, dbPath: join(directory, 'team.sqlite') };
+  let auth = createAccountAuth(config); t.after(() => auth.close());
+  const client = browser(auth); const registered = await client.register();
+  await client.call('/api/auth/profile', { method: 'POST', body: { version: 1, avatar: 'cat' } });
+  const grant = (await device(native(auth))).payload;
+  auth.close();
+  const legacyDb = new DatabaseSync(config.dbPath);
+  legacyDb.exec('ALTER TABLE account_users DROP COLUMN avatar_choice');
+  const oldUser = { ...legacyDb.prepare('SELECT * FROM account_users').get() };
+  const oldSessions = legacyDb.prepare('SELECT * FROM account_sessions ORDER BY token_hash').all().map(row => ({ ...row }));
+  assert.match(legacyDb.prepare("SELECT sql FROM sqlite_master WHERE name='account_users'").get().sql, /CHECK\(avatar IN/);
+  legacyDb.close();
+  auth = createAccountAuth(config); client.auth = auth;
+  const migratedDb = new DatabaseSync(config.dbPath);
+  const { avatar_choice, ...migratedUser } = migratedDb.prepare('SELECT * FROM account_users').get();
+  assert.equal(avatar_choice, null); assert.deepEqual(migratedUser, oldUser);
+  assert.deepEqual(migratedDb.prepare('SELECT * FROM account_sessions ORDER BY token_hash').all().map(row => ({ ...row })), oldSessions);
+  migratedDb.close();
+  assert.equal((await client.call('/api/session')).payload.user.avatar, 'cat');
+  const saved = await client.call('/api/auth/profile', { method: 'POST', body: { version: 2, avatar: 'satellite' } });
+  assert.equal(saved.payload.user.avatar, 'satellite'); assert.equal(saved.payload.user.version, 3);
+  const unchanged = await client.call('/api/auth/profile', { method: 'POST', body: { version: 3, avatar: 'satellite' } });
+  assert.equal(unchanged.payload.user.version, 3);
+  auth.close(); auth = createAccountAuth(config); client.auth = auth;
+  assert.equal((await client.call('/api/session')).payload.user.avatar, 'satellite');
+  const deviceClient = native(auth, { authorization: `Bearer ${grant.token}` });
+  assert.equal((await deviceClient.call('/api/session')).payload.user.avatar, 'satellite');
+  assert.equal(auth.getMemberIdentity(registered.payload.user.id).avatar, 'satellite');
+  const preservedDb = new DatabaseSync(config.dbPath);
+  assert.deepEqual({ ...preservedDb.prepare('SELECT avatar,avatar_choice FROM account_users').get() }, { avatar: 'cat', avatar_choice: 'satellite' });
+  preservedDb.close();
+  const legacyChoice = await client.call('/api/auth/profile', { method: 'POST', body: { version: 3, avatar: 'dog' } });
+  assert.equal(legacyChoice.payload.user.avatar, 'dog');
+  const finalDb = new DatabaseSync(config.dbPath);
+  assert.deepEqual({ ...finalDb.prepare('SELECT avatar,avatar_choice FROM account_users').get() }, { avatar: 'dog', avatar_choice: 'dog' });
+  finalDb.close();
 });
 
 test('remembered browser sessions remain valid after thirty days while desktop device grants still expire', async t => {
