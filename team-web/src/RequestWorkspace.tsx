@@ -45,9 +45,12 @@ export function RequestWorkspace(props: WorkModuleProps) {
     const request = ++generation.current
     setLoading(true); setError(null)
     try {
-      const [catalog, result] = await Promise.all([api.equipment(), user.isSuperAdmin ? workspaceApi.requests() : Promise.resolve({ requests: [] })])
+      const [catalog, result] = await Promise.all([
+        user.isSuperAdmin ? Promise.resolve({ equipment: [] as Equipment[] }) : api.equipment(),
+        user.isSuperAdmin ? workspaceApi.requests() : Promise.resolve({ requests: [] as EquipmentRequest[] }),
+      ])
       if (request !== generation.current) return
-      setEquipment(user.isSuperAdmin ? [] : catalog.equipment.filter(item => item.company === user.company && item.status === 'available' && !item.currentUser))
+      setEquipment(catalog.equipment.filter(item => item.company === user.company && item.status === 'available' && !item.currentUser))
       setRequests(result.requests)
     } catch (reason) { if (request === generation.current && !denied(reason)) { setEquipment([]); setRequests([]); setError(reason) } }
     finally { if (request === generation.current) setLoading(false) }

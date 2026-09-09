@@ -3,6 +3,12 @@ import type { BookingDraft, Company, Equipment, EquipmentDraft, EquipmentHistory
 export class ApiError extends Error {
   constructor(message: string, public status: number, public code: string, public conflicts: Reservation[] = []) { super(message); this.name = 'ApiError' }
 }
+export interface RequestOptions { signal?: AbortSignal }
+
+const REQUEST_TIMEOUT_MS = 8_000
+const GET_ATTEMPTS = 2
+const RETRYABLE_GET_STATUSES = new Set([408, 500, 502, 503, 504])
+const NON_RETRYABLE_GET_PATHS = new Set(['/session'])
 let csrfToken: string | null = null
 export const SESSION_EXPIRED_EVENT = 'racktop-team-session-expired'
 export const ACCOUNT_CHANGED_EVENT = 'racktop-team-account-changed'
@@ -11,9 +17,42 @@ function expired(path: string, status: number, code?: string) {
   if (status === 401 && !(path === '/auth/change-password' && code === 'INVALID_CREDENTIALS') && !['/session', '/auth/login', '/auth/register', '/auth/demo'].includes(path)) { csrfToken = null; window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT)) }
 }
 
-export async function request<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
+function timeoutError() {
+  return new ApiError('请求超时，请检查网络后重试。 / Request timed out. Check your connection and try again.', 408, 'REQUEST_TIMEOUT')
+}
+
+function writeResultUnknownError() {
+  return new ApiError('请求超时，结果可能已保存，请先刷新确认，避免重复提交。 / Request timed out. The result may have been saved. Refresh and verify before submitting again to avoid a duplicate.', 408, 'WRITE_RESULT_UNKNOWN')
+}
+
+function cancelledError() {
+  const error = new Error('请求已取消 / Request cancelled')
+  error.name = 'AbortError'
+  return error
+}
+
+async function withTimeout<T>(run: (signal: AbortSignal) => Promise<T>, signal?: AbortSignal, timeoutFailure = timeoutError()): Promise<T> {
+  if (signal?.aborted) throw signal.reason ?? cancelledError()
+  const controller = new AbortController()
+  let timedOut = false
+  const cancel = () => controller.abort(signal?.reason ?? cancelledError())
+  signal?.addEventListener('abort', cancel, { once: true })
+  const timer = setTimeout(() => { timedOut = true; controller.abort(timeoutFailure) }, REQUEST_TIMEOUT_MS)
+  try { return await run(controller.signal) }
+  catch (reason) { if (timedOut) throw timeoutFailure; throw reason }
+  finally { clearTimeout(timer); signal?.removeEventListener('abort', cancel) }
+}
+
+function retryableGetFailure(reason: unknown) {
+  if (reason instanceof TypeError) return true
+  if (!(reason instanceof ApiError)) return false
+  return reason.code === 'REQUEST_TIMEOUT' || RETRYABLE_GET_STATUSES.has(reason.status)
+    || (reason.code === 'INVALID_RESPONSE' && (reason.status === 0 || reason.status === 200 || reason.status >= 500))
+}
+
+async function jsonRequest<T>(path: string, method: string, body: unknown, signal: AbortSignal): Promise<T> {
   const response = await fetch(`/api${path}`, {
-    method, credentials: 'same-origin', headers: {
+    method, credentials: 'same-origin', signal, headers: {
       Accept: 'application/json', ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
       ...(method !== 'GET' && csrfToken ? { 'X-CSRF-Token': csrfToken } : {}),
     }, ...(body === undefined ? {} : { body: JSON.stringify(body) }),
@@ -26,6 +65,20 @@ export async function request<T>(path: string, method = 'GET', body?: unknown): 
     throw new ApiError(error?.message || `请求失败 / Request failed (${response.status})`, response.status, error?.code || 'REQUEST_FAILED', error?.conflicts || [])
   }
   return result as T
+}
+
+export async function request<T>(path: string, method = 'GET', body?: unknown, options: RequestOptions = {}): Promise<T> {
+  const normalizedMethod = method.toUpperCase()
+  const isGet = normalizedMethod === 'GET'
+  const attempts = isGet && !NON_RETRYABLE_GET_PATHS.has(path.split('?', 1)[0]) ? GET_ATTEMPTS : 1
+  const timeoutFailure = isGet ? timeoutError() : writeResultUnknownError()
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try { return await withTimeout((signal) => jsonRequest<T>(path, normalizedMethod, body, signal), options.signal, timeoutFailure) }
+    catch (reason) {
+      if (options.signal?.aborted || attempt + 1 === attempts || !retryableGetFailure(reason)) throw reason
+    }
+  }
+  throw new Error('请求未完成 / Request did not complete')
 }
 
 async function sessionRequest(path: string, method = 'GET', body?: unknown) {
@@ -64,16 +117,18 @@ export const api = {
   acceptInventory: (resource: Resource) => request<{ resource: Resource }>(`/resources/${encodeURIComponent(resource.id)}`, 'PATCH', { acceptInventoryVersion: resource.inventoryVersion }),
   createResource: (draft: ResourceDraft) => request<{ resource: Resource }>('/resources', 'POST', draft),
   updateResource: (id: string, draft: Partial<ResourceDraft>) => request<{ resource: Resource }>(`/resources/${encodeURIComponent(id)}`, 'PATCH', draft),
-  equipmentPhoto: async (id: string, version: number) => {
+  equipmentPhoto: async (id: string, version: number, options: RequestOptions = {}) => {
     const path = `/equipment/${encodeURIComponent(id)}/photo?v=${version}`
-    const response = await fetch(`/api${path}`, { credentials: 'same-origin', cache: 'no-store' })
-    if (!response.ok) {
-      let code = 'PHOTO_READ_FAILED'
-      try { const body = await response.json(); if (typeof body?.error?.code === 'string') code = body.error.code } catch { /* The proxy may return a non-JSON error. */ }
-      expired(path, response.status, code)
-      throw new ApiError('照片暂时无法读取 / Could not load the photo', response.status, code)
-    }
-    return response.blob()
+    return withTimeout(async (signal) => {
+      const response = await fetch(`/api${path}`, { credentials: 'same-origin', cache: 'no-store', signal })
+      if (!response.ok) {
+        let code = 'PHOTO_READ_FAILED'
+        try { const body = await response.json(); if (typeof body?.error?.code === 'string') code = body.error.code } catch { /* The proxy may return a non-JSON error. */ }
+        expired(path, response.status, code)
+        throw new ApiError('照片暂时无法读取 / Could not load the photo', response.status, code)
+      }
+      return response.blob()
+    }, options.signal)
   },
   setEquipmentPhoto: (id: string, version: number, dataUrl: string) => request<{ equipment: Equipment }>(`/equipment/${encodeURIComponent(id)}/photo`, 'POST', { version, dataUrl }),
   deleteEquipmentPhoto: (id: string, version: number) => request<{ equipment: Equipment }>(`/equipment/${encodeURIComponent(id)}/photo`, 'DELETE', { version }),

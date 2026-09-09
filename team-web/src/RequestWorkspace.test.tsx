@@ -48,7 +48,7 @@ it('supports super administrator approval followed by atomic equipment collectio
   const approved = { ...request, status: 'approved' as const, decisionComment: '批准使用', version: 2 }
   const collected = { ...approved, status: 'collected' as const, equipmentUpdated: true, version: 3 }
   const update = vi.spyOn(workspaceApi, 'updateRequest').mockResolvedValueOnce({ request: approved }).mockResolvedValueOnce({ request: collected })
-  await mount(admin); await click('查看申请')
+  await mount(admin); expect(api.equipment).not.toHaveBeenCalled(); await click('查看申请')
   expect(container.textContent).toContain(request.purpose); expect(container.querySelector('.dialog [name="purpose"]')).toBeNull()
   enter('decisionComment', '批准使用'); await click('批准申请'); expect(update).toHaveBeenNthCalledWith(1, request.id, 1, 'approved', '批准使用')
   await click('登记已领取'); expect(update).toHaveBeenNthCalledWith(2, request.id, 2, 'collected', '批准使用')
@@ -64,7 +64,7 @@ it('preserves decision notes after a concurrent update and requires explicitly l
 })
 
 it.each([null, 'A公司'] as const)('keeps a super administrator with company %s in the review role without a personal request form', async (company) => {
-  await mount({ ...admin, company }); expect(workspaceApi.requests).toHaveBeenCalledTimes(1); expect(container.querySelector('.work-request-form')).toBeNull()
+  await mount({ ...admin, company }); expect(workspaceApi.requests).toHaveBeenCalledTimes(1); expect(api.equipment).not.toHaveBeenCalled(); expect(container.querySelector('.work-request-form')).toBeNull()
   expect(container.textContent).toContain('超级管理员无需提交自己的设备申请')
   await click('查看申请'); expect(container.textContent).toContain(request.purpose)
 })
