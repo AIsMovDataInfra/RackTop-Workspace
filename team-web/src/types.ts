@@ -2,10 +2,10 @@ export type Locale = 'zh-CN' | 'en'
 export type Translate = (zh: string, en: string) => string
 export const COMPANY_OPTIONS = ['A公司', 'B公司', 'C公司', '西浦'] as const
 export type Company = typeof COMPANY_OPTIONS[number]
-export interface User { id: string; name: string; role: 'admin' | 'member'; username?: string; isSuperAdmin?: boolean; company?: Company | null; version?: number }
+export interface User { avatar?: string; id: string; name: string; role: 'admin' | 'member'; username?: string; isSuperAdmin?: boolean; company?: Company | null; version?: number }
 export interface Member extends User { username: string; isSuperAdmin: boolean; company: Company | null; version: number; createdAt: string; recoveryRequestedAt: string | null }
 export interface Gpu { id: string; uuid: string; index: number; model: string; memoryTotalMb: number }
-export interface Resource { id: string; cluster: string; name: string; gpuModel: string; gpuCount: number; notes: string; enabled: boolean; gpus?: Gpu[]; pendingGpus?: Omit<Gpu, 'id'>[] | null; inventoryVersion?: number; inventoryState?: 'manual' | 'synced' | 'conflict'; lastSeenAt?: string | null; observedAt?: string | null; status?: 'online' | 'offline' | 'unknown' }
+export interface Resource { id: string; company?: Company | ''; companyVersion?: number; cluster: string; name: string; gpuModel: string; gpuCount: number; notes: string; enabled: boolean; gpus?: Gpu[]; pendingGpus?: Omit<Gpu, 'id'>[] | null; inventoryVersion?: number; inventoryState?: 'manual' | 'synced' | 'conflict'; lastSeenAt?: string | null; observedAt?: string | null; status?: 'online' | 'offline' | 'unknown' }
 export interface Reservation {
   id: string; resourceId: string; resourceName: string; cluster: string; ownerId?: string; ownerName: string
   scope: 'machine' | 'gpus'; gpuIndices: number[]; startAt: string; endAt: string; purpose?: string; gpuIds?: string[]; inventoryVersion?: number
@@ -16,7 +16,7 @@ export interface Session {
   demoUsers?: User[]; notifications: { configured: boolean }; timezone: 'Asia/Shanghai'
 }
 export interface BookingDraft { resourceId: string; scope: 'machine' | 'gpus'; gpuIndices: number[]; startAt: string; endAt: string; purpose: string; gpuIds?: string[]; inventoryVersion?: number; requestId?: string }
-export interface ResourceDraft { cluster: string; name: string; gpuModel: string; gpuCount: number; notes: string; enabled?: boolean }
+export interface ResourceDraft { company?: Company | ''; companyVersion?: number; cluster: string; name: string; gpuModel: string; gpuCount: number; notes: string; enabled?: boolean }
 export type EquipmentStatus = 'available' | 'in_use' | 'maintenance' | 'retired'
 export interface EquipmentDraft {
   name: string; category: string; model: string; company: string

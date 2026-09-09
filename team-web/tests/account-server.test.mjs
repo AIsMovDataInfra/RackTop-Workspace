@@ -199,6 +199,26 @@ test('HTTP accounts accept short Chinese credentials and long ordinary values wh
   assert.equal(long.user.username, username.toLowerCase());
   const device = await call('/api/auth/device-login', { method: 'POST', body: { username, password, deviceName: '桌面' } });
   assert.equal(device.status, 200, device.text);
-  const oversized = await call('/api/auth/register', { method: 'POST', session: await anonymous(), body: { username: 'body-limit', name: '容量边界', password: 'x'.repeat(64 * 1024) } });
+  const oversized = await call('/api/auth/register', { method: 'POST', session: await anonymous(), body: { name: 'x'.repeat(64 * 1024), password: '密' } });
   assert.equal(oversized.status, 413); assert.equal(oversized.body.error.code, 'BODY_TOO_LARGE');
 });
+
+for (const [label, name] of [['long Chinese and English', 'Member中文 + @.'.repeat(100)], ['decomposed accents', 'Cafe\u0301中文']]) {
+  test(`HTTP single-name registration, logout and login preserve ${label}`, async t => {
+    const { call, anonymous, sessionOf } = await fixture(t);
+    const registered = await call('/api/auth/register', { method: 'POST', session: await anonymous(), body: { name: `  ${name}  `, password: '密' } });
+    assert.equal(registered.status, 201, registered.text);
+    assert.equal(registered.body.user.name, name); assert.equal(registered.body.user.username, name);
+    const session = sessionOf(registered);
+    assert.equal((await call('/api/auth/logout', { method: 'POST', session, body: {} })).status, 200);
+    assert.equal((await call('/api/session', { session })).body.user, null);
+    const login = await call('/api/auth/login', { method: 'POST', session: await anonymous(), body: { username: ` ${name.toUpperCase()} `, password: '密' } });
+    assert.equal(login.status, 200, login.text);
+    assert.equal(login.body.user.id, registered.body.user.id);
+    assert.equal(login.body.user.name, name); assert.equal(login.body.user.username, name);
+    const grant = await call('/api/auth/device-login', { method: 'POST', body: { username: name, password: '密', deviceName: '桌面' } });
+    assert.equal(grant.status, 200, grant.text); assert.equal(grant.body.user.name, name);
+    const duplicate = await call('/api/auth/register', { method: 'POST', session: await anonymous(), body: { name: ` ${name.toLowerCase()} `, password: '密' } });
+    assert.equal(duplicate.status, 409, duplicate.text); assert.equal(duplicate.body.error.code, 'ACCOUNT_EXISTS');
+  });
+}

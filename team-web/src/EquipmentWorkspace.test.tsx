@@ -56,7 +56,8 @@ describe('equipment inventory', () => {
     const create = vi.spyOn(api, 'createEquipment').mockResolvedValue({ equipment })
     await act(async () => root.render(<EquipmentWorkspace session={member} state={state} navigate={vi.fn()} onSessionChanged={vi.fn()} onSessionExpired={vi.fn()} onLogout={vi.fn()} />))
     await click('新增设备')
-    expect(document.activeElement).toBe(container.querySelector('[name="name"]'))
+    expect(document.activeElement).toBe(container.querySelector('[name="company"]'))
+    expect(container.querySelector<HTMLSelectElement>('[name="company"]')!.value).toBe('A公司')
     enter('name', '新设备')
     expect(container.querySelector<HTMLInputElement>('[name="serialNumber"]')).toBeNull()
     expect(container.querySelector<HTMLInputElement>('[name="responsiblePerson"]')!.value).toBe('李同学')
@@ -187,17 +188,18 @@ describe('equipment inventory', () => {
     await click('打印标签'); expect(print).toHaveBeenCalledOnce()
   })
 
-  it('keeps company read-only for members and offers exactly four choices and member navigation for the super administrator', async () => {
+  it('restricts member company choices to their own company and offers all four choices and member navigation for the super administrator', async () => {
     const create = vi.spyOn(api, 'createEquipment').mockResolvedValue({ equipment })
     await mount(); await click('编辑信息')
-    expect(container.querySelector('[name="company"]')).toBeNull()
-    expect(container.querySelector('[role="dialog"]')?.textContent).toContain('公司名称：A公司')
+    const company = container.querySelector<HTMLSelectElement>('[name="company"]')!
+    expect(company.value).toBe('A公司')
+    expect([...company.options].filter(option => !option.disabled).map(option => option.value)).toEqual(['A公司'])
     await click('取消')
     expect(container.textContent).not.toContain('成员管理')
     const superAdmin: Session = { ...member, user: { ...member.user!, role: 'admin', isSuperAdmin: true, company: null } }
     await act(async () => root.render(<EquipmentWorkspace session={superAdmin} state={state} navigate={vi.fn()} onSessionChanged={vi.fn()} onSessionExpired={vi.fn()} onLogout={vi.fn()} />))
     expect(container.textContent).toContain('成员管理')
-    expect(container.querySelector('.profile small')?.textContent).toBe('超级管理员')
+    expect(container.querySelector('.profile small')?.textContent).toBe('跨公司管理 · 超级管理员')
     await click('新增设备')
     expect([...container.querySelectorAll('select[name="company"] option')].map((option) => option.getAttribute('value'))).toEqual(['', 'A公司', 'B公司', 'C公司', '西浦'])
     enter('name', '管理设备'); select('category', '机械臂'); select('location', '上海')

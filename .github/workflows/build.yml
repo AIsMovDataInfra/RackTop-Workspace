@@ -27,10 +27,11 @@ permissions:
 
 jobs:
   linux:
-    if: (github.event_name == 'workflow_dispatch' && inputs.build_linux) || (github.event_name == 'push' && contains(github.ref, '-linux.'))
+    if: (github.event_name == 'workflow_dispatch' && inputs.build_linux) || github.event_name == 'push'
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
+      - run: python3 scripts/check-release-version.py
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -58,9 +59,13 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         run: |
           version=$(node -p "require('./package.json').version")
-          python3 scripts/sign-linux-update.py "src-tauri/target/release/bundle/deb/RackTop_${version}_amd64.deb"
-          cargo run --release --locked --features integration-probe --bin racktop-probe --manifest-path src-tauri/Cargo.toml -- --verify-update-files "src-tauri/target/release/bundle/deb/RackTop_${version}_amd64.deb" "src-tauri/target/release/bundle/deb/RackTop_${version}_amd64.deb.sig"
-          python3 scripts/test-linux-update.py src-tauri/target/release/racktop-probe "src-tauri/target/release/bundle/deb/RackTop_${version}_amd64.deb"
+          python3 scripts/sign-linux-update.py "src-tauri/target/release/bundle/deb/RackTop_${version}_linux-amd64.deb"
+      - name: Verify signed Linux update and migration
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          version=$(node -p "require('./package.json').version")
+          cargo run --release --locked --features integration-probe --bin racktop-probe --manifest-path src-tauri/Cargo.toml -- --verify-update-files "src-tauri/target/release/bundle/deb/RackTop_${version}_linux-amd64.deb" "src-tauri/target/release/bundle/deb/RackTop_${version}_linux-amd64.deb.sig"
+          python3 scripts/test-linux-update.py src-tauri/target/release/racktop-probe "src-tauri/target/release/bundle/deb/RackTop_${version}_linux-amd64.deb"
       - name: Inspect package and smoke-test native startup
         shell: bash
         run: |
@@ -87,31 +92,8 @@ jobs:
             src-tauri/target/release/bundle/deb/*.sig
             src-tauri/target/release/bundle/deb/linux-amd64.json
 
-  publish-linux:
-    if: startsWith(github.ref, 'refs/tags/v') && contains(github.ref, '-linux.')
-    needs: linux
-    runs-on: ubuntu-22.04
-    permissions:
-      contents: write
-    concurrency:
-      group: linux-release-feed
-      cancel-in-progress: false
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: RackTop_*_linux-amd64-deb
-          path: release-assets
-          merge-multiple: true
-      - name: Publish verified release, then update Linux feed
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: python3 scripts/publish-linux-update.py release-assets
-
   macos:
-    if: (github.event_name == 'workflow_dispatch' && inputs.build_macos) || (github.event_name == 'push' && !contains(github.ref, '-linux.'))
+    if: (github.event_name == 'workflow_dispatch' && inputs.build_macos) || github.event_name == 'push'
     strategy:
       fail-fast: false
       matrix:
@@ -125,6 +107,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
+      - run: python3 scripts/check-release-version.py
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -253,14 +236,14 @@ jobs:
             src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz
             src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz.sig
 
-  publish-macos:
-    if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-linux.')
-    needs: macos
+  publish:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: [linux, macos]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
     concurrency:
-      group: macos-release-feed
+      group: workspace-release-feeds
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
@@ -268,21 +251,24 @@ jobs:
           fetch-depth: 0
       - uses: actions/download-artifact@v4
         with:
-          pattern: RackTop_*_macos-*
+          pattern: RackTop_*
           path: release-assets
           merge-multiple: true
       - run: sudo apt-get update && sudo apt-get install -y minisign
+      - run: python3 scripts/check-release-version.py
       - run: python3 scripts/test-publish-macos-update.py
-      - name: Publish verified release, then update Mac feed
+      - run: python3 scripts/test-publish-workspace-update.py
+      - name: Publish verified Mac and Linux release, then advance both feeds
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python3 scripts/publish-macos-update.py release-assets
+        run: python3 scripts/publish-workspace-update.py release-assets
 
   windows:
     if: github.event_name == 'workflow_dispatch' && inputs.build_windows
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+      - run: python3 scripts/check-release-version.py
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -301,8 +287,8 @@ jobs:
       - uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.LINUX_UPDATER_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         with:
           args: --target x86_64-pc-windows-msvc --bundles msi,nsis
           uploadWorkflowArtifacts: false

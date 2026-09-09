@@ -92,7 +92,7 @@ test('resource names are unique within each cluster ignoring ASCII case, with no
   fails(() => store.updateResource(other.id, { cluster: resource.cluster, name: 'atlas' }, admin), 409, 'RESOURCE_DUPLICATE');
   assert.equal(store.getResource(other.id).cluster, '另一个集群');
   const legacy = new DatabaseSync(path);
-  legacy.exec("DROP INDEX resources_unique_name; INSERT INTO resources SELECT 'legacy-duplicate',cluster,name,gpu_model,gpu_count,notes,enabled,created_at,updated_at FROM resources WHERE name='Atlas' LIMIT 1;");
+  legacy.exec("DROP INDEX resources_company_name; INSERT INTO resources SELECT 'legacy-duplicate',cluster,name,gpu_model,gpu_count,notes,enabled,created_at,updated_at,company,company_version FROM resources WHERE name='Atlas' LIMIT 1;");
   legacy.close();
   assert.throws(() => createStore({ dbPath: path }), /未删除或合并/);
   assert.equal(store.listResources().length, 3);

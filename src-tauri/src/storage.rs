@@ -743,7 +743,7 @@ impl Database {
             settings.mode = "all".into();
             settings.task = true; settings.zombie = true; settings.memory = true; settings.system = true;
         } else if enabled_count == 0 {
-            return Err("部分通知至少保留一项".into());
+            settings.mode = "off".into();
         }
         let connection = self.connection.lock().map_err(|error| error.to_string())?;
         let exists: bool = connection.query_row("SELECT EXISTS(SELECT 1 FROM servers WHERE id=?1)", [&settings.server_id], |row| row.get(0)).map_err(|error| error.to_string())?;
@@ -1686,7 +1686,13 @@ mod tests {
         let empty = database.save_server_notification_settings(ServerNotificationSettings {
             server_id: server.id, mode: "partial".into(), task: false, zombie: false, memory: false, system: false,
         });
-        assert_eq!(empty.unwrap_err(), "部分通知至少保留一项");
+        assert_eq!(empty.unwrap().mode, "off");
+        drop(database);
+        let reopened = Database::open(&directory.path().join("notifications.sqlite")).unwrap();
+        let reloaded = reopened.list_server_notification_settings().unwrap();
+        assert_eq!(reloaded.len(), 1);
+        assert_eq!(reloaded[0].mode, "off");
+        assert!(!reloaded[0].task && !reloaded[0].zombie && !reloaded[0].memory && !reloaded[0].system);
     }
 
     fn snapshot(server_id: &str, timestamp: i64) -> Snapshot {

@@ -48,3 +48,35 @@ it('accepts a short Chinese new password, preserves spaces and rejects only blan
   expect(change).toHaveBeenCalledWith({ oldPassword: ' '.repeat(12), newPassword: ' 密 ' })
   expect(container.querySelector('input[minlength], input[maxlength], input[pattern]')).toBeNull()
 })
+
+it('saves only an allowlisted icon while showing the member company as read-only', async () => {
+  const account = { ...session, user: { ...session.user!, company: '西浦' as const, version: 1, avatar: 'user' } }
+  const updated = { ...account, user: { ...account.user, avatar: 'cat', version: 2 } }
+  const save = vi.spyOn(api, 'updateProfile').mockResolvedValue(updated), onSessionChanged = vi.fn()
+  await act(async () => root.render(<SettingsDialog state={state} session={account} onClose={vi.fn()} onSessionChanged={onSessionChanged} />))
+  expect(container.textContent).toContain('公司：西浦（由超级管理员管理）')
+  expect(container.querySelector('select[name="company"],input[name="company"],input[type="file"]')).toBeNull()
+  expect(container.querySelectorAll('.member-avatar-picker button')).toHaveLength(7)
+  await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="猫"]')!.click())
+  await act(async () => [...container.querySelectorAll('button')].find(button => button.textContent === '保存头像')!.click())
+  expect(save).toHaveBeenCalledWith({ version: 1, avatar: 'cat' })
+  expect(onSessionChanged).toHaveBeenCalledWith(updated)
+  expect(container.querySelector('button[aria-label="猫"]')?.getAttribute('aria-pressed')).toBe('true')
+  expect(container.textContent).toContain('头像已保存')
+})
+
+it('retains the chosen avatar after a profile conflict and uses the refreshed version on an explicit retry', async () => {
+  const account = { ...session, user: { ...session.user!, company: '西浦' as const, version: 1, avatar: 'user' } }
+  const latest = { ...account, user: { ...account.user, company: 'B公司' as const, version: 2, avatar: 'robot' } }
+  const save = vi.spyOn(api, 'updateProfile').mockRejectedValueOnce(new ApiError('changed', 409, 'VERSION_CONFLICT')).mockResolvedValue({ ...latest, user: { ...latest.user, avatar: 'cat', version: 3 } })
+  vi.spyOn(api, 'session').mockResolvedValue(latest)
+  await act(async () => root.render(<SettingsDialog state={state} session={account} onClose={vi.fn()} />))
+  await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="猫"]')!.click())
+  await act(async () => [...container.querySelectorAll('button')].find(button => button.textContent === '保存头像')!.click())
+  expect(save).toHaveBeenCalledTimes(1)
+  expect(container.textContent).toContain('头像选择已保留')
+  expect(container.textContent).toContain('公司：B公司')
+  expect(container.querySelector('button[aria-label="猫"]')?.getAttribute('aria-pressed')).toBe('true')
+  await act(async () => [...container.querySelectorAll('button')].find(button => button.textContent === '保存头像')!.click())
+  expect(save).toHaveBeenLastCalledWith({ version: 2, avatar: 'cat' })
+})

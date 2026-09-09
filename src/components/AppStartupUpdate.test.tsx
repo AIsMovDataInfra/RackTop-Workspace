@@ -100,7 +100,7 @@ describe('App startup update check', () => {
       .find((button) => button.textContent === '版本说明')
     expect(releaseNotes).toBeDefined()
     await act(async () => releaseNotes?.click())
-    const repository = desktop || packageInfo.version.includes('-linux.') ? 'AIsMovDataInfra/RackTop' : 'Tongzh-SEU/RackTop'
+    const repository = 'AIsMovDataInfra/RackTop-Workspace'
     const release = `https://github.com/${repository}/releases/tag/v${packageInfo.version}`
     if (desktop) {
       expect(openUrl).toHaveBeenCalledWith(release)

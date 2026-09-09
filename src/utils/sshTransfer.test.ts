@@ -27,4 +27,15 @@ describe('portable SSH configuration', () => {
     expect(imported[0].identityFile).toBeUndefined()
     expect(() => parseSharedSshConfig('Host invalid\nHostName host\nUser user\nPort 70000\n')).toThrow()
   })
+  it('exports only selected hosts while resolving a referenced unselected jump from the known connections', () => {
+    const jump = {...target,id:'jump',name:'Jump only',sshAlias:'gateway',host:'jump.example',username:'gateway',port:22022,proxyJump:null,identityFile:'/secret/jump-key'}
+    const selected = {...target,name:'Selected target',proxyJump:'gateway'}
+    const text = exportSshConfig([selected],[jump,selected])
+    expect(parseSharedSshConfig(text)).toHaveLength(1)
+    expect(text).toContain('ProxyJump gateway@jump.example:22022')
+    expect(text).not.toContain('Jump only')
+    expect(text).not.toContain('/secret/jump-key')
+    expect(text).not.toMatch(/^Host gateway$/m)
+  })
+
 })

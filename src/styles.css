@@ -1268,3 +1268,28 @@ fieldset { min-width: 0; margin: 0; padding: 0; border: 0; } legend { margin-bot
   .ssh-key-manager__empty { padding: 26px 20px; }
   .ssh-key-manager__footer { padding: 10px 16px; }
 }
+
+.ssh-config-sheet { width: min(540px, 100%); }
+.ssh-config-actions { display: grid; gap: 10px; padding: 8px 20px 20px; }
+.ssh-config-actions > button { display: flex; align-items: center; gap: 14px; padding: 17px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-solid); text-align: left; }
+.ssh-config-actions > button > svg { flex: none; color: var(--text-secondary); }
+.ssh-config-actions > button span { display: grid; gap: 5px; }
+.ssh-config-actions strong { font-size: calc(13px + var(--font-adjust, 0px)); }
+.ssh-config-actions small, .ssh-config-actions p { color: var(--text-secondary); font-size: calc(11px + var(--font-adjust, 0px)); line-height: 1.6; }
+.ssh-config-actions > button:disabled { opacity: .55; }
+.ssh-export-selection { min-width: 0; margin: 0; padding: 12px; border: 1px solid var(--border); border-radius: 8px; }
+.ssh-export-selection legend { padding: 0 5px; font-size: calc(12px + var(--font-adjust, 0px)); }
+.ssh-export-selection__actions { display: flex; gap: 8px; margin-bottom: 8px; }
+.ssh-export-selection__list { max-height: 180px; overflow: auto; }
+.ssh-export-selection__list label { display: flex; align-items: center; gap: 10px; padding: 8px 2px; }
+.ssh-export-selection__list input { width: 16px; height: 16px; padding: 0; accent-color: var(--blue); }
+.ssh-export-selection__list span { display: grid; gap: 3px; min-width: 0; overflow-wrap: anywhere; }
+.ssh-export-selection__list strong { font-size: calc(12px + var(--font-adjust, 0px)); }
+.ssh-export-selection__list small { color: var(--text-secondary); font-size: calc(10px + var(--font-adjust, 0px)); }
+.team-workspace-menu { position: relative; }
+.team-workspace-menu__trigger { display: flex; border-radius: 8px; }
+.sidebar__footer .team-workspace-menu__trigger > button:first-child { flex: 1; min-width: 0; }
+.sidebar__footer .team-workspace-menu__expand { width: 30px; flex: none; justify-content: center; padding: 8px 0; }
+.team-workspace-menu__flyout { position: absolute; z-index: 20; left: 100%; bottom: 0; width: max-content; min-width: 210px; padding-left: 8px; }
+.team-workspace-menu__flyout nav { display: grid; gap: 3px; padding: 6px; border: 1px solid var(--border-strong); border-radius: 9px; background: var(--surface-solid); box-shadow: 0 8px 24px rgba(0,0,0,.12); }
+.sidebar__footer .team-workspace-menu__flyout button { white-space: nowrap; min-height: 34px; }

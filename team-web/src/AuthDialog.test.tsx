@@ -36,14 +36,14 @@ describe('username accounts and member sign-in', () => {
     expect(container.querySelector('nav')).toBeNull()
   })
 
-  it('registers the fixed name and username or storing a password', async () => {
+  it('registers with one fixed member name and never stores a password', async () => {
     const register = vi.spyOn(api, 'register').mockResolvedValue(member)
     const signedIn = vi.fn()
     await act(async () => root.render(<AuthDialog session={anonymous} t={t} onClose={vi.fn()} onSignedIn={signedIn} />))
     await click('注册账号')
-    enter('username', ' test-member '); enter('name', '测试成员'); enter('password', 'safe-password-test')
+    enter('username', ' test-member '); enter('password', 'safe-password-test')
     await submit()
-    expect(register).toHaveBeenCalledWith({ username: 'test-member', name: '测试成员', password: 'safe-password-test' })
+    expect(register).toHaveBeenCalledWith({ name: 'test-member', password: 'safe-password-test', rememberMe: true })
     expect(signedIn).toHaveBeenCalledWith(member)
     expect(container.querySelector<HTMLInputElement>('[name="password"]')!.value).toBe('')
     expect(container.textContent).not.toContain('邮箱')
@@ -56,7 +56,7 @@ describe('username accounts and member sign-in', () => {
     await act(async () => root.render(<AuthDialog session={anonymous} t={t} onClose={vi.fn()} onSignedIn={signedIn} />))
     enter('username', 'test-member'); enter('password', 'wrong-password')
     await submit()
-    expect(container.querySelector('[role="alert"]')?.textContent).toContain('用户名或密码不正确')
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('成员名称或密码不正确')
     expect(container.querySelector('[role="alert"]')?.textContent).not.toContain('登录已过期')
     expect(container.querySelector<HTMLInputElement>('[name="username"]')!.value).toBe('test-member')
     expect(login).toHaveBeenCalledWith({ username: 'test-member', password: 'wrong-password', rememberMe: true })
@@ -67,11 +67,11 @@ describe('username accounts and member sign-in', () => {
     const register = vi.spyOn(api, 'register').mockResolvedValue(member)
     await act(async () => root.render(<AuthDialog session={anonymous} t={t} onClose={vi.fn()} onSignedIn={vi.fn()} />))
     await click('注册账号')
-    for (const [username, password] of [['中', '密'], [' A.+ @ 中文 ! '.repeat(40), ` ${'密 '.repeat(300)}`]]) {
-      enter('username', username); enter('name', '测试成员'); enter('password', password)
+    for (const [username, password] of [['中', '密'], [` ${'A.+ @ 中文 ! '.repeat(100)} `, ` ${'密 '.repeat(300)}`], [' Cafe\u0301中文 ', '密']]) {
+      enter('username', username); enter('password', password)
       expect(container.querySelector<HTMLFormElement>('form')!.checkValidity()).toBe(true)
       await submit()
-      expect(register).toHaveBeenLastCalledWith({ username: username.trim(), name: '测试成员', password })
+      expect(register).toHaveBeenLastCalledWith({ name: username.trim(), password, rememberMe: true })
     }
     for (const name of ['username', 'password']) {
       const input = container.querySelector(`input[name="${name}"]`)!
@@ -85,8 +85,8 @@ describe('username accounts and member sign-in', () => {
     const login = vi.spyOn(api, 'login').mockResolvedValue(member)
     await act(async () => root.render(<AuthDialog session={anonymous} t={t} onClose={vi.fn()} onSignedIn={vi.fn()} />))
     await click('注册账号')
-    enter('username', '   '); enter('name', '测试成员'); enter('password', '密'); await submit()
-    expect(container.querySelector('[role="alert"]')?.textContent).toContain('请输入用户名')
+    enter('username', '   '); enter('password', '密'); await submit()
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('请输入成员名称')
     enter('username', '中'); enter('password', '   '); await submit()
     expect(container.querySelector('[role="alert"]')?.textContent).toContain('请输入密码')
     expect(register).not.toHaveBeenCalled()
@@ -115,7 +115,7 @@ describe('username accounts and member sign-in', () => {
     expect(window.location.hash).toBe('')
     expect(container.querySelector('.login-auth h2')?.textContent).toBe('创建管理员账号')
     expect(container.textContent).not.toContain('test-bootstrap-secret')
-    enter('username', 'test-admin'); enter('name', '管理员'); enter('password', 'safe-password-test')
+    enter('username', 'test-admin'); enter('password', 'safe-password-test')
     await act(async () => container.querySelector('.dialog form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })))
     expect(register).toHaveBeenCalledWith(expect.objectContaining({ bootstrapToken: 'test-bootstrap-secret' }))
     expect(JSON.stringify(window.localStorage)).not.toContain('test-bootstrap-secret')
@@ -146,7 +146,7 @@ describe('username accounts and member sign-in', () => {
     await act(async () => root.render(<AuthDialog embedded session={anonymous} t={t} onClose={vi.fn()} onSignedIn={vi.fn()} />))
     expect(container.querySelector('h2')?.textContent).toBe('找回密码')
     enter('username', '  '); await submit(); expect(recovery).not.toHaveBeenCalled()
-    expect(container.querySelector('[role="alert"]')?.textContent).toContain('请输入用户名')
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('请输入成员名称')
     enter('username', '不存在的用户'); await submit()
     expect(container.querySelector('[role="status"]')?.textContent).toContain('如果账号存在')
     expect(window.location.pathname + window.location.search).toBe('/equipment/device?auth=recover&from=qr')
@@ -162,4 +162,17 @@ describe('username accounts and member sign-in', () => {
     expect(container.textContent).not.toContain('private-purpose')
     expect(container.textContent).not.toContain('确认取消')
   })
+})
+
+it('uses the same 360-day preference for registration and sign-in, with only one name input', async () => {
+  const register = vi.spyOn(api, 'register').mockResolvedValue(member)
+  await act(async () => root.render(<AuthDialog session={anonymous} t={t} onClose={vi.fn()} onSignedIn={vi.fn()} />))
+  await click('注册账号')
+  expect(container.textContent).toContain('记住登录（360 天）')
+  expect(container.querySelector('input[name="name"]')).toBeNull()
+  expect(container.querySelectorAll('input[type="text"]')).toHaveLength(1)
+  enter('username', '新员工'); enter('password', '密')
+  await act(async () => container.querySelector<HTMLInputElement>('input[type="checkbox"]')!.click())
+  await submit()
+  expect(register).toHaveBeenCalledWith({ name: '新员工', password: '密', rememberMe: false })
 })

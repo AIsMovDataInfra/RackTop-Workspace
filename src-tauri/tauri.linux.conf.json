@@ -17,7 +17,7 @@
   },
   "bundle": {
     "publisher": "AIsMov",
-    "homepage": "https://github.com/AIsMovDataInfra/RackTop",
+    "homepage": "https://github.com/AIsMovDataInfra/RackTop-Workspace",
     "createUpdaterArtifacts": false,
     "targets": [
       "deb"

@@ -1,14 +1,14 @@
-name: Recover verified Mac release publication
+name: Recover verified Mac and Linux release publication
 
 on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing version tag (for example v1.27.0)
+        description: Existing version tag (for example v2.0.0)
         required: true
         type: string
       build_run_id:
-        description: Existing Build RackTop tag run with both Mac jobs successful
+        description: Existing Build RackTop tag run with Linux and both Mac jobs successful
         required: true
         type: string
 
@@ -17,12 +17,12 @@ permissions:
   actions: read
 
 concurrency:
-  group: macos-release-feed
+  group: workspace-release-feeds
   cancel-in-progress: false
 
 jobs:
   publish:
-    if: github.repository == 'AIsMovDataInfra/RackTop'
+    if: github.repository == 'AIsMovDataInfra/RackTop-Workspace'
     runs-on: ubuntu-24.04
     env:
       RELEASE_TAG: ${{ inputs.tag }}
@@ -47,7 +47,7 @@ jobs:
         with:
           ref: refs/tags/${{ inputs.tag }}
           fetch-depth: 0
-      - name: Verify original tag build and both Mac architectures
+      - name: Verify original tag build, Linux and both Mac architectures
         run: |
           python3 - <<'PY'
           import json, os, re, subprocess
@@ -76,20 +76,23 @@ jobs:
               if len(batch) < 100:
                   break
               page += 1
+          linux = [job for job in jobs if job['name'] == 'linux']
+          require(len(linux) == 1 and linux[0]['status'] == 'completed' and linux[0]['conclusion'] == 'success',
+                  'The Linux build did not succeed')
           for target, arch in [('aarch64-apple-darwin', 'arm64'), ('x86_64-apple-darwin', 'x64')]:
               pattern = rf'macos \([^,]+, {re.escape(target)}, {arch}\)'
               matches = [job for job in jobs if re.fullmatch(pattern, job['name'])]
               require(len(matches) == 1, f'Expected exactly one Mac {arch} build job')
               require(matches[0]['status'] == 'completed' and matches[0]['conclusion'] == 'success',
                       f'Mac {arch} build did not succeed')
-          print(f'Verified {repository} tag {tag} at {commit}; both Mac jobs succeeded in run {run_id}')
+          print(f'Verified {repository} tag {tag} at {commit}; Linux and both Mac jobs succeeded in run {run_id}')
           PY
       - uses: actions/download-artifact@v4
         with:
           github-token: ${{ github.token }}
           repository: ${{ github.repository }}
           run-id: ${{ inputs.build_run_id }}
-          pattern: RackTop_*_macos-*
+          pattern: RackTop_*
           path: release-assets
           merge-multiple: true
       - name: Install release signature verifier
@@ -97,9 +100,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y minisign
       - run: python3 scripts/test-publish-macos-update.py
+      - run: python3 scripts/test-publish-workspace-update.py
       - name: Publish the verified existing tag artifacts
         run: |
           # This is recovery of the verified tag, not a new push or a moved tag.
           # The original workflow_dispatch ref/SHA remains in the audit log above;
           # only the existing tag publisher receives its validated release ref.
-          GITHUB_REF="refs/tags/$RELEASE_TAG" python3 scripts/publish-macos-update.py release-assets
+          GITHUB_REF="refs/tags/$RELEASE_TAG" python3 scripts/publish-workspace-update.py release-assets

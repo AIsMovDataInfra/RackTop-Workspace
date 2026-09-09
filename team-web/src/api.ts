@@ -11,7 +11,7 @@ function expired(path: string, status: number, code?: string) {
   if (status === 401 && !(path === '/auth/change-password' && code === 'INVALID_CREDENTIALS') && !['/session', '/auth/login', '/auth/register', '/auth/demo'].includes(path)) { csrfToken = null; window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT)) }
 }
 
-async function request<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
+export async function request<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
   const response = await fetch(`/api${path}`, {
     method, credentials: 'same-origin', headers: {
       Accept: 'application/json', ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
@@ -36,12 +36,13 @@ async function sessionRequest(path: string, method = 'GET', body?: unknown) {
 
 export const api = {
   session: () => sessionRequest('/session'),
-  register: (details: { username: string; name: string; password: string; bootstrapToken?: string }) => sessionRequest('/auth/register', 'POST', details),
+  register: (details: { username?: string; name: string; password: string; bootstrapToken?: string; rememberMe?: boolean }) => sessionRequest('/auth/register', 'POST', details),
   login: (details: { username: string; password: string; rememberMe?: boolean }) => sessionRequest('/auth/login', 'POST', details),
   changePassword: (details: { oldPassword: string; newPassword: string }) => sessionRequest('/auth/change-password', 'POST', details),
+  updateProfile: (details: { version: number; avatar: string }) => sessionRequest('/auth/profile', 'POST', details),
   requestPasswordRecovery: (username: string) => request<{ ok: true }>('/auth/recovery-request', 'POST', { username }),
   members: () => request<{ members: Member[] }>('/admin/members'),
-  createMember: (details: { username: string; name: string; password: string; company: Company }) => request<{ member: Member }>('/admin/members', 'POST', details),
+  createMember: (details: { username?: string; name: string; password: string; company: Company }) => request<{ member: Member }>('/admin/members', 'POST', details),
   setMemberCompany: (member: Member, company: Company) => request<{ member: Member }>(`/admin/members/${encodeURIComponent(member.id)}`, 'PATCH', { version: member.version, company }),
   resetMemberPassword: (member: Member, newPassword: string) => request<{ member: Member }>(`/admin/members/${encodeURIComponent(member.id)}/reset-password`, 'POST', { version: member.version, newPassword }),
   deleteMember: (member: Member) => request<{ ok: true }>(`/admin/members/${encodeURIComponent(member.id)}`, 'DELETE', { version: member.version }),

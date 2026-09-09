@@ -16,9 +16,10 @@ describe('server notification settings', () => {
     expect(allowsServerNotification(partial, 'zombie')).toBe(false)
   })
 
-  it('keeps at least one category in partial mode and disables all regular categories in off mode', () => {
+  it('turns an empty partial selection off and disables all regular categories in off mode', () => {
     const empty = normalizeServerNotificationSettings({ serverId: 'server', mode: 'partial', task: false, zombie: false, memory: false, system: false })
-    expect(empty.task).toBe(true)
+    expect(empty.mode).toBe('off')
+    expect(empty.task).toBe(false)
     const off = normalizeServerNotificationSettings({ ...defaultServerNotificationSettings('server'), mode: 'off' })
     expect(['task', 'zombie', 'memory', 'system'].every((category) => !allowsServerNotification(off, category as 'task'))).toBe(true)
   })

@@ -1,13 +1,13 @@
 # Linux 客户端（实验版）
 
-此社区 fork 最初基于上游 RackTop v1.25.4，提供 Ubuntu 22.04 x86_64 的原生 Linux 桌面构建。本次 Linux 测试版为 `1.30.0-linux.12`，下载和发布状态以对应 Release 的实际附件为准。这是由 [AIsMovDataInfra/RackTop](https://github.com/AIsMovDataInfra/RackTop) 分发的社区移植版本，不是上游官方 Linux Release。原作者为 Tongzh-SEU，许可证为 GPL-3.0。
+RackTop 2.0.0 由独立仓库 [AIsMovDataInfra/RackTop-Workspace](https://github.com/AIsMovDataInfra/RackTop-Workspace) 分发，面向 Ubuntu 22.04 x86_64 / amd64 图形桌面。Linux 与 Mac 使用相同版本号，安装包名区分平台。本轮构建和公开下载仍在验收，以 [v2.0.0 Release](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/tag/v2.0.0) 的实际附件为准。项目源自上游及旧 AIsMov 维护版，保留 Tongzh-SEU 原作者署名、完整历史及 GPL-3.0。
 
 ## 安装与启动
 
-从 [Linux Release](https://github.com/AIsMovDataInfra/RackTop/releases) 下载 `.deb` 后，在其所在目录执行（将文件名替换为实际下载的文件名）：
+从 [Linux / Mac Release](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases) 下载 `.deb` 后，在其所在目录执行（将文件名替换为实际下载的文件名）：
 
 ```bash
-sudo apt install ./RackTop_1.30.0-linux.12_amd64.deb
+sudo apt install ./RackTop_2.0.0_linux-amd64.deb
 racktop
 ```
 
@@ -19,31 +19,31 @@ racktop
 - 服务器密码通过 Secret Service 存入系统钥匙串。Ubuntu GNOME 通常由 GNOME Keyring 提供此服务；其他桌面需配置兼容服务。服务不可用或钥匙串未解锁时，保存密码可能报错；可使用 SSH Agent/密钥或仅会话密码。
 - 外部 SSH 快速配置终端沿用 `x-terminal-emulator`。Ubuntu 上需安装一个提供此命令的终端程序；应用内 SSH 终端由原有 PTY 实现提供。
 - 托盘可见性取决于桌面的 AppIndicator 支持。窗口内仍可使用主要功能。
-- 从 linux.4 起支持签名 Debian 包的一键更新。点击左上角 RackTop → 检查更新 → 更新到指定版本，下载和校验后由系统请求管理员授权，完成后重新启动。原作者主页和官方仓库入口继续保留。
+- 当前新分发支持专用密钥签名的 Debian 包一键更新。点击左上角 RackTop → 检查更新 → 更新到指定版本，下载和校验后由系统请求管理员授权，完成后重新启动。原作者主页和官方仓库入口继续保留。
 - 应用数据通常位于 `${XDG_DATA_HOME:-$HOME/.local/share}/com.racktop.desktop`。卸载软件包不会自动删除用户数据。
 
 ## 一键更新与首次升级
 
-linux.1～linux.3 的旧更新模块需要先手动安装一次 linux.4 或更新版本。安装后，侧栏与“关于”中显示完整版本号。新版在启动和每 24 小时检查更新，用户也可点击左上角手动检查；有新版本时选择“更新到 v…”。系统管理员密码由系统授权窗口输入，与服务器 SSH 密码无关。
+从旧 `1.30.0-linux.12` 或其他旧维护版迁入 **2.0.0**，必须先下载新仓库 Deb 并手动安装一次。旧仓库及旧更新清单保持原状，不会自动将旧客户端引导到新仓库。新版本保留 `com.racktop.desktop` 标识与数据目录，服务器、项目、密钥引用和本机历史继续使用原资料；更换安装前可先备份应用数据。
 
-安装包只从本 fork 的 Linux Release 下载，客户端在运行安装器前验证签名以及包名称、版本和架构，并拒绝降级。更新取消、网络或安装失败时可以重试，也可打开 Release 手动下载。系统安装依赖 `pkexec`、APT 和可用的桌面授权代理；需要管理权限。安装保留原有应用数据。
+安装新分发后，启动和每 24 小时检查新仓库更新，也可点击左上角手动检查。选择“更新到 v…”后先下载、验证新仓库的专用签名、包名、版本和架构，再通过系统授权窗口安装；拒绝降级。安装取消、网络或授权失败可重试或手动下载。系统安装需要 `pkexec`、APT 和可用的桌面授权代理，系统管理员密码与服务器 SSH 密码无关。
 
-发布维护者需在 GitHub Actions Secret 中配置 `LINUX_UPDATER_PRIVATE_KEY`，与源码中的 `src-tauri/linux-updater.pub` 匹配。本仓库采用无密码保护、由 GitHub Secret 加密存储的专用发布密钥。不得把私钥放入源码、安装包或 Release 附件。自动流程先校验签名并运行下载集成测试，创建 Release 并核对 GitHub 附件摘要，最后更新独立 `updater` 分支的 `linux-amd64.json`。公钥更换会影响旧客户端的更新信任，不能随意轮换。首次发布的清单须在标签构建成功后才会存在。
+维护者在**新仓库** GitHub Actions Secret 配置 `LINUX_UPDATER_PRIVATE_KEY`，与 `src-tauri/linux-updater.pub` 匹配；Mac 使用其专用更新密钥。不要复用旧仓库私钥或修改旧 feed，也不把密钥放入 Git、安装包或附件。统一发布流程确认 Linux / Mac 全部附件可下载且摘要一致后，才同时推进新仓库 `updater` 分支的 `linux-amd64.json` 和 `macos.json`；不能在包尚未就绪时先发清单。
 
 签名工具与本地下载测试：
 
 ```bash
 # TAURI_SIGNING_PRIVATE_KEY_PATH 指向受保护的私钥文件；不要将内容写进命令或日志。
-python3 scripts/sign-linux-update.py src-tauri/target/release/bundle/deb/RackTop_1.30.0-linux.12_amd64.deb
+python3 scripts/sign-linux-update.py src-tauri/target/release/bundle/deb/RackTop_2.0.0_linux-amd64.deb
 cargo build --release --locked --features integration-probe --bin racktop-probe --manifest-path src-tauri/Cargo.toml
-python3 scripts/test-linux-update.py src-tauri/target/release/racktop-probe src-tauri/target/release/bundle/deb/RackTop_1.30.0-linux.12_amd64.deb
+python3 scripts/test-linux-update.py src-tauri/target/release/racktop-probe src-tauri/target/release/bundle/deb/RackTop_2.0.0_linux-amd64.deb
 ```
 
 ## 分享 SSH 连接与失败重试
 
-侧栏“导出 SSH Config”可预览、复制或保存全部服务器连接。桌面版保存至本机下载目录，并显示完整文件路径。接收者选择“导入 SSH Config”→“选择配置文件”，预览并选择需要的服务器后导入。仍保留读取本机 `~/.ssh/config` 的入口，重复连接自动跳过。
+侧栏 **“SSH 配置”** 统一提供导入与导出。选择“导出配置”后勾选需要分享的服务器，预览只包含所选连接；可以全选或清空，空选择不能保存或复制。桌面版保存到本机下载目录并显示完整路径。接收者从“SSH 配置”→“导入配置”→“选择配置文件”预览并导入，仍可读取本机 `~/.ssh/config`，重复连接自动跳过。
 
-共享文件只包含名称、主机、端口、用户名和 ProxyJump；不包含密码、私钥内容、本机私钥路径、标签及历史数据。密码认证的接收者需编辑导入的服务器，选择密码并自行输入目标与跳板密码。别名跳板只有在导出列表中能解析时才展开为明确地址，否则提示先补齐地址。共享文件不能替代 VPN、跳板机网络权限或目标服务器账号。
+共享文件只包含名称、主机、端口、用户名和 ProxyJump；不包含密码、私钥内容、本机私钥路径、标签及历史数据。密码认证的接收者需编辑导入的服务器，选择密码并自行输入目标与跳板密码。别名跳板从已知本机连接中解析为明确地址；未勾选跳板机不会单独导出 Host 块，但所选连接所需的 ProxyJump 地址仍会包含在配置中。无法解析时提示先补齐地址。共享文件不能替代 VPN、跳板机网络权限或目标服务器账号。
 
 连接失败后自动重试等待 30 分钟；后台历史同步也遵守这一等待时间，避免每 5 分钟绕过限制。手动刷新或重新启动应用可立即重连，成功连接后恢复正常采样频率。离线时仍保留最后一份快照供查看。
 
@@ -90,13 +90,21 @@ npm run bundle:linux -- --locked
 
 产物位于 `src-tauri/target/release/bundle/deb/`，并附 SHA-256 文件。Tauri 会自动合并 `src-tauri/tauri.linux.conf.json`。普通本地构建不需要私钥；发布流程另外为 `.deb` 签名，签名不使用上游密钥。
 
-`.github/workflows/build.yml` 同时提供 Ubuntu 22.04 构建、测试和启动烟雾检查。推送已合并到 `main` 的 `v*-linux.*` 标签时自动构建、签名并发布 Linux；手动运行默认只构建 Linux，不推进更新通道。Mac 用户使用本 fork 的双架构安装包，Windows 使用上游官方安装包。
+`.github/workflows/build.yml` 在推送与源码版本一致、已合并到新仓库 `main` 的 `vX.Y.Z` 标签后，同时构建 Linux 和 Mac 两架构，包含版本一致性、测试与原生启动检查。全部产物核验后统一发布。手动运行默认只构建 Linux，不推进更新通道。Windows 继续使用上游官方安装包。
 
-## 设备管理
+## 团队工作台与通知
 
-桌面侧栏的「设备管理」位于「密钥管理」与「日志」之间，打开 [在线设备工作台](https://136.0.110.161/equipment)。扫码登记、打印标签和字段说明见 [设备管理指南](EQUIPMENT.md)。
+桌面侧栏的 **团队工作台** 位于「密钥管理」与「日志」之间，悬停或键盘焦点即可展开设备管理、周报与绩效、算力预约、设备申请与领取；点击主按钮打开网页首页。原「团队预约」页面继续提供本机资源同步，说明与打开网页按钮放在同一组。账号公司由服务端返回并只读显示。
+
+单台服务器「配置 → 服务器通知」可选打开、部分或关闭。部分模式取消最后一类后自动关闭，每次选择立即保存；关闭后，采集中或等待系统通知授权的提醒也会再次核对开关。预约条件仍会正常更新，但该服务器不再弹出相应提醒。保存失败会回到最后成功保存的设置并提示，不把尚未保存的开关状态当作永久生效。
+
+网页使用方法见[工作台指南](WORKSPACE.md)与[设备管理](EQUIPMENT.md)。本轮没有 SSH 云同步，线上只保存团队业务资料。
 
 ## 验证范围
+
+2.0.0 当前已完成桌面 322 项、Linux Rust 160 项测试（3 项依赖外部环境的既有测试忽略）及桌面生产构建。网页 91 项及浏览器工作台流程已验证；双平台 CI、公开附件下载、签名与安装迁移仍在验收，结果待补；本轮不能沿用下面历史版本的成功记录代替验证。
+
+### 历史 1.x 验证记录
 
 `1.30.0-linux.12` 的 [标签构建与发布 34250392746](https://github.com/AIsMovDataInfra/RackTop/actions/runs/34250392746) 已完成：桌面 301、Rust 160、中继 27、文件协议 15、更新器 9 项及真实中继重连、15 秒隔离原生启动检查通过。5 个公开附件独立下载核对摘要，Deb 包与全部 389 个源码文件、Linux 更新签名通过；本机用户安装入口已更新，原有数据保留，重启后生效。账号与设备指南见 [团队账号](TEAM_ACCOUNTS.md) 与 [固定资产标签](EQUIPMENT.md)。
 

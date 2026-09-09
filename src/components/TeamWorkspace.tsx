@@ -40,8 +40,9 @@ export function TeamWorkspace({ servers, snapshots }: { servers: Server[]; snaps
   async function loadMemberData(current: TeamStatus, attempt: number, active = () => true, resetSelection = false) {
     if (attempt !== generation.current || !active()) return
     if (!isMember(current)) { clearPrivateData(); return }
-    if (current.user!.id !== accountId.current) setData(emptyData)
-    accountId.current = current.user!.id
+    const accountScope = `${current.user!.id}:${current.user!.company ?? ''}:${Boolean(current.user!.isSuperAdmin)}`
+    if (accountScope !== accountId.current) setData(emptyData)
+    accountId.current = accountScope
     setStatus(current)
     if (needsCompany(current)) { setData(emptyData); setSelected([]); setDirty(false); return }
     if (resetSelection || !dirty) setSelected(Object.keys(current.bindings))
@@ -131,7 +132,7 @@ export function TeamWorkspace({ servers, snapshots }: { servers: Server[]; snaps
     {loading && <p className="team-footnote" role="status">正在检查团队登录状态…</p>}
     {error && <div className="team-error" role="alert">{error}</div>}
     {notice && <div className="team-notice" role="status"><Check size={16}/>{notice}</div>}
-    <div className="team-account"><div><strong>{authenticated ? status.user?.name : '尚未连接团队账号'}</strong><p>{authenticated ? `${status.user?.username} · ${status.user?.isSuperAdmin ? '超级管理员' : status.user?.role === 'admin' ? '管理员' : '团队成员'}${status.user?.company ? ` · ${status.user.company}` : ''}` : '登录团队账号后查看资源与排期；管理员可以同步本机资源。首次使用请在网页注册，注册后即成为成员，由超级管理员分配公司。'}</p></div>
+    <div className="team-account"><div><strong>{authenticated ? status.user?.name : '尚未连接团队账号'}</strong><p>{authenticated ? `${status.user?.username} · ${status.user?.isSuperAdmin ? '超级管理员' : status.user?.role === 'admin' ? '管理员' : '团队成员'}` : '登录团队账号后查看资源与排期；管理员可以同步本机资源。首次使用请在网页注册，注册后即成为成员，由超级管理员分配公司。'}</p>{authenticated && <dl className="team-account-company"><div><dt>所属公司</dt><dd>{status.user?.company || (status.user?.isSuperAdmin ? '跨公司管理' : '等待分配')}</dd></div></dl>}</div>
       {authenticated ? <button className="button button--secondary" disabled={loggingOut} onClick={() => void signOut()}><LogOut size={15}/>退出账号</button> : <button ref={loginButton} className="button button--secondary" onClick={() => setLogin(true)}><LogIn size={15}/>账号登录</button>}
     </div>
     {waitingForCompany && <section className="team-panel" role="status"><div className="team-section-title"><h2>等待分配公司</h2></div><p className="team-footnote">请联系超级管理员为你分配 A公司、B公司、C公司或西浦。分配后点击“刷新”，即可查看团队资源和预约。你也可以打开网页或退出账号。</p></section>}

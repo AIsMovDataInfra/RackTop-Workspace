@@ -4,6 +4,17 @@ import { isNewerVersion, releaseUrl, shouldShowUpdateBadge } from './updateCheck
 afterEach(() => vi.unstubAllGlobals())
 
 describe('update checks', () => {
+  it.each(['Macintosh; Intel Mac OS X 10_15_7', 'X11; Linux x86_64', 'Windows NT 10.0; Win64; x64'])('opens the independent Workspace 2.x release on %s', (agent) => {
+    vi.stubGlobal('window', { __TAURI_INTERNALS__: {} })
+    vi.stubGlobal('navigator', { userAgent: `Mozilla/5.0 (${agent})` })
+    expect(releaseUrl('v2.0.0')).toBe('https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/tag/v2.0.0')
+  })
+
+  it('recognizes the migration from the final 1.x Linux version', () => {
+    expect(isNewerVersion('2.0.0', '1.30.0-linux.12')).toBe(true)
+    expect(isNewerVersion('1.30.0-linux.12', '2.0.0')).toBe(false)
+  })
+
   it('opens community release notes for Linux versions and upstream notes for official versions', () => {
     expect(releaseUrl('1.26.0-linux.2')).toBe('https://github.com/AIsMovDataInfra/RackTop/releases/tag/v1.26.0-linux.2')
     expect(releaseUrl('v1.26.0-linux.2')).toBe('https://github.com/AIsMovDataInfra/RackTop/releases/tag/v1.26.0-linux.2')

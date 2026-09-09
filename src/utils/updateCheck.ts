@@ -10,7 +10,10 @@ export function releaseUrl(version: string) {
   const tag = version.replace(/^v/i, '')
   const isDesktop = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
   const platform = detectAppPlatform(isDesktop, typeof navigator === 'undefined' ? '' : navigator.userAgent)
-  const repository = tag.includes('-linux.') || platform === 'macos' ? 'AIsMovDataInfra/RackTop' : 'Tongzh-SEU/RackTop'
+  const workspaceRelease = /^(0|[1-9]\d*)\./.exec(tag)
+  const repository = workspaceRelease && Number(workspaceRelease[1]) >= 2
+    ? 'AIsMovDataInfra/RackTop-Workspace'
+    : tag.includes('-linux.') || platform === 'macos' ? 'AIsMovDataInfra/RackTop' : 'Tongzh-SEU/RackTop'
   return `https://github.com/${repository}/releases/tag/v${tag}`
 }
 

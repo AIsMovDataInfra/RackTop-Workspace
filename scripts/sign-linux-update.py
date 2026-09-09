@@ -2,6 +2,7 @@
 """Sign an existing Debian package and prepare the Linux-only updater manifest."""
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -9,8 +10,8 @@ import sys
 package = Path(sys.argv[1]).resolve()
 repository = Path(__file__).resolve().parents[1]
 version = json.loads((repository / 'package.json').read_text())['version']
-expected = f'RackTop_{version}_amd64.deb'
-if package.name != expected or '-linux.' not in version:
+expected = f'RackTop_{version}_linux-amd64.deb'
+if package.name != expected or not re.fullmatch(r'(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)', version):
     raise SystemExit('Package filename/version does not match this Linux source tree')
 if not os.environ.get('TAURI_SIGNING_PRIVATE_KEY') and not os.environ.get('TAURI_SIGNING_PRIVATE_KEY_PATH'):
     raise SystemExit('Set the protected Linux updater signing key before signing')
@@ -23,6 +24,6 @@ if result.returncode:
 signature = Path(str(package) + '.sig').read_text().strip()
 manifest = {'version': version, 'notes': 'Linux 客户端更新', 'platforms': {
     'linux-x86_64-deb': {'signature': signature,
-                       'url': f'https://github.com/AIsMovDataInfra/RackTop/releases/download/v{version}/{package.name}'}}}
+                       'url': f'https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v{version}/{package.name}'}}}
 (package.parent / 'linux-amd64.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + '\n')
 print(f'Signed {package.name}; prepared linux-amd64.json')

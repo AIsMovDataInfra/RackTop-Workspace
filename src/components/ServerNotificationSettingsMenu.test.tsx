@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act } from 'react'
+import { act, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ServerNotificationSettingsMenu } from '../App'
@@ -54,4 +54,29 @@ describe('ServerNotificationSettingsMenu', () => {
     expect(container.querySelector('[role="menu"]')).not.toBeNull()
     expect(container.querySelectorAll('[role="menuitemcheckbox"][aria-checked="true"]')).toHaveLength(2)
   })
+  it('saves every category immediately and allows the final category to switch all notifications off', async () => {
+    const saved = vi.fn()
+    function Controlled() {
+      const [settings, setSettings] = useState(defaultServerNotificationSettings('server'))
+      return <ServerNotificationSettingsMenu settings={settings} onChange={next => { saved(next); setSettings(next) }}/>
+    }
+    const container = document.createElement('div'); document.body.append(container); root = createRoot(container)
+    await act(async () => root?.render(<Controlled/>))
+    await act(async () => container.querySelector<HTMLButtonElement>('.notification-menu__trigger')!.click())
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>('[role=menuitemradio]')].find(button => button.textContent === '部分')!.click())
+    for (const category of ['我的任务结束','他人的僵尸或卡住进程','我的显存异常释放','设备与连接告警']) {
+      const button=[...container.querySelectorAll<HTMLButtonElement>('[role=menuitemcheckbox]')].find(button=>button.textContent===category)!
+      expect(button.disabled).toBe(false)
+      await act(async () => button.click())
+    }
+    expect(saved).toHaveBeenCalledTimes(4)
+    expect(saved).toHaveBeenLastCalledWith({serverId:'server',mode:'off',task:false,zombie:false,memory:false,system:false})
+    expect(container.querySelector('[role=menu]')).toBeNull()
+    expect(container.textContent).toContain('此服务器的系统通知已关闭')
+    await act(async () => container.querySelector<HTMLButtonElement>('.notification-menu__trigger')!.click())
+    await act(async () => document.dispatchEvent(new Event('pointerdown', {bubbles:true})))
+    expect(saved).toHaveBeenCalledTimes(4)
+    expect(container.querySelector('.notification-menu__trigger')?.textContent).toBe('关闭')
+  })
+
 })

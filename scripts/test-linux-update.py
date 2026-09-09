@@ -13,7 +13,8 @@ probe, package = map(lambda value: Path(value).resolve(), sys.argv[1:3])
 original_bytes = package.read_bytes()
 original_manifest = json.loads((package.parent / 'linux-amd64.json').read_text())
 version = original_manifest['version']
-previous_version = version.rsplit('.', 1)[0] + '.' + str(int(version.rsplit('.', 1)[1]) - 1)
+# The first Workspace installer must upgrade an existing 1.x Linux installation.
+previous_version = '1.30.0-linux.12'
 state = {'manifest': original_manifest, 'bytes': original_bytes, 'status': 200}
 
 
