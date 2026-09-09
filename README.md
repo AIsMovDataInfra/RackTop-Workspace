@@ -2,7 +2,7 @@
 
 本项目由 **AIsMov** 维护，当前代码与 Linux / macOS 分发位于独立公开仓库 [AIsMovDataInfra/RackTop-Workspace](https://github.com/AIsMovDataInfra/RackTop-Workspace)。桌面应用继续叫 **RackTop**，在线网页为 **AIsMov RackTop 团队工作台**。项目源自 [Tongzh-SEU/RackTop](https://github.com/Tongzh-SEU/RackTop) 及 [原 AIsMov 维护仓库](https://github.com/AIsMovDataInfra/RackTop)，保留原作者 **Tongzh-SEU**、完整 Git 历史、[GPL-3.0](LICENSE) 和[来源说明](NOTICE.md)。
 
-本轮开发版本为 **2.1.0**，继续提供Linux amd64及Mac Apple Silicon、Intel两种安装包。新增24种彩色头像、完整公司筛选、超管周报统计和明确的周一至周日报告窗口；网页以 **RackTop** 为主字、**AIsMov · 团队工作台** 为辅助字。本地自动化与两套生产构建已通过，浏览器剩余流程、部署和发布验收继续进行，见[2.1.0验证记录](docs/VERIFICATION_2_1.md)。上一版[2.0.0 Release](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/tag/v2.0.0)仍可下载，其[历史验证记录](docs/VERIFICATION.md)保留。
+当前发布版本为 **2.1.0 测试版**，继续提供Linux amd64及Mac Apple Silicon、Intel两种安装包。新增24种彩色头像、完整公司筛选、超管周报统计和明确的周一至周日报告窗口；网页以 **RackTop** 为主字、**AIsMov · 团队工作台** 为辅助字。本地自动化、两套生产构建与浏览器检查已通过，在线工作台已于2026-09-09升级；Linux与两种Mac安装包、全部更新签名已通过核验，本机Linux用户目录已安装2.1.0并保留原资料，见[2.1.0验证记录](docs/VERIFICATION_2_1.md)。上一版[2.0.0 Release](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/tag/v2.0.0)仍可下载，其[历史验证记录](docs/VERIFICATION.md)保留。
 
 <div align="right">
   🌐 Language:
@@ -44,9 +44,9 @@ RackTop 是面向个人研究者和小型团队的 GPU 服务器桌面工作台�
 
 ## 下载
 
-**2.1.0目标安装包，待发布验收。** 以下链接在发布完成前可能不可下载；Mac继续提供两种架构。
+**2.1.0 测试版已发布并完成公开下载核验。** Mac继续提供两种架构；这是Pre-release，未标记为Latest。完整附件与SHA256见[本轮校验表](docs/VERIFICATION_2_1.md#公开附件与更新签名)。
 
-| 平台 | 目标安装包 |
+| 平台 | 安装包 |
 | --- | --- |
 | Linux amd64 | [RackTop_2.1.0_linux-amd64.deb](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.1.0/RackTop_2.1.0_linux-amd64.deb) |
 | Mac Apple Silicon | [RackTop_2.1.0_macos-arm64-unsigned.dmg](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.1.0/RackTop_2.1.0_macos-arm64-unsigned.dmg) |
@@ -68,7 +68,7 @@ RackTop 是面向个人研究者和小型团队的 GPU 服务器桌面工作台�
 从旧 `1.30.0-linux.12` 或其他旧维护版迁入，下载并手动安装一次新仓库包。新分发使用专用签名密钥和新更新地址，旧更新通道不会自动迁移；应用标识与本机数据目录保持兼容。Mac 用户先退出应用，再用新 DMG 替换安装。
 
 ```bash
-sudo apt install ./RackTop_2.0.0_linux-amd64.deb
+sudo apt install ./RackTop_2.1.0_linux-amd64.deb
 racktop
 ```
 
@@ -76,7 +76,7 @@ racktop
 
 ## 在线团队工作台
 
-以下包含2.1.0功能说明；线上升级状态以[本轮验证记录](docs/VERIFICATION_2_1.md)为准。
+在线工作台已于2026-09-09 12:01:40（UTC+8）升级至2.1.0。旧业务数据及会话保持，公网与生产只读浏览器检查通过，见[本轮验证记录](docs/VERIFICATION_2_1.md#生产升级与公网检查)。
 
 打开 [AIsMov RackTop](https://136.0.110.161)，用一个成员名称和密码注册，不需要邮箱。超级管理员分配公司后即可使用本公司的设备台账和算力预约；2.1.0设置中可选择24种彩色头像，原7种保持兼容，网页“记住登录”为 360 天，桌面设备登录仍为 30 天。
 
