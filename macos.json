@@ -1,15 +1,15 @@
 {
-  "version": "2.1.0",
-  "notes": "- 网页突出RackTop主品牌，辅助显示“AIsMov · 团队工作台”，登录和各工作页统一。\n- 新增24种彩色内置头像，原7种继续兼容，保存后在账号各会话显示。\n- 设备筛选固定显示四家公司及数量，零设备公司也可选；目录标明归属，普通成员仍仅看自己公司。\n- 超管可按周、公司、成员查看周报统计，汇总提交状态、任务完成度与已有人工评分，不把缺报或未评分记零。\n- 周报任选日期自动归入北京时间周一至周日，本周工作和下周计划都显示明确日期范围。",
-  "pub_date": "2026-09-09T04:17:47Z",
+  "version": "2.1.1",
+  "notes": "- 超级管理员无需提交自己的周报，也不能作为周报作者；仍可代已分配公司的普通成员填写周报。\n- 周报统计排除超级管理员名册及历史超级管理员周报，只统计普通成员。\n- 超级管理员固定为跨公司管理身份，无需分配公司；旧数据库中的公司值保留，但身份和权限判断会忽略。\n- 超级管理员不提交个人设备申请，继续查看和审批成员申请。",
+  "pub_date": "2026-09-09T07:01:31Z",
   "platforms": {
     "darwin-aarch64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTVThDMjZnT3Yrc3R2WWFIbGYvT0JQOEk5a2YyQnNZTHVwMkpMdzJiTGdxeXIySUczU1pOekNuemVjWm9CNXlQWVcyMTNSOFpIQTFHcnFvRVRJdVl0dHd2Qnk4WFpSUVE0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4OTI2ODY2CWZpbGU6UmFja1RvcF8yLjEuMF9tYWNvcy1hcm02NC11bnNpZ25lZC5hcHAudGFyLmd6ClY1UkJwNGFRUXhlZzNVTVF5QWV3L2ZzNVZLY08xZEtlSS85c01rWnRkNzdTRDRRcWUxellvd01rd210WXJFdWdsY1R2OVcwM2E5RzVMUU13MHZhRkRBPT0K",
-      "url": "https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.1.0/RackTop_2.1.0_macos-arm64-unsigned.app.tar.gz"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTVThDMjZnT3Yrc21wVWMrR2swWWJmL0w3ZFZQZkNpSmMwUStKaWJ1eGFRNzJ2OFYxTlZPajFwN2s2akY5c1U0Y242NDZLcDBXUEZvRlBVQnVwZDhxTk1UbUd5S3pLZVFRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4OTM2NjkzCWZpbGU6UmFja1RvcF8yLjEuMV9tYWNvcy1hcm02NC11bnNpZ25lZC5hcHAudGFyLmd6CkU5eG1Gbk9DOG9RaWljamVWL3hkVXF4L1JIcjhpVFZQRldqYjkzT241bWxSTWFLQ3E3RU9YMitIUTJJTDRqaXFpZEhTcGxCcXZ5Y3JObHQwenErRURBPT0K",
+      "url": "https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.1.1/RackTop_2.1.1_macos-arm64-unsigned.app.tar.gz"
     },
     "darwin-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTVThDMjZnT3Yrc2hodGxLSVM2RjZzOXlaNUtlSFJDQzlhOUtMMzZTdmVPS2JaOGdmYjB3TU9ZN2ZrRWhGenBMMWVvM0x0WnpZZEdRMXB4Tms3MVAybHVaV2YveGdudWc4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4OTI3Mzg3CWZpbGU6UmFja1RvcF8yLjEuMF9tYWNvcy14NjQtdW5zaWduZWQuYXBwLnRhci5negplaUxrZS9kRm5mR25JMFkxbnBrQVRKUlREN3g2M1JuZlZZeENITjR1eHhvSnVqUlcwUGZKKytBUFBOaXlTT0V5V2FCYUZZWXovYlhtZHdFTTJBSUFCUT09Cg==",
-      "url": "https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.1.0/RackTop_2.1.0_macos-x64-unsigned.app.tar.gz"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTVThDMjZnT3Yrc3FqVHNzZkUxSDdkK2puTTZjY3RjbWgvdVJBMHFnOUNkblgvZTdKNGhGYllLRjdwWE1VeEdTVEJjVnUyZG5EQk9uTDZqRVRWalV4TFF3N3BNMUxpQXdrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4OTM3MTc1CWZpbGU6UmFja1RvcF8yLjEuMV9tYWNvcy14NjQtdW5zaWduZWQuYXBwLnRhci5nego2aU1ZclUvLzdZVGVnVXJqdW1TY29BSDgvS0Y1eEdhTUF6aXNyeHh0aE90TDZaY0p2MW1tcERWOXo3dnRrVmNtNmNZVXhja1ljZk9HNk5McS9iTDJEdz09Cg==",
+      "url": "https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.1.1/RackTop_2.1.1_macos-x64-unsigned.app.tar.gz"
     }
   }
 }

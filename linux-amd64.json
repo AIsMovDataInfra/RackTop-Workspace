@@ -1,11 +1,11 @@
 {
-  "version": "2.1.0",
-  "notes": "- 网页突出RackTop主品牌，辅助显示“AIsMov · 团队工作台”，登录和各工作页统一。\n- 新增24种彩色内置头像，原7种继续兼容，保存后在账号各会话显示。\n- 设备筛选固定显示四家公司及数量，零设备公司也可选；目录标明归属，普通成员仍仅看自己公司。\n- 超管可按周、公司、成员查看周报统计，汇总提交状态、任务完成度与已有人工评分，不把缺报或未评分记零。\n- 周报任选日期自动归入北京时间周一至周日，本周工作和下周计划都显示明确日期范围。",
-  "pub_date": "2026-09-09T04:17:47Z",
+  "version": "2.1.1",
+  "notes": "- 超级管理员无需提交自己的周报，也不能作为周报作者；仍可代已分配公司的普通成员填写周报。\n- 周报统计排除超级管理员名册及历史超级管理员周报，只统计普通成员。\n- 超级管理员固定为跨公司管理身份，无需分配公司；旧数据库中的公司值保留，但身份和权限判断会忽略。\n- 超级管理员不提交个人设备申请，继续查看和审批成员申请。",
+  "pub_date": "2026-09-09T07:01:31Z",
   "platforms": {
     "linux-x86_64-deb": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTVThDMjZnT3Yrc3ZkMnNQc3FES3BTQUo2bzZBWkhUYk1Famk4d2RGNjVJbmJFQURlSGNINmdpYmhQWXBEcHp3VFRkVlM5UDZBWXFBZHBJTVBDMFJ6NXVyM0p4Z1NQVnc0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4OTI2ODQ4CWZpbGU6UmFja1RvcF8yLjEuMF9saW51eC1hbWQ2NC5kZWIKM050MmN6Z1hPeFgyeVJYUHYwM25nQUJlNEkyVVhzWTlveUVsZEJ1WDJPd2I3Y0tsUVlTZE9ncDNLNDdaSmJCVXBlV3c0VHVOdyt3TFNadW5Hc2QzQlE9PQo=",
-      "url": "https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.1.0/RackTop_2.1.0_linux-amd64.deb"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTVThDMjZnT3Yrc2hPYjFSSnZ4eDNERWlPU2F2SGl1MDZwRzJOanhWMENSQkJIOHpQMFlFUVFPUE1xdnFLamNWT2thR241Z2JISWpRNjNRYUlqRmlhVWp4L2JmRHVnZUFRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4OTM2NzIwCWZpbGU6UmFja1RvcF8yLjEuMV9saW51eC1hbWQ2NC5kZWIKOVJETEJkdlY5cDUzU0FqMDJteXQ5U0gyTnpYMnpCS0gyeVJ4NHdsUU04RW1jeXU5VVlYYitpZERGcWN3OFFNVHk0a3ZZMHNjdmxSS3dVNDkyK1NtQlE9PQo=",
+      "url": "https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.1.1/RackTop_2.1.1_linux-amd64.deb"
     }
   }
 }
