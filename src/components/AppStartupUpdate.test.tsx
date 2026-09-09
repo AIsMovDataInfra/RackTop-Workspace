@@ -117,10 +117,10 @@ describe('App startup update check', () => {
     else expect(open).toHaveBeenLastCalledWith('https://xhslink.cn/o/AsgFqJMZfR5', '_blank', 'noopener,noreferrer')
   })
 
-  it('identifies the current maintainer separately from the original author and opens fork help links', async () => {
+  it('identifies the current maintainer separately from the original author and opens independent workspace help links', async () => {
     vi.spyOn(api, 'getLatestRelease').mockResolvedValue({
       version: packageInfo.version,
-      url: `https://github.com/AIsMovDataInfra/RackTop/releases/tag/v${packageInfo.version}`,
+      url: `https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/tag/v${packageInfo.version}`,
     })
     const open = vi.spyOn(window, 'open').mockReturnValue(null)
     const container = document.createElement('div')
@@ -143,9 +143,9 @@ describe('App startup update check', () => {
 
     for (const [label, url] of [
       ['GitHub @AIsMovDataInfra', 'https://github.com/AIsMovDataInfra'],
-      ['GitHub 仓库', 'https://github.com/AIsMovDataInfra/RackTop'],
-      ['使用说明', 'https://github.com/AIsMovDataInfra/RackTop/blob/main/README.md'],
-      ['问题反馈', 'https://github.com/AIsMovDataInfra/RackTop/issues'],
+      ['GitHub 仓库', 'https://github.com/AIsMovDataInfra/RackTop-Workspace'],
+      ['使用说明', 'https://github.com/AIsMovDataInfra/RackTop-Workspace/blob/main/README.md'],
+      ['问题反馈', 'https://github.com/AIsMovDataInfra/RackTop-Workspace/issues'],
       ['上游项目', 'https://github.com/Tongzh-SEU/RackTop'],
     ]) {
       const link = [...about.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.includes(label))
