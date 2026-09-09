@@ -63,8 +63,10 @@ it('preserves decision notes after a concurrent update and requires explicitly l
   await click('载入最新记录（替换说明）'); expect(container.querySelector<HTMLTextAreaElement>('[name="decisionComment"]')!.value).toBe('其他管理员已经处理'); expect(container.textContent).toContain('登记已领取')
 })
 
-it('allows a super administrator without a company to review while offering no request form', async () => {
-  await mount({ ...admin, company: null }); expect(workspaceApi.requests).toHaveBeenCalledTimes(1); expect(container.querySelector('.work-request-form')).toBeNull(); await click('查看申请'); expect(container.textContent).toContain(request.purpose)
+it.each([null, 'A公司'] as const)('keeps a super administrator with company %s in the review role without a personal request form', async (company) => {
+  await mount({ ...admin, company }); expect(workspaceApi.requests).toHaveBeenCalledTimes(1); expect(container.querySelector('.work-request-form')).toBeNull()
+  expect(container.textContent).toContain('超级管理员无需提交自己的设备申请')
+  await click('查看申请'); expect(container.textContent).toContain(request.purpose)
 })
 
 it('erases admin records on permission failure and ignores delayed responses after loss of super administrator access', async () => {

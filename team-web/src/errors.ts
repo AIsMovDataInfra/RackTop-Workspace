@@ -12,6 +12,7 @@ export function errorText(error: unknown, t: Translate) {
       INVALID_COMPANY: ['请选择 A公司、B公司、C公司或西浦。', 'Choose A公司, B公司, C公司 or 西浦.'],
       COMPANY_REQUIRED: ['请等待超级管理员分配公司后再使用。', 'Wait for the super administrator to assign your company.'],
       SUPERADMIN_REQUIRED: ['只有超级管理员可以管理成员账号。', 'Only the super administrator can manage member accounts.'],
+      SUPERADMIN_COMPANY_NOT_REQUIRED: ['超级管理员跨公司管理，无需分配公司。', 'Super administrators manage all companies and do not need a company assignment.'],
       VERSION_CONFLICT: ['记录已被更新，请读取最新资料并核对后重试。', 'This record changed. Load the latest details, review and retry.'],
       BOOTSTRAP_REJECTED: ['管理员设置链接无效或已经使用，请联系部署管理员。', 'This administrator setup link is invalid or already used. Contact your deployment administrator.'],
       BOOTSTRAP_REQUIRED: ['此用户名预留给管理员，请使用管理员设置链接注册。', 'This username is reserved for the administrator. Register using the administrator setup link.'],

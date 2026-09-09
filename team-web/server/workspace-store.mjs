@@ -137,8 +137,9 @@ export function createWorkspaceStore({ dbPath = ':memory:', now = Date.now, reso
     if (!['draft', 'submitted'].includes(status)) invalid('周报状态无效');
     const data = content(input, status === 'submitted'), { weekStart } = week(input.weekStart);
     return transaction(() => {
-      const user = actor(claim), author = target(input.authorId ?? user.id);
+      const user = actor(claim), author = target(input.authorId ?? user.id, true);
       if (!user.isSuperAdmin && author.id !== user.id) fail(403, 'FORBIDDEN', '只能为自己创建周报');
+      if (author.isSuperAdmin) fail(403, 'SUPERADMIN_REPORT_NOT_REQUIRED', '超级管理员无需填写周报，请选择普通成员');
       if (db.prepare('SELECT 1 FROM weekly_reports WHERE author_id=? AND week_start=?').get(author.id, weekStart)) fail(409, 'REPORT_EXISTS', '该成员本周已有周报，请打开已有记录');
       const id = randomUUID(), at = now();
       db.prepare(`INSERT INTO weekly_reports(id,author_id,author_name,company,week_start,todos,next_plan,status,submitted_at,version,created_at,updated_at)
@@ -155,9 +156,10 @@ export function createWorkspaceStore({ dbPath = ':memory:', now = Date.now, reso
       if (own(query, 'company') && query.company !== 'unassigned' && !companies.has(query.company)) invalid('公司筛选无效');
       const memberId = own(query, 'memberId') ? identifier(query.memberId) : null;
       // Read only profile columns, on this same connection and snapshot as the reports.
-      const members = db.prepare('SELECT id,name,company FROM account_users WHERE deleted_at IS NULL AND created_at<?').all(endExclusive);
-      const reports = db.prepare(`SELECT id,author_id,author_name,company,todos,status,score,reviewer_name
-        FROM weekly_reports WHERE week_start=?`).all(weekStart);
+      const members = db.prepare('SELECT id,name,company FROM account_users WHERE is_super_admin=0 AND deleted_at IS NULL AND created_at<?').all(endExclusive);
+      const reports = db.prepare(`SELECT r.id,r.author_id,r.author_name,r.company,r.todos,r.status,r.score,r.reviewer_name
+        FROM weekly_reports r WHERE r.week_start=? AND NOT EXISTS (
+          SELECT 1 FROM account_users a WHERE a.id=r.author_id AND a.is_super_admin=1)`).all(weekStart);
       const rows = new Map(members.map(member => [member.id, { authorId: member.id, name: member.name, company: member.company,
         weekStart, weekEnd, status: 'missing', reportId: null, todoCount: 0, completedCount: 0, unfinishedCount: 0,
         averageCompletion: null, score: null, reviewerName: null }]));
@@ -248,6 +250,7 @@ export function createWorkspaceStore({ dbPath = ':memory:', now = Date.now, reso
     if (equipmentId && input.quantity !== 1) invalid('关联单台已有设备时数量须为 1');
     return transaction(() => {
       const user = actor(claim);
+      if (user.isSuperAdmin) fail(403, 'SUPERADMIN_REQUEST_NOT_REQUIRED', '超级管理员无需提交设备申请');
       if (!companies.has(user.company)) fail(403, 'COMPANY_REQUIRED', '提交申请前请先给自己分配公司');
       let equipment = null;
       if (equipmentId) {

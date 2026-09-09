@@ -6,6 +6,8 @@ export function workspaceErrorText(error: unknown, t: Translate) {
   if (!(error instanceof ApiError)) return errorText(error, t)
   const messages: Record<string, [string, string]> = {
     SUPERADMIN_REQUIRED: ['此操作仅限超级管理员。', 'Only the super administrator can perform this action.'],
+    SUPERADMIN_REPORT_NOT_REQUIRED: ['超级管理员无需写周报，请选择普通成员作为作者。', 'Super administrators do not need weekly reports. Choose a regular member as the author.'],
+    SUPERADMIN_REQUEST_NOT_REQUIRED: ['超级管理员无需提交设备申请，可直接处理成员申请。', 'Super administrators do not submit device requests. Review member requests directly.'],
     REPORT_EXISTS: ['该成员本周已有周报，请打开已有记录。', 'This member already has a report for this week. Open the existing report.'],
     REPORT_LOCKED: ['周报已提交，正文不可再修改。请重新打开查看最新内容。', 'The report was submitted and its contents are locked. Reopen it to see the latest contents.'],
     REPORT_NOT_SUBMITTED: ['请等待作者提交周报后再评分。', 'Wait for the author to submit the report before reviewing it.'],

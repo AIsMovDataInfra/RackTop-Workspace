@@ -33,3 +33,9 @@ it('only edits user-controlled metadata for a synchronized resource', async () =
   await act(async () => container.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })))
   expect(update).toHaveBeenCalledWith(resource.id, { name: resource.name, cluster: resource.cluster, notes: resource.notes })
 })
+it('does not reuse a super administrator historical company for a new resource', async () => {
+  const user = { id: 'super', name: '超级管理员', role: 'admin' as const, isSuperAdmin: true, company: '西浦' as const }
+  await act(async () => root.render(<ResourceDialog user={user} t={t} onClose={vi.fn()} onSaved={vi.fn()} />))
+  expect(container.querySelector<HTMLSelectElement>('select')!.value).toBe('')
+  expect([...container.querySelectorAll<HTMLOptionElement>('select option')].map(option => option.value)).toEqual(['', 'A公司', 'B公司', 'C公司', '西浦'])
+})

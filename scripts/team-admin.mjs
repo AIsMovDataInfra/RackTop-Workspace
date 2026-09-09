@@ -7,11 +7,11 @@ import { createAccountAuth } from '../team-web/server/account-auth.mjs';
 async function main() {
   const { values, positionals } = parseArgs({ allowPositionals: true, options: {
     db: { type: 'string' }, 'public-url': { type: 'string' }, username: { type: 'string', default: 'admin' },
-    name: { type: 'string', default: '超级管理员' }, company: { type: 'string' },
+    name: { type: 'string', default: '超级管理员' },
   } });
   const mode = positionals[0];
   if (positionals.length !== 1 || !['create', 'reset'].includes(mode) || !values.db || !values['public-url']) {
-    throw new Error('用法：node scripts/team-admin.mjs create|reset --db /path/team.sqlite --public-url https://team.example.com [--username admin] [--name 超级管理员] [--company 西浦]；密码仅从标准输入读取。');
+    throw new Error('用法：node scripts/team-admin.mjs create|reset --db /path/team.sqlite --public-url https://team.example.com [--username admin] [--name 超级管理员]；密码仅从标准输入读取。');
   }
   if (process.stdin.isTTY) throw new Error('请通过隐藏输入或受保护管道提供密码；不要将密码放进命令行参数。');
   const chunks = [];
@@ -26,8 +26,7 @@ async function main() {
   if (!supplied.trim()) throw new Error('密码不能为空。');
   const auth = createAccountAuth({ dbPath: resolve(values.db), publicUrl: values['public-url'], host: '127.0.0.1', nodeEnv: 'production' });
   try {
-    const result = await auth.provisionSuperAdmin({ mode, username: values.username, name: values.name,
-      password: supplied, ...(values.company === undefined ? {} : { company: values.company }) });
+    const result = await auth.provisionSuperAdmin({ mode, username: values.username, name: values.name, password: supplied });
     process.stdout.write(`${JSON.stringify(result)}\n`);
   } finally { auth.close(); }
 }

@@ -1,6 +1,6 @@
 # Linux 客户端（实验版）
 
-RackTop 2.1.0 由独立仓库 [AIsMovDataInfra/RackTop-Workspace](https://github.com/AIsMovDataInfra/RackTop-Workspace) 分发，面向 Ubuntu 22.04 x86_64 / amd64 图形桌面。Linux 与 Mac 使用相同版本号，安装包名区分平台。[v2.1.0 测试版Release](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/tag/v2.1.0) 已发布，Deb的公开下载、摘要、签名、版本与amd64架构均已核验。项目源自上游及旧 AIsMov 维护版，保留 Tongzh-SEU 原作者署名、完整历史及 GPL-3.0。
+RackTop 2.1.1 测试候选版由独立仓库 [AIsMovDataInfra/RackTop-Workspace](https://github.com/AIsMovDataInfra/RackTop-Workspace) 维护，面向 Ubuntu 22.04 x86_64 / amd64 图形桌面。Linux 与 Mac 使用相同版本号，安装包名区分平台。2.1.1公开发布与本机安装仍待完成；当前可下载的是已核验公开下载、摘要、签名、版本与amd64架构的上一版 [v2.1.0测试版Release](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/tag/v2.1.0)。项目源自上游及旧 AIsMov 维护版，保留 Tongzh-SEU 原作者署名、完整历史及 GPL-3.0。
 
 ## 安装与启动
 
@@ -24,7 +24,7 @@ racktop
 
 ## 一键更新与首次升级
 
-从旧 `1.30.0-linux.12` 或其他旧维护版迁入 **2.1.0**，必须先下载新仓库 Deb 并手动安装一次。旧仓库及旧更新清单保持原状，不会自动将旧客户端引导到新仓库。新版本保留 `com.racktop.desktop` 标识与数据目录，服务器、项目、密钥引用和本机历史继续使用原资料；更换安装前可先备份应用数据。
+从旧 `1.30.0-linux.12` 或其他旧维护版迁入当前新仓库分发，必须先下载新仓库 Deb 并手动安装一次。当前可安装的上一版是 **2.1.0**；2.1.1安装包尚未公开。旧仓库及旧更新清单保持原状，不会自动将旧客户端引导到新仓库。新版本保留 `com.racktop.desktop` 标识与数据目录，服务器、项目、密钥引用和本机历史继续使用原资料；更换安装前可先备份应用数据。
 
 安装新分发后，启动和每 24 小时检查新仓库更新，也可点击左上角手动检查。选择“更新到 v…”后先下载、验证新仓库的专用签名、包名、版本和架构，再通过系统授权窗口安装；拒绝降级。安装取消、网络或授权失败可重试或手动下载。系统安装需要 `pkexec`、APT 和可用的桌面授权代理，系统管理员密码与服务器 SSH 密码无关。
 
@@ -34,9 +34,9 @@ racktop
 
 ```bash
 # TAURI_SIGNING_PRIVATE_KEY_PATH 指向受保护的私钥文件；不要将内容写进命令或日志。
-python3 scripts/sign-linux-update.py src-tauri/target/release/bundle/deb/RackTop_2.1.0_linux-amd64.deb
+python3 scripts/sign-linux-update.py src-tauri/target/release/bundle/deb/RackTop_2.1.1_linux-amd64.deb
 cargo build --release --locked --features integration-probe --bin racktop-probe --manifest-path src-tauri/Cargo.toml
-python3 scripts/test-linux-update.py src-tauri/target/release/racktop-probe src-tauri/target/release/bundle/deb/RackTop_2.1.0_linux-amd64.deb
+python3 scripts/test-linux-update.py src-tauri/target/release/racktop-probe src-tauri/target/release/bundle/deb/RackTop_2.1.1_linux-amd64.deb
 ```
 
 ## 分享 SSH 连接与失败重试
@@ -94,13 +94,17 @@ npm run bundle:linux -- --locked
 
 ## 团队工作台与通知
 
-桌面侧栏的 **团队工作台** 位于「密钥管理」与「日志」之间，悬停或键盘焦点即可展开设备管理、周报与绩效、算力预约、设备申请与领取；点击主按钮打开网页首页。原「团队预约」页面继续提供本机资源同步，说明与打开网页按钮放在同一组。账号公司由服务端返回并只读显示。
+桌面侧栏的 **团队工作台** 位于「密钥管理」与「日志」之间，悬停或键盘焦点即可展开设备管理、周报与绩效、算力预约、设备申请与领取；点击主按钮打开网页首页。原「团队预约」页面继续提供本机资源同步，说明与打开网页按钮放在同一组。普通成员的账号公司由服务端返回并只读显示；超级管理员显示跨公司管理，不分配公司。
 
 单台服务器「配置 → 服务器通知」可选打开、部分或关闭。部分模式取消最后一类后自动关闭，每次选择立即保存；关闭后，采集中或等待系统通知授权的提醒也会再次核对开关。预约条件仍会正常更新，但该服务器不再弹出相应提醒。保存失败会回到最后成功保存的设置并提示，不把尚未保存的开关状态当作永久生效。
 
 网页使用方法见[工作台指南](WORKSPACE.md)与[设备管理](EQUIPMENT.md)。本轮没有 SSH 云同步，线上只保存团队业务资料。
 
 ## 验证范围
+
+2.1.1候选代码的桌面322项、团队网页119项、团队后端140项和两套生产构建通过；Linux Rust 160项通过，3项既有外部环境测试忽略。公开三平台CI、Deb附件与更新签名、在线部署和本机安装仍待完成。
+
+### 上一版 2.1.0 验证记录
 
 2.1.0的[标签工作流](https://github.com/AIsMovDataInfra/RackTop-Workspace/actions/runs/34309165167)三平台构建与发布成功。Linux通过桌面322项、Rust160项、中继27项、签名下载器9项、真实中继重连及至少15秒隔离原生启动。公开Deb的版本/amd64架构、7份包内MD5、许可证与来源说明均核验通过；9个公开附件和三个更新签名通过，完整文件名及SHA256见[2.1.0校验表](VERIFICATION_2_1.md#公开附件与更新签名)。
 

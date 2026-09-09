@@ -2,9 +2,9 @@
 
 **AIsMov** maintains RackTop in the independent public repository [AIsMovDataInfra/RackTop-Workspace](https://github.com/AIsMovDataInfra/RackTop-Workspace). The desktop app remains **RackTop**; the online product is **AIsMov RackTop Team Workspace**. The project derives from [Tongzh-SEU/RackTop](https://github.com/Tongzh-SEU/RackTop) and the [previous AIsMov maintenance repository](https://github.com/AIsMovDataInfra/RackTop). **Tongzh-SEU** remains the original author, and the full Git history, attribution, [GPL-3.0 license](LICENSE) and [NOTICE](NOTICE.md) are preserved.
 
-The current release is **2.1.0 pre-release**, for Ubuntu 22.04 amd64 and both Apple Silicon and Intel Macs. This update adds 24 colorful avatars, clearer equipment company filters, super-administrator weekly statistics and explicit Monday–Sunday report windows. Web pages emphasize **RackTop**, with **AIsMov · Team workspace** as the secondary identity. Local automated tests, both production builds and browser checks passed. The online workspace was upgraded on September 9, 2026; all three platform packages and updater signatures have been verified. The local Linux user installation is now 2.1.0 with its existing data preserved; the running application was not restarted. See the [2.1.0 record](docs/VERIFICATION_2_1.md). The previous [2.0.0 release](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/tag/v2.0.0) remains available with its [verified packages](docs/VERIFICATION.md).
+The current code version is the **2.1.1 pre-release candidate**, targeting Ubuntu 22.04 amd64 and both Apple Silicon and Intel Macs. Version 2.1.1 defines the super-administrator boundary: the super administrator has no company assignment and manages all companies; they are neither required nor allowed to author a report for themselves and are excluded from weekly statistics, while retaining the ability to write reports for ordinary members and approve equipment requests. Local automated tests, both production builds, and browser checks passed. Public release, online deployment, and local installation are still pending. The previous [2.1.0 release](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/tag/v2.1.0) remains the current downloadable and deployed version, with its [verification record](docs/VERIFICATION_2_1.md).
 
-The [online workspace guide](docs/WORKSPACE.md) covers equipment photos and QR labels, compute reservations, private weekly work reports with designated reviewers and manual scores, and equipment requests readable only by the super administrator. New members register with one name and password, then receive a company assignment from the super administrator. Business access is restricted to that company, with stricter report/request permissions. In 2.1.0, settings provide 24 colorful built-in SVG avatars, retaining all seven old IDs. Super administrators can inspect weekly submission and task statistics filtered by company and member; scores remain manual. New reports accept any date and display its Beijing-time Monday–Sunday window and the following week. These additions were deployed at 12:01:40 (UTC+8) on September 9, 2026, preserving existing business data and sessions. Public TLS, anonymous access restrictions, asset checksums and read-only production browser checks passed; see the [deployment record](docs/VERIFICATION_2_1.md#生产升级与公网检查). Remembered web sessions last 360 days; desktop device tokens remain valid for 30 days.
+The [online workspace guide](docs/WORKSPACE.md) covers equipment photos and QR labels, compute reservations, private weekly work reports with designated reviewers and manual scores, and equipment requests readable only by the super administrator. New ordinary members register with one name and password, then receive a company assignment from the super administrator. Business access is restricted to that company. The super administrator itself has no company assignment and manages all companies. Weekly submission and task statistics include ordinary members only; the super administrator may write for an ordinary member, assign reviewers, score reports, and approve equipment requests, but cannot create a report with itself as the author. Remembered web sessions last 360 days; desktop device tokens remain valid for 30 days.
 
 The desktop **团队工作台** (Team Workspace) menu opens the four web modules. The existing **团队预约** (Team Reservations) page retains desktop GPU inventory synchronization. **SSH 配置** (SSH Configuration) combines import and selected-connection export, excluding passwords, private keys and local key paths. Cloud synchronization of SSH configurations is deferred; the online service stores team business records. GPU reservations do not lock hardware or stop training jobs. Node.js 24+ is required to run the team service locally; full new modules require account mode, not the default demo.
 
@@ -45,7 +45,7 @@ Find the right GPU before launching a job, monitor resources and processes while
 
 ## Download
 
-**2.1.0 installers are published and their public downloads verified.** Both Mac architectures remain supported. This is a Pre-release, not Latest. See the [complete checksum table](docs/VERIFICATION_2_1.md#公开附件与更新签名).
+**2.1.1 is still a pre-release candidate; its installers have not been published.** Use the verified 2.1.0 installers below for now. Both Mac architectures remain supported. See the [2.1.0 checksum table](docs/VERIFICATION_2_1.md#公开附件与更新签名).
 
 | Platform | Installer |
 | --- | --- |
@@ -53,9 +53,9 @@ Find the right GPU before launching a job, monitor resources and processes while
 | Mac Apple Silicon | [RackTop_2.1.0_macos-arm64-unsigned.dmg](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.1.0/RackTop_2.1.0_macos-arm64-unsigned.dmg) |
 | Mac Intel | [RackTop_2.1.0_macos-x64-unsigned.dmg](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.1.0/RackTop_2.1.0_macos-x64-unsigned.dmg) |
 
-### Previously released installers
+### Older historical installers
 
-The following 2.0.0 packages are already available; their results do not establish acceptance of 2.1.0.
+The following 2.0.0 packages are also available; their results do not establish acceptance of later versions.
 
 | Client platform | Publisher | Installer |
 | --- | --- | --- |

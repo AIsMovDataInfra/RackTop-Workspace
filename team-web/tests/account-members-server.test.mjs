@@ -274,7 +274,8 @@ test('weekly statistics HTTP protects the full roster and retains deleted author
   assert.equal((await call(path, { session: pending })).status, 403);
   const result = await call(`${path}?weekStart=2026-09-10`, { session: admin });
   assert.equal(result.status, 200, result.text); assert.equal(result.headers['cache-control'], 'no-store');
-  assert.deepEqual(result.body.summary, { expectedCount: 5, submittedCount: 1, unsubmittedCount: 4, reviewedCount: 1, averageCompletion: 100, averageScore: 0 });
+  assert.deepEqual(result.body.summary, { expectedCount: 4, submittedCount: 1, unsubmittedCount: 3, reviewedCount: 1, averageCompletion: 100, averageScore: 0 });
+  assert.equal(result.body.rows.some(row => row.authorId === admin.user.id), false);
   assert.equal(result.body.rows.find(row => row.authorId === author.member.id).reviewerName, '指定评审人');
   assert.deepEqual(Object.keys(result.body.rows[0]).sort(), ['authorId', 'name', 'company', 'weekStart', 'weekEnd', 'status', 'reportId', 'todoCount', 'completedCount', 'unfinishedCount', 'averageCompletion', 'score', 'reviewerName'].sort());
   for (const query of ['?unknown=x', '?weekStart=2026-09-07&weekStart=2026-09-14', '?company=A%E5%85%AC%E5%8F%B8&company=B%E5%85%AC%E5%8F%B8', '?memberId=bad', '?weekStart=', '?company=']) {
@@ -285,7 +286,7 @@ test('weekly statistics HTTP protects the full roster and retains deleted author
   const company = await call(`${path}?company=${encodeURIComponent('A公司')}&memberId=${author.member.id}`, { session: admin });
   assert.equal(company.body.rows.length, 1); assert.equal(company.body.rows[0].score, 0);
   const unassigned = await call(`${path}?company=unassigned`, { session: admin });
-  assert.equal(unassigned.body.rows.length, 2); assert.ok(unassigned.body.rows.every(row => row.company === null));
+  assert.equal(unassigned.body.rows.length, 1); assert.ok(unassigned.body.rows.every(row => row.company === null));
   const earlier = await call(`${path}?weekStart=2026-08-31`, { session: admin });
   assert.equal(earlier.body.rows.length, 0, 'accounts registered later do not acquire missing reports');
   const removed = await call(`/api/admin/members/${author.member.id}`, { method: 'DELETE', session: admin, body: { version: author.member.version } });

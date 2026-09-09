@@ -47,7 +47,7 @@ export function RequestWorkspace(props: WorkModuleProps) {
     try {
       const [catalog, result] = await Promise.all([api.equipment(), user.isSuperAdmin ? workspaceApi.requests() : Promise.resolve({ requests: [] })])
       if (request !== generation.current) return
-      setEquipment(catalog.equipment.filter(item => item.company === user.company && item.status === 'available' && !item.currentUser))
+      setEquipment(user.isSuperAdmin ? [] : catalog.equipment.filter(item => item.company === user.company && item.status === 'available' && !item.currentUser))
       setRequests(result.requests)
     } catch (reason) { if (request === generation.current && !denied(reason)) { setEquipment([]); setRequests([]); setError(reason) } }
     finally { if (request === generation.current) setLoading(false) }
@@ -63,7 +63,7 @@ export function RequestWorkspace(props: WorkModuleProps) {
     if (item) { setCategory(item.category); setQuantity(1) }
   }
   async function submit() {
-    if (busy || !user || !user.company) return
+    if (busy || !user || user.isSuperAdmin || !user.company) return
     setBusy(true); setFormError(null)
     const request = generation.current
     try {
@@ -101,7 +101,7 @@ export function RequestWorkspace(props: WorkModuleProps) {
   return <>
     <WorkModuleFrame {...props} section="requests" title={t('设备申请与领取', 'Device requests')} subtitle={t('填写设备需求，交由超级管理员审批与登记领取。', 'Submit equipment needs for the super administrator to review and record collection.')} modal={Boolean(detail)} actions={<button disabled={loading || busy} onClick={() => void load()}><RefreshCw size={16}/>{t('刷新', 'Refresh')}</button>}>
       {Boolean(error) && <div className="error" role="alert">{errorText(error, t)}</div>}
-      {submitted ? <section className="work-success" role="status"><Check size={24}/><h2>{t('申请已提交', 'Request submitted')}</h2><p>{t('超级管理员将查看申请并处理。此页面不提供员工申请历史。', 'The super administrator will review your request. Employee request history is not available on this page.')}</p><button onClick={() => { setSubmitted(false); setFormError(null) }}>{t('继续提交申请', 'Submit another request')}</button></section> : user.company ? <form className="work-record work-request-form" onSubmit={event => { event.preventDefault(); void submit() }}>
+      {submitted ? <section className="work-success" role="status"><Check size={24}/><h2>{t('申请已提交', 'Request submitted')}</h2><p>{t('超级管理员将查看申请并处理。此页面不提供员工申请历史。', 'The super administrator will review your request. Employee request history is not available on this page.')}</p><button onClick={() => { setSubmitted(false); setFormError(null) }}>{t('继续提交申请', 'Submit another request')}</button></section> : !user.isSuperAdmin && user.company ? <form className="work-record work-request-form" onSubmit={event => { event.preventDefault(); void submit() }}>
         <h2>{t('新申请', 'New request')}</h2><p>{user.name} · {user.company}</p>
         <label>{t('关联现有设备（可选）', 'Existing equipment (optional)')}<select name="equipmentId" disabled={busy || loading} value={equipmentId} onChange={event => chooseEquipment(event.target.value)}><option value="">{t('不关联设备，提交设备需求', 'Submit a need without linking equipment')}</option>{equipment.map(item => <option key={item.id} value={item.id}>{item.serialNumber} · {item.name}</option>)}</select><span className="field-help">{t('只显示本公司当前可领取的设备。', 'Only available equipment in your company is listed.')}</span></label>
         <div className="field-pair"><label>{t('设备类别', 'Equipment category')}<select name="category" required disabled={busy || Boolean(equipmentId)} value={category} onChange={event => setCategory(event.target.value)}><option value="">{t('请选择类别', 'Choose a category')}</option>{EQUIPMENT_CATEGORIES.map(value => <option key={value}>{value}</option>)}</select></label><label>{t('数量', 'Quantity')}<input name="quantity" type="number" min={1} max={999} step={1} required disabled={busy || Boolean(equipmentId)} value={quantity} onChange={event => setQuantity(Number(event.target.value))}/></label></div>
@@ -109,7 +109,7 @@ export function RequestWorkspace(props: WorkModuleProps) {
         {Boolean(formError) && !detail && <div className="error" role="alert">{errorText(formError, t)}</div>}
         <p className="field-help">{t('提交后由超级管理员查看和处理。申请本身不会预留或领用设备。', 'Only the super administrator can view and process submitted requests. Submitting does not reserve or collect equipment.')}</p>
         <div className="work-inline-actions"><button type="submit" className="primary" disabled={busy || loading}>{busy ? t('正在提交…', 'Submitting…') : t('提交申请', 'Submit request')}</button></div>
-      </form> : <div className="callout">{t('查看申请不要求超级管理员有公司；如需提交自己的申请，请先在成员管理中给自己分配公司。', 'A super administrator can review requests without a company. Assign your own company in Members before submitting a request yourself.')}</div>}
+      </form> : <div className="callout">{user.isSuperAdmin ? t('超级管理员无需提交自己的设备申请，可在下方直接处理成员申请。', 'Super administrators do not submit their own device requests. Review member requests below.') : t('请等待超级管理员分配公司后再提交设备申请。', 'Wait for the super administrator to assign your company before submitting a device request.')}</div>}
       {user.isSuperAdmin && <section className="work-request-section" aria-label={t('全部设备申请', 'All equipment requests')}><h2>{t('申请处理', 'Review requests')}</h2><div className="work-filters"><label>{t('申请状态', 'Request status')}<select value={filter} onChange={event => setFilter(event.target.value)}><option value="">{t('全部状态', 'All statuses')}</option>{(['pending', 'approved', 'rejected', 'collected'] as const).map(value => <option key={value} value={value}>{statusText(value, t)}</option>)}</select></label></div>{loading ? <p role="status">{t('正在读取申请…', 'Loading requests…')}</p> : shown.length ? <div className="work-module-grid">{shown.map(item => <article className="work-record" key={item.id}><header><h2>{item.applicantName}</h2><span className={`work-module-status work-module-status--${item.status}`}>{statusText(item.status, t)}</span></header><p>{item.company} · {item.category} × {item.quantity}</p><small className="muted">{formatTime(item.createdAt, preferences.locale)}</small><button disabled={busy} onClick={() => void openRequest(item.id)}>{t('查看申请', 'View request')}</button></article>)}</div> : !error && <p className="muted">{t('暂无符合条件的申请。', 'No requests match this filter.')}</p>}</section>}
     </WorkModuleFrame>
     {detail && user.isSuperAdmin && <Dialog title={t('设备申请详情', 'Equipment request')} subtitle={`${detail.applicantName} · ${detail.company}`} onClose={() => { setDetail(null); setFormError(null) }} busy={busy} t={t}><div className="dialog-body">

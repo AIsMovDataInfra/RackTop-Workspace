@@ -2,7 +2,7 @@
 
 本项目由 **AIsMov** 维护，当前代码与 Linux / macOS 分发位于独立公开仓库 [AIsMovDataInfra/RackTop-Workspace](https://github.com/AIsMovDataInfra/RackTop-Workspace)。桌面应用继续叫 **RackTop**，在线网页为 **AIsMov RackTop 团队工作台**。项目源自 [Tongzh-SEU/RackTop](https://github.com/Tongzh-SEU/RackTop) 及 [原 AIsMov 维护仓库](https://github.com/AIsMovDataInfra/RackTop)，保留原作者 **Tongzh-SEU**、完整 Git 历史、[GPL-3.0](LICENSE) 和[来源说明](NOTICE.md)。
 
-当前发布版本为 **2.1.0 测试版**，继续提供Linux amd64及Mac Apple Silicon、Intel两种安装包。新增24种彩色头像、完整公司筛选、超管周报统计和明确的周一至周日报告窗口；网页以 **RackTop** 为主字、**AIsMov · 团队工作台** 为辅助字。本地自动化、两套生产构建与浏览器检查已通过，在线工作台已于2026-09-09升级；Linux与两种Mac安装包、全部更新签名已通过核验，本机Linux用户目录已安装2.1.0并保留原资料，见[2.1.0验证记录](docs/VERIFICATION_2_1.md)。上一版[2.0.0 Release](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/tag/v2.0.0)仍可下载，其[历史验证记录](docs/VERIFICATION.md)保留。
+当前代码版本为 **2.1.1 测试候选版**，继续面向 Linux amd64、Mac Apple Silicon 和 Mac Intel。2.1.1 明确超级管理员职责：超管没有公司归属，可跨公司管理；无需且不能以自己为作者写周报，也不进入周报统计，但仍可代普通成员写周报和审批设备申请。本地自动化、两套生产构建与浏览器检查已通过；公开发布、在线部署和本机安装仍待完成。当前可下载和线上运行的上一版仍为 [2.1.0](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/tag/v2.1.0)，其[验证记录](docs/VERIFICATION_2_1.md)保留。
 
 <div align="right">
   🌐 Language:
@@ -44,7 +44,7 @@ RackTop 是面向个人研究者和小型团队的 GPU 服务器桌面工作台�
 
 ## 下载
 
-**2.1.0 测试版已发布并完成公开下载核验。** Mac继续提供两种架构；这是Pre-release，未标记为Latest。完整附件与SHA256见[本轮校验表](docs/VERIFICATION_2_1.md#公开附件与更新签名)。
+**2.1.1 仍是测试候选版，安装包尚未公开发布。** 当前请下载已完成公开核验的上一版 2.1.0；Mac 继续提供两种架构。完整附件与 SHA256 见[2.1.0 校验表](docs/VERIFICATION_2_1.md#公开附件与更新签名)。
 
 | 平台 | 安装包 |
 | --- | --- |
@@ -52,9 +52,9 @@ RackTop 是面向个人研究者和小型团队的 GPU 服务器桌面工作台�
 | Mac Apple Silicon | [RackTop_2.1.0_macos-arm64-unsigned.dmg](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.1.0/RackTop_2.1.0_macos-arm64-unsigned.dmg) |
 | Mac Intel | [RackTop_2.1.0_macos-x64-unsigned.dmg](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.1.0/RackTop_2.1.0_macos-x64-unsigned.dmg) |
 
-### 已发布的上一版
+### 更早的历史版本
 
-以下2.0.0安装包仍可下载，已有验证不代替2.1.0验收。
+以下2.0.0安装包仍可下载，已有验证不代替后续版本验收。
 
 | 客户端平台 | 提供方 | 安装包与下载 |
 | --- | --- | --- |
@@ -76,14 +76,14 @@ racktop
 
 ## 在线团队工作台
 
-在线工作台已于2026-09-09 12:01:40（UTC+8）升级至2.1.0。旧业务数据及会话保持，公网与生产只读浏览器检查通过，见[本轮验证记录](docs/VERIFICATION_2_1.md#生产升级与公网检查)。
+在线工作台目前仍运行 2.1.0，旧业务数据及会话保持，公网与生产只读浏览器检查结果见[2.1.0 验证记录](docs/VERIFICATION_2_1.md#生产升级与公网检查)。2.1.1 的在线部署尚未执行。
 
-打开 [AIsMov RackTop](https://136.0.110.161)，用一个成员名称和密码注册，不需要邮箱。超级管理员分配公司后即可使用本公司的设备台账和算力预约；2.1.0设置中可选择24种彩色头像，原7种保持兼容，网页“记住登录”为 360 天，桌面设备登录仍为 30 天。
+打开 [AIsMov RackTop](https://136.0.110.161)，用一个成员名称和密码注册，不需要邮箱。普通成员由超级管理员分配公司后即可使用本公司的设备台账和算力预约；超管本身没有公司归属，可跨公司管理。2.1.0设置中可选择24种彩色头像，原7种保持兼容，网页“记住登录”为 360 天，桌面设备登录仍为 30 天。
 
 | 功能 | 使用方式 |
 | --- | --- |
 | 设备管理 | 目录显示照片和公司；超管始终可筛选四家公司及零数量状态，手机扫码登记负责人、使用人和位置，打印资产标签。 |
-| 周报与绩效 | 明确本周与下周日期范围；超管按周、公司、成员查看提交、任务与人工评分汇总，单份周报仍限作者、指定评审人和超管查看。 |
+| 周报与绩效 | 明确本周与下周日期范围；超管无需且不能以自己为作者写周报，也不进入统计，可代普通成员写周报，并按周、公司、成员查看普通成员汇总。 |
 | 算力预约 | 同公司整机或指定 GPU 排期、冲突检查、续约与取消；管理员同步桌面 GPU 清单或手工登记资源。 |
 | 设备申请与领取 | 员工提交申请后只得到编号确认；只有超管能读申请内容和审批，关联现有设备的领取会同步使用人及设备状态。 |
 

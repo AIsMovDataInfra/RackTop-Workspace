@@ -26,6 +26,39 @@ it('does not fetch or render the roster for ordinary admins, and erases it when 
   await mount(); expect(container.textContent).toContain(employee.name)
   await mount({ ...admin, isSuperAdmin: false }); expect(container.textContent).toBe('')
 })
+it.each([null, '西浦'] as const)('keeps super administrators with company %s global and out of employee company filters', async (company) => {
+  const globalAdmin = { ...admin, company }
+  const assigned = { ...employee, id: 'assigned', name: '已分配员工', username: 'assigned', company: '西浦' as const }
+  const update = vi.spyOn(api, 'setMemberCompany')
+  vi.mocked(api.members).mockResolvedValue({ members: [globalAdmin, employee, assigned] })
+  await mount(globalAdmin)
+  const rows = () => [...container.querySelectorAll<HTMLTableRowElement>('.member-table tbody tr')]
+  const superRow = rows().find((row) => row.cells[0].textContent?.includes(admin.name))!
+  expect(superRow.cells[1].textContent).toBe('跨公司管理，无需分配公司')
+  expect(superRow.querySelector('button')).toBeNull()
+  expect(container.querySelector(`[aria-label="分配公司 · ${employee.name}"]`)).not.toBeNull()
+  const filter = (value: string) => act(() => {
+    const input = container.querySelector<HTMLSelectElement>('.member-filters select')!
+    input.value = value; input.dispatchEvent(new Event('change', { bubbles: true }))
+  })
+  filter('pending')
+  expect(rows()).toHaveLength(1)
+  expect(rows()[0].cells[0].textContent).toContain(employee.name)
+  expect(container.querySelector('.member-directory-heading strong')?.textContent).toBe('成员 1')
+  filter('西浦')
+  expect(rows()).toHaveLength(1)
+  expect(rows()[0].cells[0].textContent).toContain(assigned.name)
+  filter('')
+  act(() => {
+    const input = container.querySelector<HTMLInputElement>('input[type="search"]')!
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, '西浦')
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+  expect(rows()).toHaveLength(1)
+  expect(rows()[0].cells[0].textContent).toContain(assigned.name)
+  expect(update).not.toHaveBeenCalled()
+  expect(globalAdmin.company).toBe(company)
+})
 it('supports single-character Chinese credentials, fixed company choices and clears the password after creating', async () => {
   const create = vi.spyOn(api, 'createMember').mockResolvedValue({ member: { ...employee, id: 'new', name: '名', company: 'A公司' } })
   await mount(); await click('增加员工'); enter('name', '名'); enter('password', '密'); select('A公司')
