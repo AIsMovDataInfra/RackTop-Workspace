@@ -1,11 +1,11 @@
 {
-  "version": "2.0.0",
-  "notes": "- Linux 与 Mac 统一版本，安装包按平台和芯片区分，迁至独立 RackTop-Workspace 仓库分发。\n- 保留 RackTop 名称、原作者署名、GPL 许可证、本机资料和全部旧版本记录。\n- 修复 GPU 通知关闭后仍触发及快速切换保存结果错乱的问题。\n- SSH 导入导出合并为“SSH 配置”，导出支持勾选特定服务器。\n- 桌面新增团队工作台菜单，可直达设备、周报、预约和申请网页。\n- 团队预约的说明与打开网页按钮靠近排列。\n- 设备目录直接显示照片缩略图。\n- 新注册只填写一个成员名称和密码，保留旧账号登录兼容。\n- 支持选择并保存 7 种内置头像。\n- 网页记住登录延长为 360 天，桌面设备登录仍为 30 天。\n- 员工公司只由超管分配，个人资料中只读显示。\n- 设备公司可下拉选择，普通成员仅选自己公司，超管可跨公司选择。\n- 资源、预约、设备与照片按公司隔离，未分配旧记录仅超管可见。\n- 资源跨公司调整前检查未结束预约，保留原公司的历史资料。\n- 新增私密周报、指定评审与手工评分，普通同事不能查看。\n- 新增设备申请，提交人仅获得编号确认，申请内容只有超管可读。\n- 已有关联设备领取同步使用人和设备状态，并保留完整操作记录。",
-  "pub_date": "2026-09-09T00:41:24Z",
+  "version": "2.1.0",
+  "notes": "- 网页突出RackTop主品牌，辅助显示“AIsMov · 团队工作台”，登录和各工作页统一。\n- 新增24种彩色内置头像，原7种继续兼容，保存后在账号各会话显示。\n- 设备筛选固定显示四家公司及数量，零设备公司也可选；目录标明归属，普通成员仍仅看自己公司。\n- 超管可按周、公司、成员查看周报统计，汇总提交状态、任务完成度与已有人工评分，不把缺报或未评分记零。\n- 周报任选日期自动归入北京时间周一至周日，本周工作和下周计划都显示明确日期范围。",
+  "pub_date": "2026-09-09T04:17:47Z",
   "platforms": {
     "linux-x86_64-deb": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTVThDMjZnT3Yrc3Z2NkNPMzJCRmE3NkNCUTFPQjBOQVlJMEdVSmFRdTVnM2htb0hHUWpyY3cyWVNYdUFLNW1ZTTlmdVREeno2bXJjd2J4Y0d1cFRJLzRVcGdiTDRHeFFzPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4OTEzNjIxCWZpbGU6UmFja1RvcF8yLjAuMF9saW51eC1hbWQ2NC5kZWIKeVgyYU1OWXU1Z1pKOFRrMjhTKzVJOTdvZCtaUE9udDFEMDJ5QlY3SDZMWUlkYnR1ZEZtNnVCdWgvMWVRVldHdXViTytBNE03bXRRL3dBdEJLNUZTQWc9PQo=",
-      "url": "https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.0.0/RackTop_2.0.0_linux-amd64.deb"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTVThDMjZnT3Yrc3ZkMnNQc3FES3BTQUo2bzZBWkhUYk1Famk4d2RGNjVJbmJFQURlSGNINmdpYmhQWXBEcHp3VFRkVlM5UDZBWXFBZHBJTVBDMFJ6NXVyM0p4Z1NQVnc0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4OTI2ODQ4CWZpbGU6UmFja1RvcF8yLjEuMF9saW51eC1hbWQ2NC5kZWIKM050MmN6Z1hPeFgyeVJYUHYwM25nQUJlNEkyVVhzWTlveUVsZEJ1WDJPd2I3Y0tsUVlTZE9ncDNLNDdaSmJCVXBlV3c0VHVOdyt3TFNadW5Hc2QzQlE9PQo=",
+      "url": "https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.1.0/RackTop_2.1.0_linux-amd64.deb"
     }
   }
 }
