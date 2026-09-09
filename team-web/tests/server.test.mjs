@@ -15,6 +15,9 @@ async function fixture(t, overrides = {}) {
   const distPath = join(directory, 'dist'); mkdirSync(distPath);
   writeFileSync(join(distPath, 'index.html'), '<!doctype html><title>RackTop team test</title>');
   writeFileSync(join(distPath, 'app.js'), 'console.log("test")');
+  mkdirSync(join(distPath, 'assets'));
+  writeFileSync(join(distPath, 'assets', 'fixed-name.js'), 'console.log("replaceable")');
+  writeFileSync(join(distPath, 'assets', 'app-a1B2c3D4.js'), 'console.log("immutable")');
   writeFileSync(join(directory, 'secret.txt'), 'must never be served');
   symlinkSync(join(directory, 'secret.txt'), join(distPath, 'escape.txt'));
   let clock = base;
@@ -101,8 +104,13 @@ test('static app supports routes and blocks traversal, symlink escape, bad bodie
   assert.equal(index.status, 200);
   assert.match(index.body, /RackTop team test/);
   assert.equal(index.headers['x-content-type-options'], 'nosniff');
+  assert.equal(index.headers['cache-control'], 'no-cache');
   assert.equal((await call('/reservations')).status, 200);
-  assert.equal((await call('/app.js')).headers['content-type'], 'text/javascript; charset=utf-8');
+  const script = await call('/app.js');
+  assert.equal(script.headers['content-type'], 'text/javascript; charset=utf-8');
+  assert.equal(script.headers['cache-control'], 'public, max-age=3600');
+  assert.equal((await call('/assets/fixed-name.js')).headers['cache-control'], 'public, max-age=3600');
+  assert.equal((await call('/assets/app-a1B2c3D4.js')).headers['cache-control'], 'public, max-age=31536000, immutable');
   assert.equal((await call('/%2e%2e/secret.txt')).status, 400);
   assert.equal((await call('/escape.txt')).status, 403);
   assert.equal((await call('/.env')).status, 400);

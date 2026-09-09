@@ -138,7 +138,9 @@ export function createTeamServer(overrides = {}) {
     const bytes = await readFile(canonical);
     res.setHeader('Content-Type', mimeTypes[extname(canonical)] || 'application/octet-stream');
     res.setHeader('Content-Length', bytes.length);
-    res.setHeader('Cache-Control', extname(canonical) === '.html' ? 'no-cache' : 'public, max-age=3600');
+    const assetName = relativePath.split(sep).at(-1) || '';
+    const immutableAsset = relativePath.startsWith(`assets${sep}`) && /-[A-Za-z0-9_-]{8,}\.[^.]+$/.test(assetName);
+    res.setHeader('Cache-Control', extname(canonical) === '.html' ? 'no-cache' : immutableAsset ? 'public, max-age=31536000, immutable' : 'public, max-age=3600');
     res.statusCode = 200;
     res.end(req.method === 'HEAD' ? undefined : bytes);
   }

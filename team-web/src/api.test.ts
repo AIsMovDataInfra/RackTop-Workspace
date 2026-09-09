@@ -1,7 +1,18 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { api, ApiError, ACCOUNT_CHANGED_EVENT, SESSION_EXPIRED_EVENT } from './api'
+import { api, ApiError, ACCOUNT_CHANGED_EVENT, request, SESSION_EXPIRED_EVENT } from './api'
+import { errorText } from './errors'
 
-afterEach(() => vi.unstubAllGlobals())
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })
+
+function hangingFetch(signals: AbortSignal[]) {
+  return vi.fn((_input: RequestInfo | URL, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+    const signal = init?.signal
+    if (!signal) { reject(new Error('missing request signal')); return }
+    signals.push(signal)
+    const abort = () => reject(signal.reason ?? new DOMException('Aborted', 'AbortError'))
+    if (signal.aborted) abort(); else signal.addEventListener('abort', abort, { once: true })
+  }))
+}
 
 describe('authenticated reservation API', () => {
   it('refreshes account permissions on photo access denial without treating it as a failed login', async () => {
@@ -56,7 +67,113 @@ describe('authenticated reservation API', () => {
     await api.session(); await api.setEquipmentPhoto('photo-device', 4, 'data:image/jpeg;base64,cGhvdG8='); await api.deleteEquipmentPhoto('photo-device', 5); await api.equipmentPhoto('photo-device', 6)
     expect(fetch.mock.calls[1]).toEqual(['/api/equipment/photo-device/photo', expect.objectContaining({ method: 'POST', body: JSON.stringify({ version: 4, dataUrl: 'data:image/jpeg;base64,cGhvdG8=' }), headers: expect.objectContaining({ 'X-CSRF-Token': 'photo-csrf' }) })])
     expect(fetch.mock.calls[2]).toEqual(['/api/equipment/photo-device/photo', expect.objectContaining({ method: 'DELETE', body: '{"version":5}', headers: expect.objectContaining({ 'X-CSRF-Token': 'photo-csrf' }) })])
-    expect(fetch).toHaveBeenLastCalledWith('/api/equipment/photo-device/photo?v=6', { credentials: 'same-origin', cache: 'no-store' })
+    expect(fetch).toHaveBeenLastCalledWith('/api/equipment/photo-device/photo?v=6', expect.objectContaining({ credentials: 'same-origin', cache: 'no-store', signal: expect.any(AbortSignal) }))
+  })
+
+  it('gives GET two bounded attempts and reports a bilingual retryable timeout without leaking timers', async () => {
+    vi.useFakeTimers()
+    const signals: AbortSignal[] = [], fetch = hangingFetch(signals)
+    vi.stubGlobal('fetch', fetch)
+    const outcome = api.equipment().then(() => null, reason => reason)
+
+    await vi.advanceTimersByTimeAsync(8_000)
+    expect(fetch).toHaveBeenCalledTimes(2)
+    await vi.advanceTimersByTimeAsync(8_000)
+
+    const error = await outcome
+    expect(error).toMatchObject({ status: 408, code: 'REQUEST_TIMEOUT' })
+    expect(errorText(error, (zh) => zh)).toBe('请求超时，请检查网络后重试。')
+    expect(errorText(error, (_zh, en) => en)).toBe('Request timed out. Check your connection and try again.')
+    expect(signals).toHaveLength(2)
+    expect(signals.every(signal => signal.aborted)).toBe(true)
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('does not retry the session GET because it may establish an anonymous session', async () => {
+    vi.useFakeTimers()
+    const signals: AbortSignal[] = [], fetch = hangingFetch(signals)
+    vi.stubGlobal('fetch', fetch)
+    const outcome = api.session().then(() => null, reason => reason)
+
+    await vi.advanceTimersByTimeAsync(8_000)
+
+    await expect(outcome).resolves.toMatchObject({ status: 408, code: 'REQUEST_TIMEOUT' })
+    expect(fetch).toHaveBeenCalledTimes(1)
+    expect(signals).toHaveLength(1)
+    expect(signals[0].aborted).toBe(true)
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('retries a transient GET transport failure once but does not retry a successful response', async () => {
+    vi.useFakeTimers()
+    const fetch = vi.fn().mockRejectedValueOnce(new TypeError('connection reset'))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ resources: [{ id: 'recovered' }] })))
+    vi.stubGlobal('fetch', fetch)
+
+    await expect(api.resources()).resolves.toMatchObject({ resources: [{ id: 'recovered' }] })
+    expect(fetch).toHaveBeenCalledTimes(2)
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('retries a temporary GET server failure but returns a permanent client error immediately', async () => {
+    vi.useFakeTimers()
+    const fetch = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ error: { code: 'SERVICE_UNAVAILABLE' } }), { status: 503 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ equipment: [] })))
+    vi.stubGlobal('fetch', fetch)
+
+    await expect(api.equipment()).resolves.toEqual({ equipment: [] })
+    expect(fetch).toHaveBeenCalledTimes(2)
+    fetch.mockReset().mockResolvedValue(new Response(JSON.stringify({ error: { code: 'NOT_FOUND' } }), { status: 404 }))
+    await expect(api.equipment()).rejects.toMatchObject({ status: 404, code: 'NOT_FOUND' })
+    expect(fetch).toHaveBeenCalledTimes(1)
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it.each(['POST', 'PATCH', 'DELETE'])('times out %s once without retrying a write', async (method) => {
+    vi.useFakeTimers()
+    const signals: AbortSignal[] = [], fetch = hangingFetch(signals)
+    vi.stubGlobal('fetch', fetch)
+    const outcome = request('/write-test', method, { value: 1 }).then(() => null, reason => reason)
+
+    await vi.advanceTimersByTimeAsync(8_000)
+
+    const error = await outcome
+    expect(error).toMatchObject({ status: 408, code: 'WRITE_RESULT_UNKNOWN' })
+    expect(errorText(error, (zh) => zh)).toBe('请求超时，结果可能已保存，请先刷新确认，避免重复提交。')
+    expect(errorText(error, (_zh, en) => en)).toBe('Request timed out. The result may have been saved. Refresh and verify before submitting again to avoid a duplicate.')
+    expect(fetch).toHaveBeenCalledTimes(1)
+    expect(signals).toHaveLength(1)
+    expect(signals[0].aborted).toBe(true)
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('honours a caller abort without retrying and removes its timeout', async () => {
+    vi.useFakeTimers()
+    const signals: AbortSignal[] = [], fetch = hangingFetch(signals)
+    const controller = new AbortController(), reason = new DOMException('caller stopped', 'AbortError')
+    vi.stubGlobal('fetch', fetch)
+    const outcome = request('/resources', 'GET', undefined, { signal: controller.signal }).then(() => null, error => error)
+
+    controller.abort(reason)
+
+    expect(await outcome).toBe(reason)
+    expect(fetch).toHaveBeenCalledTimes(1)
+    expect(signals[0].aborted).toBe(true)
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('times out a photo read once without multiplying concurrent thumbnail requests', async () => {
+    vi.useFakeTimers()
+    const signals: AbortSignal[] = [], fetch = hangingFetch(signals)
+    vi.stubGlobal('fetch', fetch)
+    const outcome = api.equipmentPhoto('slow-photo', 1).then(() => null, reason => reason)
+
+    await vi.advanceTimersByTimeAsync(8_000)
+
+    await expect(outcome).resolves.toMatchObject({ status: 408, code: 'REQUEST_TIMEOUT' })
+    expect(fetch).toHaveBeenCalledTimes(1)
+    expect(signals[0].aborted).toBe(true)
+    expect(vi.getTimerCount()).toBe(0)
   })
 
 })
