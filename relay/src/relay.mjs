@@ -1,6 +1,7 @@
 import http from 'node:http';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { constants, openSync, fstatSync, readFileSync, closeSync } from 'node:fs';
+import { isIP } from 'node:net';
 import { pathToFileURL } from 'node:url';
 import { performance } from 'node:perf_hooks';
 import { WebSocket, WebSocketServer } from 'ws';
@@ -21,6 +22,33 @@ const ROOM_PATH = /^\/v1\/rooms\/([A-Za-z0-9_-]{32})\/(host|guest)$/;
 const hash = value => createHash('sha256').update(value).digest();
 const secret = () => randomBytes(32).toString('base64url');
 const arm = (fn, ms) => { const timer = setTimeout(fn, ms); timer.unref(); return timer; };
+
+function normalizeIp(value) {
+  if (typeof value !== 'string') return null;
+  const address = value.trim();
+  if (!address || address.includes(',')) return null;
+  if (address.toLowerCase().startsWith('::ffff:')) {
+    const mapped = address.slice(7);
+    if (isIP(mapped) === 4) return mapped;
+  }
+  return isIP(address) ? address : null;
+}
+
+function isLoopback(address) {
+  if (address === '::1') return true;
+  if (isIP(address) !== 4) return false;
+  const first = Number(address.split('.', 1)[0]);
+  return first === 127;
+}
+
+// Nginx overwrites X-Forwarded-For with $remote_addr and is the only production
+// peer of this loopback-bound service. Never trust a forwarded value arriving
+// through any other network peer or a list assembled by arbitrary proxies.
+export function forwardedGuestIp(remoteAddress, forwardedFor) {
+  const peer = normalizeIp(remoteAddress);
+  if (!peer || !isLoopback(peer) || typeof forwardedFor !== 'string') return null;
+  return normalizeIp(forwardedFor);
+}
 
 // Open without following symlinks, then inspect the opened file to avoid a stat/open race.
 export function readOwnerTokenFile(path) {
@@ -325,6 +353,7 @@ export function createRelay(options = {}) {
       if (!authorized(req, route.tokenDigest)) {
         json(res, 401, { error: 'Unauthorized' }); req.resume(); return;
       }
+      const guestIp = forwardedGuestIp(req.socket.remoteAddress, req.headers['x-forwarded-for']);
       readBody(req, res, 256, body => {
         if (body.trim() !== '' && body.trim() !== '{}') {
           json(res, 400, { error: 'Body must be empty or {}' }); return;
@@ -344,9 +373,11 @@ export function createRelay(options = {}) {
         }
         route.credit -= 1;
         const ticket = newRoom(route);
-        // Only this short-lived owner queue retains an undisclosed host bearer token.
+        // Only this short-lived owner queue retains the host bearer token and
+        // optional proxy-attested guest address. Neither is returned to guests.
         pending.push({ routeId: route.id, roomId: ticket.roomId,
-          hostPath: ticket.hostPath, hostToken: ticket.hostToken, expiresAt: ticket.expiresAt });
+          hostPath: ticket.hostPath, hostToken: ticket.hostToken, expiresAt: ticket.expiresAt,
+          ...(guestIp ? { guestIp } : {}) });
         json(res, 201, { roomId: ticket.roomId, guestPath: ticket.guestPath,
           guestToken: ticket.guestToken, expiresAt: ticket.expiresAt });
       });

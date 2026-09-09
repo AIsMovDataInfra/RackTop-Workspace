@@ -4,7 +4,7 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 use racktop_lib::{
     models::Server,
     sharing::{
-        client::{ClientSession, ConnectOptions},
+        client::{AuthenticatedInfo, ClientSession, ConnectOptions},
         identity::{self, DeviceIdentity, Invitation},
         runtime::{EventSink, ServerContext, SharingRuntime},
         store::{Capabilities, Persisted, ShareStore},
@@ -359,7 +359,7 @@ async fn terminal_value(
     .map_err(|_| "Terminal marker did not arrive; SSH shell or gateway may be unavailable")?
 }
 
-fn options(invite: &Invitation, device: &DeviceIdentity, secret: bool) -> ConnectOptions {
+fn invitation_options(invite: &Invitation, device: &DeviceIdentity) -> ConnectOptions {
     ConnectOptions {
         relay_url: invite.relay_url.clone(),
         route_id: invite.route_id.clone(),
@@ -367,8 +367,32 @@ fn options(invite: &Invitation, device: &DeviceIdentity, secret: bool) -> Connec
         owner_cert_der: invite.owner_cert_der.clone(),
         device: device.clone(),
         device_name: "Disposable file guest".into(),
-        invite_secret: secret.then(|| invite.invite_secret.clone()),
+        invite_secret: Some(invite.invite_secret.clone()),
+        reusable_invitation: invite.reusable,
     }
+}
+
+fn member_options(
+    invite: &Invitation,
+    device: &DeviceIdentity,
+    info: &AuthenticatedInfo,
+) -> Result<ConnectOptions, String> {
+    Ok(ConnectOptions {
+        relay_url: invite.relay_url.clone(),
+        route_id: info
+            .member_route_id
+            .clone()
+            .ok_or("Reusable pairing did not return a member route")?,
+        route_token: info
+            .member_route_token
+            .clone()
+            .ok_or("Reusable pairing did not return a member token")?,
+        owner_cert_der: invite.owner_cert_der.clone(),
+        device: device.clone(),
+        device_name: "Disposable file guest".into(),
+        invite_secret: None,
+        reusable_invitation: false,
+    })
 }
 
 async fn file_round_trip(
@@ -377,24 +401,85 @@ async fn file_round_trip(
     directory: &str,
 ) -> Result<(), String> {
     let response = owner.invite(share.into(), 10).await?;
-    let invite = identity::decode_invitation(&field(&response, "code")?)?;
+    let code = field(&response, "code")?;
+    let repeated = owner.invite(share.into(), 10).await?;
+    ensure(
+        field(&repeated, "code")? == code,
+        "Repeated invitation request did not return the same active code",
+    )?;
+    let invite = identity::decode_invitation(&code)?;
+    ensure(invite.reusable, "Owner did not issue a reusable v2 invitation")?;
+    println!("PASS active invitation can be retrieved and copied repeatedly");
+
     let device = identity::generate_device_identity();
-    let (session, info) = ClientSession::connect(options(&invite, &device, true), quiet()).await?;
+    let info = ClientSession::pair_reusable(invitation_options(&invite, &device)).await?;
+    let (session, connected_info) =
+        ClientSession::connect(member_options(&invite, &device, &info)?, quiet()).await?;
+    ensure(
+        connected_info.member_id == info.member_id,
+        "Member route returned a different device grant",
+    )?;
     let result = transfer_bytes(&session, &format!("{directory}/probe.bin")).await;
     session.close();
     // Give owner-side worker EOF cleanup a chance to complete even on failure.
     tokio::time::sleep(Duration::from_secs(1)).await;
     result?;
     let (session, restored) =
-        ClientSession::connect(options(&invite, &device, false), quiet()).await?;
+        ClientSession::connect(member_options(&invite, &device, &info)?, quiet()).await?;
     ensure(
         restored.member_id == info.member_id,
         "Reconnect created a different device grant",
     )?;
     let result = async {
         session.request("session.ping", json!({})).await?;
-        println!("PASS reconnect reuses device grant without a new invitation");
-        owner.revoke_member(share.into(), info.member_id).await?;
+        println!("PASS reconnect uses the independent saved device route");
+
+        let second_device = identity::generate_device_identity();
+        let second_info =
+            ClientSession::pair_reusable(invitation_options(&invite, &second_device)).await?;
+        let (second, connected_second_info) = ClientSession::connect(
+            member_options(&invite, &second_device, &second_info)?,
+            quiet(),
+        )
+        .await?;
+        ensure(
+            second_info.member_id != info.member_id
+                && second_info.member_route_id != info.member_route_id
+                && second_info.member_route_token != info.member_route_token,
+            "Reusable invitation did not grant independent device credentials",
+        )?;
+        ensure(
+            connected_second_info.member_id == second_info.member_id,
+            "Second member route returned a different device grant",
+        )?;
+        second.request("session.ping", json!({})).await?;
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let status = owner.status().await?;
+                let members = status["shares"]
+                    .as_array()
+                    .and_then(|shares| shares.iter().find(|item| item["id"] == share))
+                    .and_then(|item| item["members"].as_array())
+                    .ok_or("Owner status is missing shared members")?;
+                if members.iter().any(|member| {
+                    member["id"] == second_info.member_id
+                        && member["connected"] == true
+                        && member["ipAddress"]
+                            .as_str()
+                            .is_some_and(|value| !value.is_empty())
+                }) {
+                    return Ok::<(), String>(());
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        })
+        .await
+        .map_err(|_| "Owner did not expose the connected guest public IP")??;
+        println!("PASS one reusable invitation pairs multiple devices and owner sees guest IP");
+
+        owner
+            .revoke_member(share.into(), info.member_id.clone())
+            .await?;
         tokio::time::timeout(Duration::from_secs(5), async {
             while session.is_alive() {
                 tokio::time::sleep(Duration::from_millis(50)).await;
@@ -409,14 +494,31 @@ async fn file_round_trip(
                 .is_err(),
             "Revoked device can still send RPC",
         )?;
-        match ClientSession::connect(options(&invite, &device, false), quiet()).await {
+        match ClientSession::connect(member_options(&invite, &device, &info)?, quiet()).await {
             Ok((unexpected, _)) => {
                 unexpected.close();
                 return Err("Revoked device reconnected".into());
             }
             Err(_) => {}
         }
-        println!("PASS revocation closes active session and rejects reconnect");
+        let third_device = identity::generate_device_identity();
+        if ClientSession::pair_reusable(invitation_options(&invite, &third_device))
+            .await
+            .is_ok()
+        {
+            second.close();
+            return Err("Old reusable invitation remained valid after revocation".into());
+        }
+        second.request("session.ping", json!({})).await?;
+        let replacement = owner.invite(share.into(), 10).await?;
+        ensure(
+            field(&replacement, "code")? != code,
+            "Revocation did not rotate the reusable invitation",
+        )?;
+        second.close();
+        println!(
+            "PASS revocation rotates the invite, rejects the revoked route, and preserves other devices"
+        );
         Ok::<(), String>(())
     }
     .await;

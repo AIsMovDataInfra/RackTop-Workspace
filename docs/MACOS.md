@@ -1,10 +1,10 @@
 # macOS 安装与构建说明
 
-RackTop 2.1.1 是 [AIsMovDataInfra/RackTop-Workspace](https://github.com/AIsMovDataInfra/RackTop-Workspace) 的独立分发，与 Linux 共用同一版本和 Release，分别提供 Apple Silicon 与 Intel 原生安装包。桌面名称仍为 RackTop，保留 SSH、本机密钥管理、共享网关及团队工作台。项目沿用 Tongzh-SEU 原作和旧 AIsMov 维护版的历史、[GPL-3.0](../LICENSE)及[来源说明](../NOTICE.md)。
+RackTop 2.2.0 是 [AIsMovDataInfra/RackTop-Workspace](https://github.com/AIsMovDataInfra/RackTop-Workspace) 正在准备的统一测试候选，与 Linux 共用同一版本、标签和 Release，并计划分别提供 Apple Silicon 与 Intel 原生安装包。2.2.0 的公开标签、两种Mac安装包、更新清单、生产中继部署和本机安装均待后续完成。桌面名称仍为 RackTop，保留 SSH、本机密钥管理、共享网关及团队工作台。项目沿用 Tongzh-SEU 原作和旧 AIsMov 维护版的历史、[GPL-3.0](../LICENSE)及[来源说明](../NOTICE.md)。
 
 ## 下载与系统要求
 
-**发布状态：2.1.1测试版已作为Pre-release发布并完成安装包核验。** [v2.1.1 Release](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/tag/v2.1.1)提供两种DMG、对应更新归档，并与Linux共享源码、许可证、NOTICE及 `SHA256SUMS`。全部9个公开附件可匿名下载，GitHub digest、SHA256、源码及更新签名通过，见[2.1.1完整校验表](VERIFICATION_2_1_1.md#公开附件与更新签名)。
+**发布状态：2.2.0仍是测试候选，尚无Mac安装包。** 当前请使用已发布的 [v2.1.1 Release](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/tag/v2.1.1)；它提供两种DMG、对应更新归档，并与Linux共享源码、许可证、NOTICE及 `SHA256SUMS`。全部9个2.1.1公开附件可匿名下载，GitHub digest、SHA256、源码及更新签名通过，见[2.1.1完整校验表](VERIFICATION_2_1_1.md#公开附件与更新签名)。
 
 | Mac 机型 | 安装包 |
 | --- | --- |
@@ -25,12 +25,12 @@ RackTop 2.1.1 是 [AIsMovDataInfra/RackTop-Workspace](https://github.com/AIsMovD
 ## 连接服务器、共享与预约
 
 - **直接连接服务器**：在「添加服务器」填写 SSH 主机、端口和用户名，选择本机 SSH Agent、私钥或密码，并核对服务器 Host Key 指纹。已有私钥可通过「密钥管理」导入引用；Mac 需要能访问所选文件。保存密码使用本机系统钥匙串。
-- **通过邀请码访问共享资源**：在共享访客入口连接网关并输入资源所有者提供的邀请码，使用获准的监控、终端和文件能力。共享依赖资源所有者的 RackTop 和电脑持续在线；Mac 客户端不需要复制所有者的私钥。
+- **通过邀请码访问共享资源**：在共享访客入口连接网关并输入资源所有者提供的邀请码，使用获准的监控、终端和文件能力。2.2.0候选允许同一码在到期前依次绑定多台独立授权设备，撤销成员时轮换邀请码；分享者仅在访客在线时看到公网出口IP，并会提示NAT、VPN或代理可能让多人显示同一地址。共享依赖资源所有者的 RackTop 和电脑持续在线；Mac 客户端不需要复制所有者的私钥。
 - **团队预约**：连接同一个在线预约服务，用成员名称和密码注册或登录；普通成员需由超级管理员分配公司后使用。无需安装 RackTop 也可以在浏览器查看排期和预约；管理员可在桌面端将选中的服务器 GPU 清单同步到中央目录。同步不上传 SSH 地址或私钥。预约属于排期协调，不会自动授予 SSH 权限，也不会强制占用 GPU。详细流程见 [团队预约使用说明](../team-web/README.md)。
 
 ## 更新
 
-首次从旧维护版迁入当前新仓库分发，请退出 RackTop 后用对应架构的 DMG 替换应用。旧仓库与旧更新清单不变；新分发使用专用更新签名与 [RackTop-Workspace Releases](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases)，保留原应用标识和用户数据兼容。2.1.1通过新仓库 `updater/macos.json` 的 `darwin-aarch64` / `darwin-x86_64` 选择包并验证签名；两种公开更新归档已用新仓库公钥复验签名，Mac与Linux清单位于同一updater提交 `42b9e3a`。真实Mac用户的首次迁移与后续自动更新替换仍需在用户设备上验证。
+首次从旧维护版迁入当前新仓库分发，请退出 RackTop 后用对应架构的 DMG 替换应用。旧仓库与旧更新清单不变；新分发使用专用更新签名与 [RackTop-Workspace Releases](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases)，保留原应用标识和用户数据兼容。当前2.1.1通过新仓库 `updater/macos.json` 的 `darwin-aarch64` / `darwin-x86_64` 选择包并验证签名，两种公开更新归档已用新仓库公钥复验签名；2.2.0的两种更新归档和Mac/Linux清单推进仍待发布任务完成。真实Mac用户的首次迁移与后续自动更新替换仍需在用户设备上验证。
 
 Tauri 更新签名与 Apple Developer ID / 公证是两套机制。更新包具备 Tauri 签名，不代表其通过 Apple 公证。自动更新不可用时，退出应用后手动下载并安装本机架构对应的 DMG。应用数据与安装包分开存放，替换前可先在设置中导出配置备份。
 
@@ -69,6 +69,10 @@ SSH 导入与导出合并到 **SSH 配置**，导出可勾选特定连接，不�
 
 ## 验证范围
 
+2.2.0当前为测试候选。两种Mac架构的下拉菜单交互、邀请码多设备绑定与撤销轮换、在线访客IP、前端/Rust测试、DMG及更新归档构建、签名检查、原生启动和截图仍待本轮后续实际验证。v2.2.0标签、公开附件、Mac/Linux更新清单、生产中继升级和真实Mac安装均尚未完成。
+
+### 上一版 2.1.1 验证记录
+
 2.1.1的[标签工作流](https://github.com/AIsMovDataInfra/RackTop-Workspace/actions/runs/34320295755)三平台构建与统一发布全部成功。Apple Silicon和Intel分别通过DMG挂载、架构/代码签名、DMG与更新归档应用一致性及更新签名检查。两种原生runner各在隔离资料下启动至少8秒并创建数据库；两张1432×932截图已逐张审阅，可见2.1.1窗口和团队工作台入口，没有白屏、可见错误或明显布局问题。9个公开附件、423份标签源码和三个平台更新签名均通过，见[2.1.1完整记录](VERIFICATION_2_1_1.md)。
 
 ### 上一版 2.1.0 验证记录
@@ -106,6 +110,6 @@ GitHub Actions [v1.27.0 标签双架构构建 34180973823](https://github.com/AI
 
 ## 历史发布任务恢复（旧 1.x 仓库）
 
-以下说明仅针对旧仓库的 Mac 专项发布。当前2.1.1已依照统一工作流收齐 Linux 与两种 Mac 产物，核验同一 Release 后推进新仓库的两个 feed；不要用旧恢复工作流改动旧清单或单独提前推进 Mac。
+以下说明仅针对旧仓库的 Mac 专项发布。已发布的2.1.1依照统一工作流收齐 Linux 与两种 Mac 产物，核验同一 Release 后推进新仓库的两个 feed；2.2.0也必须使用当前统一标签工作流，不要用旧恢复工作流改动旧清单或单独提前推进 Mac。
 
 Mac 构建及原生检查已成功、但发布任务因环境或网络失败时，可在主分支运行 `Recover verified Mac release publication` 工作流，填写已有版本标签和该标签的构建 Run ID。恢复流程核对来源工作流、标签提交和两种架构的成功状态，重新验证更新签名后发布既有安装包，不重建应用、不移动标签。签名校验使用提供 minisign 的 Ubuntu 24.04 环境；已经创建的 Release 不允许覆盖，需先核实既有附件及更新清单状态。

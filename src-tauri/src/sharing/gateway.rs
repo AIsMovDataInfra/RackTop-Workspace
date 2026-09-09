@@ -47,16 +47,29 @@ pub async fn serve(
         tokio::time::timeout(Duration::from_secs(10), read_frame::<_, Wire>(&mut stream))
             .await
             .map_err(|_| "设备认证超时")??;
-    let Wire::Authenticate {
-        public_key,
-        signature,
-        device_name,
-        invite_secret,
-    } = authentication
-    else {
-        return Err("设备认证消息无效".into());
-    };
-    let (share, member) = match auth::authenticate(
+    let (public_key, signature, device_name, invite_secret, reusable_invitation) =
+        match authentication {
+            Wire::Authenticate {
+                public_key,
+                signature,
+                device_name,
+                invite_secret,
+            } => (public_key, signature, device_name, invite_secret, false),
+            Wire::AuthenticateReusable {
+                public_key,
+                signature,
+                device_name,
+                invite_secret,
+            } => (
+                public_key,
+                signature,
+                device_name,
+                Some(invite_secret),
+                true,
+            ),
+            _ => return Err("设备认证消息无效".into()),
+        };
+    let authenticated = match auth::authenticate(
         &runtime.store,
         &ticket.route_id,
         &public_key,
@@ -64,6 +77,7 @@ pub async fn serve(
         &nonce,
         invite_secret.as_deref(),
         &device_name,
+        reusable_invitation,
     ) {
         Ok(value) => value,
         Err(message) => {
@@ -71,8 +85,14 @@ pub async fn serve(
             return Ok(());
         }
     };
-    // Pairing changes an invitation route into a device route without handing
-    // out another capability. Extend its lifetime before confirming pairing.
+    let auth::Authentication {
+        share,
+        member,
+        reusable_pairing,
+        member_created: _,
+    } = authenticated;
+    // Reusable invitations issue one independent relay route per member. The
+    // route must exist before its capability is returned to the guest.
     relay
         .register_route(
             persisted.owner_token.as_deref().ok_or("共享网关未配置")?,
@@ -103,6 +123,7 @@ pub async fn serve(
             OwnerConnection {
                 generation: generation.clone(),
                 share_id: share.id.clone(),
+                guest_ip: ticket.guest_ip,
                 stop: stop.clone(),
             },
         ) {
@@ -111,8 +132,24 @@ pub async fn serve(
     }
     let result = async {
         auth::authorize_request(&runtime.store, &share.id, &member.id, &public_key, "session.ping")?;
-        write_frame(&mut stream, &Wire::Authenticated { member_id: member.id.clone(), resource_name: share.name.clone(),
-            expires_at: share.expires_at, capabilities: share.capabilities }).await?;
+        let response = if reusable_pairing {
+            Wire::AuthenticatedReusable {
+                member_id: member.id.clone(),
+                resource_name: share.name.clone(),
+                expires_at: share.expires_at,
+                capabilities: share.capabilities,
+                member_route_id: member.route_id.clone(),
+                member_route_token: member.route_token.clone(),
+            }
+        } else {
+            Wire::Authenticated {
+                member_id: member.id.clone(),
+                resource_name: share.name.clone(),
+                expires_at: share.expires_at,
+                capabilities: share.capabilities,
+            }
+        };
+        write_frame(&mut stream, &response).await?;
         let (mut reader, mut writer) = tokio::io::split(stream);
         let (incoming_tx, mut incoming_rx) = mpsc::channel(8);
         let mut reader_stopped = stopped.clone();

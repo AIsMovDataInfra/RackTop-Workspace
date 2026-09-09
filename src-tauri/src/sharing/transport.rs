@@ -2,7 +2,7 @@ use super::identity::{INNER_SERVER_NAME, OwnerIdentity, TRUSTED_RELAY_URL, decod
 use futures_util::{SinkExt, StreamExt};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer, ServerName};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use std::{sync::Arc, time::Duration};
+use std::{net::IpAddr, sync::Arc, time::Duration};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, DuplexStream};
 use tokio_rustls::{TlsAcceptor, TlsConnector, rustls};
 use tokio_tungstenite::{
@@ -26,6 +26,8 @@ pub struct HostTicket {
     pub host_path: String,
     pub host_token: String,
     pub expires_at: u64,
+    #[serde(default)]
+    pub guest_ip: Option<IpAddr>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -418,6 +420,28 @@ mod tests {
         assert!(RelayClient::new("https://attacker.invalid").is_err());
         assert!(RelayClient::new("http://136.0.110.161").is_err());
         assert!(validate_id("../../../etc/passwd").is_err());
+    }
+
+    #[test]
+    fn owner_ticket_accepts_optional_valid_ip_addresses_and_rejects_invalid_values() {
+        let base = serde_json::json!({
+            "routeId": "a".repeat(32),
+            "roomId": "b".repeat(32),
+            "hostPath": format!("/v1/rooms/{}/host", "b".repeat(32)),
+            "hostToken": "c".repeat(43),
+            "expiresAt": 42
+        });
+        let without: HostTicket = serde_json::from_value(base.clone()).unwrap();
+        assert!(without.guest_ip.is_none());
+        for address in ["203.0.113.8", "2001:db8::8"] {
+            let mut value = base.clone();
+            value["guestIp"] = serde_json::Value::String(address.into());
+            let ticket: HostTicket = serde_json::from_value(value).unwrap();
+            assert_eq!(ticket.guest_ip.unwrap().to_string(), address);
+        }
+        let mut invalid = base;
+        invalid["guestIp"] = serde_json::Value::String("not-an-ip".into());
+        assert!(serde_json::from_value::<HostTicket>(invalid).is_err());
     }
 
     #[tokio::test]

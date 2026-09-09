@@ -37,19 +37,59 @@ describe('sharing workspace authorization and workflows', () => {
     expect(container.textContent).not.toContain(server.host)
     expect(container.textContent).not.toContain(server.identityFile)
   })
-  it('creates the selected resource and displays only the invite returned by the backend', async () => {
+  it('keeps both sharing selects intact with a long resource label', async () => {
+    const longServer = { ...server, name: '上海具身智能训练集群 A100 服务器 · embodied-training-primary-01' }
+    vi.mocked(sharingApi.status).mockResolvedValue({ ...emptySharingStatus(), configured: true, ownerOnline: true })
+    await act(async () => root.render(<SharingWorkspace servers={[longServer]} currentServerId={longServer.id}/>))
+    await click('共享资源')
+    const selects = [...container.querySelectorAll<HTMLSelectElement>('.sharing-form select')]
+    expect(selects).toHaveLength(2)
+    expect(selects[0].value).toBe(longServer.id)
+    expect(selects[0].selectedOptions[0]?.textContent).toBe(longServer.name)
+    expect(selects[1].value).toBe('24')
+  })
+  it('creates the selected resource and presents the reusable invite returned by the backend', async () => {
     vi.mocked(sharingApi.status).mockResolvedValue({ ...emptySharingStatus(), configured: true, ownerOnline: true })
     const create = vi.spyOn(sharingApi, 'create').mockResolvedValue(owned)
-    vi.spyOn(sharingApi, 'invite').mockResolvedValue({ shareId: owned.id, code: 'one-time-test-code', expiresAt: Date.now() + 60000 })
+    vi.spyOn(sharingApi, 'invite').mockResolvedValue({ shareId: owned.id, code: 'reusable-test-code', expiresAt: Date.now() + 60000 })
     await mount(); await click('共享资源'); await click('创建并生成邀请码')
     expect(create).toHaveBeenCalledWith({ serverId: server.id, name: server.name, expiresInHours: 24, defaultPath: '~', capabilities })
-    expect(container.querySelector<HTMLTextAreaElement>('[aria-label="一次性邀请码"]')?.value).toBe('one-time-test-code')
+    expect(container.querySelector<HTMLTextAreaElement>('[aria-label="共享邀请码"]')?.value).toBe('reusable-test-code')
+    expect(container.querySelector('dialog')?.textContent).toContain('可反复复制')
+    expect(container.querySelector('dialog')?.textContent).toContain('多台设备')
+  })
+  it('copies the same reusable invite repeatedly and retrieves it again after closing', async () => {
+    vi.mocked(sharingApi.status).mockResolvedValue({ ...emptySharingStatus(), configured: true, ownerOnline: true, shares: [owned] })
+    const invite = vi.spyOn(sharingApi, 'invite').mockResolvedValue({ shareId: owned.id, code: 'stable-reusable-code', expiresAt: Date.now() + 60000 })
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+    await mount(); await click('查看邀请码'); await click('复制邀请码'); await click('再次复制')
+    expect(writeText).toHaveBeenCalledTimes(2)
+    expect(writeText).toHaveBeenNthCalledWith(1, 'stable-reusable-code')
+    expect(writeText).toHaveBeenNthCalledWith(2, 'stable-reusable-code')
+    await click('完成'); await click('查看邀请码')
+    expect(invite).toHaveBeenCalledTimes(2)
+    expect(container.querySelector<HTMLTextAreaElement>('[aria-label="共享邀请码"]')?.value).toBe('stable-reusable-code')
   })
   it('does not revoke a device until the confirmation is accepted', async () => {
     vi.mocked(sharingApi.status).mockResolvedValue({ ...emptySharingStatus(), configured: true, ownerOnline: true, shares: [owned] })
     const revoke = vi.spyOn(sharingApi, 'revokeMember').mockResolvedValue(undefined)
     await mount(); await click('撤销访问'); expect(revoke).not.toHaveBeenCalled()
+    expect(container.querySelector('dialog')?.textContent).toContain('现有邀请码会自动更新')
     await click('确认'); expect(revoke).toHaveBeenCalledWith('owned', 'member-a')
+  })
+  it('shows a connected member public egress IP and explains NAT without exposing stale addresses', async () => {
+    const withNetworkMembers: OwnedShare = { ...owned, members: [
+      { id: 'connected-ip', deviceName: '在线设备', pairedAt: Date.now(), connected: true, ipAddress: '203.0.113.7' },
+      { id: 'offline-ip', deviceName: '离线设备', pairedAt: Date.now(), lastSeenAt: Date.now(), connected: false, ipAddress: '198.51.100.8' },
+      { id: 'connected-no-ip', deviceName: '未知网络设备', pairedAt: Date.now(), connected: true },
+    ] }
+    vi.mocked(sharingApi.status).mockResolvedValue({ ...emptySharingStatus(), configured: true, ownerOnline: true, shares: [withNetworkMembers] })
+    await mount()
+    expect(container.textContent).toContain('公网出口 IP')
+    expect(container.textContent).toContain('203.0.113.7')
+    expect(container.textContent).not.toContain('198.51.100.8')
+    expect(container.textContent).toContain('同一 NAT 网络中的多台设备可能显示相同 IP')
   })
   it('keeps failed invitation input available for correction and shows the error', async () => {
     vi.spyOn(sharingApi, 'accept').mockRejectedValue(new Error('邀请码已过期'))

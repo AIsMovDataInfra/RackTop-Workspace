@@ -1,5 +1,5 @@
 export interface ShareCapabilities { monitor: boolean; terminal: boolean; files: boolean }
-export interface ShareMember { id: string; deviceName: string; pairedAt: number; lastSeenAt?: number | null; connected: boolean }
+export interface ShareMember { id: string; deviceName: string; pairedAt: number; lastSeenAt?: number | null; connected: boolean; ipAddress?: string | null }
 export interface OwnedShare { id: string; serverId: string; name: string; expiresAt: number; defaultPath: string; capabilities: ShareCapabilities; paused: boolean; members: ShareMember[] }
 export interface ReceivedShare { id: string; name: string; ownerLabel: string; expiresAt: number; capabilities: ShareCapabilities; state: 'offline' | 'connecting' | 'online' | 'error'; lastError?: string | null; defaultPath: string }
 export interface SharingStatus { relayUrl: string; configured: boolean; ownerOnline: boolean; shares: OwnedShare[]; received: ReceivedShare[] }
