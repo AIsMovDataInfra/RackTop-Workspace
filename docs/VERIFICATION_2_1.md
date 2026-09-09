@@ -1,6 +1,6 @@
 # RackTop 2.1.0 验证记录
 
-本页对应统一版本 **2.1.0**，基于已交付的2.0.0和仓库基线 `8d706e2`。本轮仍提供Linux amd64、Mac Apple Silicon和Intel安装包；Mac双架构是已有分发范围。本页只记录本轮实际证据，[2.0.0验证记录](VERIFICATION.md)原样保留。
+本页对应统一版本 **2.1.0**，基于已交付的2.0.0和仓库基线 `8d706e2`，发布源码为 [`b7e2f2d`](https://github.com/AIsMovDataInfra/RackTop-Workspace/commit/b7e2f2d67003569c4772f7121ac31aeaf855047d)。本轮仍提供Linux amd64、Mac Apple Silicon和Intel安装包；Mac双架构是已有分发范围。本页只记录本轮实际证据，[2.0.0验证记录](VERIFICATION.md)原样保留。
 
 ## 当前进展
 
@@ -12,9 +12,9 @@
 | 团队后端与网页全套 | 后端139/139、网页113/113通过。 |
 | 桌面自动化 | 322/322通过。 |
 | 浏览器流程 | 品牌、24头像持久保存、公司空状态、跨年周窗口、统计操作、手机尺寸和普通成员权限均已验证。 |
-| 生产升级 | 尚待本轮备份、迁移和部署验证；上一版2.0.0的上线记录不代替本轮。 |
-| 三平台CI、Release及更新清单 | 尚待构建、公开下载、摘要和签名核验。 |
-| 本机安装及原生交互 | 尚待本轮安装和启动验证；不沿用2.0.0结果。 |
+| 生产升级 | 2026-09-09 12:01:40（UTC+8）部署成功；一致性备份、20张旧表数据保全、公网TLS/15项GET检查及生产只读浏览器检查通过，无需回滚。 |
+| 三平台CI、Release及更新清单 | 标签工作流成功；9个公开附件、423个源码文件、两份清单内的三个平台签名均通过核验。 |
+| 本机安装及原生交互 | 已安装2.1.0至Linux用户目录并保留原资料/权限；旧进程未重启。三平台CI隔离原生启动通过，两张Mac截图已逐张审阅；完整用户设备交互不在本次范围。 |
 
 ## 已完成的本机浏览器检查
 
@@ -27,17 +27,47 @@
 
 普通成员浏览器仅显示自己的周报，不显示统计入口；设备公司固定为所属A公司，只返回该公司两台合成设备。390×844英文深色大字统计页的网格溢出已修复：日期和筛选框保持在页面内，统计表独立横滚并可打开报告，详情日期标题正常换行。上述检查不等于物理手机相机/触摸操作，也没有执行Mac真人原生交互。
 
-## 目标下载
+## 生产升级与公网检查
 
-以下是2.1.0目标文件，**尚未声明已发布或可下载**。上一版[2.0.0 Release](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/tag/v2.0.0)仍可使用。
+[在线工作台](https://136.0.110.161)已于 **2026-09-09 12:01:40（UTC+8）** 升级到2.1.0，部署源码为 `b7e2f2d`。部署包来自该合并提交；网页构建来源与发布源码的Git树一致。切换服务前，在服务器Node.js 24.20.0和独立临时测试库中运行后端全套，139/139通过。
 
-| 平台 | 目标文件 |
-| --- | --- |
-| Linux amd64 | [RackTop_2.1.0_linux-amd64.deb](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.1.0/RackTop_2.1.0_linux-amd64.deb) |
-| Mac Apple Silicon | [RackTop_2.1.0_macos-arm64-unsigned.dmg](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.1.0/RackTop_2.1.0_macos-arm64-unsigned.dmg) |
-| Mac Intel | [RackTop_2.1.0_macos-x64-unsigned.dmg](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.1.0/RackTop_2.1.0_macos-x64-unsigned.dmg) |
+一致性备份后的迁移核对20张旧表的旧列摘要及计数器，全部保持一致；仅新增默认NULL的 `account_users.avatar_choice`，没有重建账号表或新增业务表。旧账号、会话、公司、照片、预约、周报日期/内容/评分和审计资料保持。服务配置未改变，团队服务、原共享中继与Nginx继续运行，未触发回滚。
 
-Mac更新归档分别为 `RackTop_2.1.0_macos-arm64-unsigned.app.tar.gz` 和 `RackTop_2.1.0_macos-x64-unsigned.app.tar.gz`。源码、LICENSE、NOTICE与SHA256SUMS在统一Release完成后核验，不预填摘要。
+公网证书校验和15项匿名GET检查通过：网页入口及健康检查可达，含周报统计在内的业务接口均拒绝匿名访问（401）。HTML、CSS和JavaScript三份构建资产的SHA256与部署前记录一致。这些检查没有创建或修改生产业务资料。
+
+生产浏览器只读检查确认原超级管理员会话仍有效，RackTop主品牌、四家公司筛选（包含零设备公司）、待分配设备列表、周报统计页及设置中的24种头像正常载入。检查没有更改实际成员公司、头像、周报或设备内容；公开记录不包含真实员工资料或业务数值。公开桌面包与本机安装的独立验收结果如下。
+
+## 公开附件与更新签名
+
+[v2.1.0 Release](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/tag/v2.1.0)已于2026-09-09作为**测试版（Pre-release）**发布，不标记为Latest。公开页面已核对标题、五条更新及正文九个下载链接。Linux、Apple Silicon和Intel来自同一标签；[标签工作流](https://github.com/AIsMovDataInfra/RackTop-Workspace/actions/runs/34309165167)的三平台构建与统一发布均成功。
+
+下列九个附件均已实际匿名下载（HTTP 200），字节数、GitHub digest与本机SHA256一致；`SHA256SUMS`覆盖其余八个文件并逐一匹配。源码归档的423个文件与发布标签精确一致，提交标记、LICENSE和NOTICE亦匹配。普通安装选择Deb或对应DMG，`.app.tar.gz`为Mac更新归档。
+
+| 文件 | 字节数 | SHA256 |
+| --- | ---: | --- |
+| [RackTop_2.1.0_linux-amd64.deb](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.1.0/RackTop_2.1.0_linux-amd64.deb) | 11,710,122 | `a2efe8090409dc930621fcda635fe9111de688a4f0bcf4eb59e912447f6a10b2` |
+| [RackTop_2.1.0_macos-arm64-unsigned.dmg](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.1.0/RackTop_2.1.0_macos-arm64-unsigned.dmg) | 9,419,333 | `796e9f7c12023e70749e05bb165841b5effbbfef94cd71e9f3ea61585c9aa121` |
+| [RackTop_2.1.0_macos-arm64-unsigned.app.tar.gz](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.1.0/RackTop_2.1.0_macos-arm64-unsigned.app.tar.gz) | 9,325,064 | `90ceba052ff7bdcfbecc4c672b966812858c0e0df3c743694d3579ad3c5065c0` |
+| [RackTop_2.1.0_macos-x64-unsigned.dmg](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.1.0/RackTop_2.1.0_macos-x64-unsigned.dmg) | 10,042,445 | `06e3da18dda80f4375cc63c8d740035a347ab8ed91c531f5f3b44047ace40f4a` |
+| [RackTop_2.1.0_macos-x64-unsigned.app.tar.gz](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.1.0/RackTop_2.1.0_macos-x64-unsigned.app.tar.gz) | 9,951,505 | `af5906829d9ef1271d7caa38865b3b7fbbf05733d0e747da7813125ef084c275` |
+| [RackTop_2.1.0_source.tar.gz](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.1.0/RackTop_2.1.0_source.tar.gz) | 9,526,148 | `65144adc7eaee3c3715df8698d0f8f1fd259347e983fae9942aa0180564e1799` |
+| [LICENSE](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.1.0/LICENSE) | 35,149 | `3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986` |
+| [NOTICE.md](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.1.0/NOTICE.md) | 2,703 | `df41af7d9908083c2b26686640dbb9d9d788ddbf7ef9098c5fa56e0e29a6fbff` |
+| [SHA256SUMS](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.1.0/SHA256SUMS) | 770 | `992df3c51815aea80611aa9c33e218a6b04a716f99a6270d95b4af078a734fef` |
+
+[Linux更新清单](https://github.com/AIsMovDataInfra/RackTop-Workspace/blob/5decbee0094c79e69b2f7ac44daff8f7c2d4748e/linux-amd64.json)与[Mac更新清单](https://github.com/AIsMovDataInfra/RackTop-Workspace/blob/5decbee0094c79e69b2f7ac44daff8f7c2d4748e/macos.json)位于同一updater提交 `5decbee0094c79e69b2f7ac44daff8f7c2d4748e`，均为2.1.0。`linux-x86_64-deb`、`darwin-aarch64`、`darwin-x86_64`的URL指向上述已验证文件，三个内嵌签名均已用对应仓库公钥复验通过。此结论验证下载与签名，不代替用户设备实际执行自动更新。
+
+## 三平台原生检查
+
+Linux CI通过桌面322项、Rust160项、中继27项、签名下载器9项及真实中继重连检查。Deb元数据版本为2.1.0、架构为amd64；7份包内MD5、ELF架构、LICENSE与NOTICE检查通过。隔离用户资料下原生启动至少15秒，按预定超时结束。
+
+Mac两架构分别在原生runner验证DMG挂载、架构、代码签名、更新签名，以及DMG和更新归档中的应用一致性；各自使用隔离资料启动至少8秒并创建独立数据库。两张正式CI截图与已查看的预览截图摘要相同，逐张视觉审阅可见2.1.0原生窗口和团队工作台入口，没有白屏或可见错误。这是CI原生启动和截图审阅，**没有执行真人Mac交互**；两种包仍为ad-hoc签名且未Apple公证。
+
+## 本机Linux安装
+
+已将上表核验过的公开Deb安装至本机用户目录中的2.1.0版本目录，用户启动器和应用菜单均指向新入口，动态库依赖可解析。安装前完成备份，安装后原数据库、配置及权限保持一致，应用标识仍为 `com.racktop.desktop`。
+
+系统级dpkg包仍为 `1.26.0-linux.8`，本次用户目录安装没有替换系统包。没有停止、启动或重启原RackTop进程，既有共享会话继续运行；用户方便时退出并重新打开即可使用2.1.0。本机安装检查没有另起隔离启动或操作真实用户资料；原生启动证据来自上面的CI检查。
 
 ## 功能与数据边界
 

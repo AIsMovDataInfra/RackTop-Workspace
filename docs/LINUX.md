@@ -1,13 +1,13 @@
 # Linux 客户端（实验版）
 
-RackTop 2.0.0 由独立仓库 [AIsMovDataInfra/RackTop-Workspace](https://github.com/AIsMovDataInfra/RackTop-Workspace) 分发，面向 Ubuntu 22.04 x86_64 / amd64 图形桌面。Linux 与 Mac 使用相同版本号，安装包名区分平台。[v2.0.0 Release](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/tag/v2.0.0) 已发布，Deb的公开下载、摘要、签名、版本与amd64架构均已核验。项目源自上游及旧 AIsMov 维护版，保留 Tongzh-SEU 原作者署名、完整历史及 GPL-3.0。
+RackTop 2.1.0 由独立仓库 [AIsMovDataInfra/RackTop-Workspace](https://github.com/AIsMovDataInfra/RackTop-Workspace) 分发，面向 Ubuntu 22.04 x86_64 / amd64 图形桌面。Linux 与 Mac 使用相同版本号，安装包名区分平台。[v2.1.0 测试版Release](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/tag/v2.1.0) 已发布，Deb的公开下载、摘要、签名、版本与amd64架构均已核验。项目源自上游及旧 AIsMov 维护版，保留 Tongzh-SEU 原作者署名、完整历史及 GPL-3.0。
 
 ## 安装与启动
 
 从 [Linux / Mac Release](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases) 下载 `.deb` 后，在其所在目录执行（将文件名替换为实际下载的文件名）：
 
 ```bash
-sudo apt install ./RackTop_2.0.0_linux-amd64.deb
+sudo apt install ./RackTop_2.1.0_linux-amd64.deb
 racktop
 ```
 
@@ -24,7 +24,7 @@ racktop
 
 ## 一键更新与首次升级
 
-从旧 `1.30.0-linux.12` 或其他旧维护版迁入 **2.0.0**，必须先下载新仓库 Deb 并手动安装一次。旧仓库及旧更新清单保持原状，不会自动将旧客户端引导到新仓库。新版本保留 `com.racktop.desktop` 标识与数据目录，服务器、项目、密钥引用和本机历史继续使用原资料；更换安装前可先备份应用数据。
+从旧 `1.30.0-linux.12` 或其他旧维护版迁入 **2.1.0**，必须先下载新仓库 Deb 并手动安装一次。旧仓库及旧更新清单保持原状，不会自动将旧客户端引导到新仓库。新版本保留 `com.racktop.desktop` 标识与数据目录，服务器、项目、密钥引用和本机历史继续使用原资料；更换安装前可先备份应用数据。
 
 安装新分发后，启动和每 24 小时检查新仓库更新，也可点击左上角手动检查。选择“更新到 v…”后先下载、验证新仓库的专用签名、包名、版本和架构，再通过系统授权窗口安装；拒绝降级。安装取消、网络或授权失败可重试或手动下载。系统安装需要 `pkexec`、APT 和可用的桌面授权代理，系统管理员密码与服务器 SSH 密码无关。
 
@@ -34,9 +34,9 @@ racktop
 
 ```bash
 # TAURI_SIGNING_PRIVATE_KEY_PATH 指向受保护的私钥文件；不要将内容写进命令或日志。
-python3 scripts/sign-linux-update.py src-tauri/target/release/bundle/deb/RackTop_2.0.0_linux-amd64.deb
+python3 scripts/sign-linux-update.py src-tauri/target/release/bundle/deb/RackTop_2.1.0_linux-amd64.deb
 cargo build --release --locked --features integration-probe --bin racktop-probe --manifest-path src-tauri/Cargo.toml
-python3 scripts/test-linux-update.py src-tauri/target/release/racktop-probe src-tauri/target/release/bundle/deb/RackTop_2.0.0_linux-amd64.deb
+python3 scripts/test-linux-update.py src-tauri/target/release/racktop-probe src-tauri/target/release/bundle/deb/RackTop_2.1.0_linux-amd64.deb
 ```
 
 ## 分享 SSH 连接与失败重试
@@ -101,6 +101,13 @@ npm run bundle:linux -- --locked
 网页使用方法见[工作台指南](WORKSPACE.md)与[设备管理](EQUIPMENT.md)。本轮没有 SSH 云同步，线上只保存团队业务资料。
 
 ## 验证范围
+
+2.1.0的[标签工作流](https://github.com/AIsMovDataInfra/RackTop-Workspace/actions/runs/34309165167)三平台构建与发布成功。Linux通过桌面322项、Rust160项、中继27项、签名下载器9项、真实中继重连及至少15秒隔离原生启动。公开Deb的版本/amd64架构、7份包内MD5、许可证与来源说明均核验通过；9个公开附件和三个更新签名通过，完整文件名及SHA256见[2.1.0校验表](VERIFICATION_2_1.md#公开附件与更新签名)。
+
+本机已将核验过的2.1.0 Deb安装至用户目录，更新用户启动器及应用菜单，原数据库、配置与权限保持。系统级dpkg仍为 `1.26.0-linux.8`，未替换系统包。原有进程未停止或重启，方便时退出并重新打开后生效；本机安装没有操作真实用户会话，也没有另起隔离启动。原生启动来自CI检查，详情见[本轮安装记录](VERIFICATION_2_1.md#本机linux安装)。
+
+### 历史 2.0.0 验证记录
+
 
 2.0.0 当前已完成桌面 322 项、Linux Rust 160 项测试（3 项依赖外部环境的既有测试忽略）及桌面生产构建。网页 91 项及浏览器工作台流程已验证。[标签工作流](https://github.com/AIsMovDataInfra/RackTop-Workspace/actions/runs/34294527671)三平台构建及发布均成功；Linux另通过中继27项、签名下载器9项、真实中继重连及至少15秒隔离原生启动检查。9个公开附件的下载、摘要和全部更新签名通过。在线工作台已部署，迁移与原管理员登录通过，详见[本轮验证记录](VERIFICATION.md)。
 
