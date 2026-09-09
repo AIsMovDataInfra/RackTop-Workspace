@@ -19,11 +19,25 @@ pub enum Wire {
         device_name: String,
         invite_secret: Option<String>,
     },
+    AuthenticateReusable {
+        public_key: String,
+        signature: String,
+        device_name: String,
+        invite_secret: String,
+    },
     Authenticated {
         member_id: String,
         resource_name: String,
         expires_at: u64,
         capabilities: Capabilities,
+    },
+    AuthenticatedReusable {
+        member_id: String,
+        resource_name: String,
+        expires_at: u64,
+        capabilities: Capabilities,
+        member_route_id: String,
+        member_route_token: String,
     },
     Rejected {
         message: String,

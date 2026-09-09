@@ -31,6 +31,7 @@ pub struct ConnectOptions {
     pub device: DeviceIdentity,
     pub device_name: String,
     pub invite_secret: Option<String>,
+    pub reusable_invitation: bool,
 }
 
 pub struct AuthenticatedInfo {
@@ -38,6 +39,8 @@ pub struct AuthenticatedInfo {
     pub resource_name: String,
     pub expires_at: u64,
     pub capabilities: Capabilities,
+    pub member_route_id: Option<String>,
+    pub member_route_token: Option<String>,
 }
 
 #[derive(Clone, Copy)]
@@ -90,6 +93,31 @@ impl ClientSession {
         options: ConnectOptions,
         events: EventSink,
     ) -> Result<(Arc<Self>, AuthenticatedInfo), String> {
+        if options.reusable_invitation {
+            return Err("可重复邀请码必须先完成成员配对".into());
+        }
+        let (stream, info) = Self::open_authenticated(&options).await?;
+        Ok((Self::start(stream, events, Timing::default()), info))
+    }
+
+    pub async fn pair_reusable(options: ConnectOptions) -> Result<AuthenticatedInfo, String> {
+        if !options.reusable_invitation {
+            return Err("当前邀请码不使用可重复配对协议".into());
+        }
+        let (stream, info) = Self::open_authenticated(&options).await?;
+        // The invitation route is only a short-lived pairing channel. Runtime
+        // persists the independently-issued member route before starting its
+        // normal reconnect loop.
+        drop(stream);
+        if info.member_route_id.is_none() || info.member_route_token.is_none() {
+            return Err("资源提供者未签发成员连接凭据".into());
+        }
+        Ok(info)
+    }
+
+    async fn open_authenticated(
+        options: &ConnectOptions,
+    ) -> Result<(SharedStream, AuthenticatedInfo), String> {
         label(&options.device_name, 80)?;
         let relay = RelayClient::new(&options.relay_url)?;
         let ticket = relay
@@ -98,8 +126,7 @@ impl ClientSession {
         let stream = relay
             .connect_visitor(&ticket, &options.owner_cert_der)
             .await?;
-        let (stream, info) = authenticate_stream(stream, &options).await?;
-        Ok((Self::start(stream, events, Timing::default()), info))
+        authenticate_stream(stream, options).await
     }
 
     fn start(stream: SharedStream, events: EventSink, timing: Timing) -> Arc<Self> {
@@ -278,6 +305,28 @@ impl ClientSession {
     }
 }
 
+pub(super) fn validate_member_authorization(
+    member: &AuthenticatedInfo,
+    expected_member_id: &str,
+    expected_resource_name: &str,
+    expected_expires_at: u64,
+    expected_capabilities: Capabilities,
+) -> Result<(), String> {
+    let same_capabilities = expected_capabilities.monitor == member.capabilities.monitor
+        && expected_capabilities.terminal == member.capabilities.terminal
+        && expected_capabilities.files == member.capabilities.files;
+    if expected_member_id != member.member_id
+        || expected_resource_name != member.resource_name
+        || expected_expires_at != member.expires_at
+        || !same_capabilities
+        || member.member_route_id.is_some()
+        || member.member_route_token.is_some()
+    {
+        return Err("成员通道返回的授权与配对结果不一致".into());
+    }
+    Ok(())
+}
+
 impl Drop for ClientSession {
     fn drop(&mut self) {
         self.close();
@@ -315,23 +364,36 @@ async fn authenticate_stream(
             &options.device,
             &authentication_message(&nonce, &options.route_id, &options.device.public_key),
         )?;
-        write_frame(
-            &mut stream,
-            &Wire::Authenticate {
+        let authentication = if options.reusable_invitation {
+            let invite_secret = options
+                .invite_secret
+                .clone()
+                .ok_or("可重复邀请码缺少配对密钥")?;
+            if identity::decode_bounded(&invite_secret, 32)?.len() != 32 {
+                return Err("可重复邀请码配对密钥无效".into());
+            }
+            Wire::AuthenticateReusable {
+                public_key: options.device.public_key.clone(),
+                signature,
+                device_name: label(&options.device_name, 80)?,
+                invite_secret,
+            }
+        } else {
+            Wire::Authenticate {
                 public_key: options.device.public_key.clone(),
                 signature,
                 device_name: label(&options.device_name, 80)?,
                 invite_secret: options.invite_secret.clone(),
-            },
-        )
-        .await?;
+            }
+        };
+        write_frame(&mut stream, &authentication).await?;
         match read_frame::<_, Wire>(&mut stream).await? {
             Wire::Authenticated {
                 member_id,
                 resource_name,
                 expires_at,
                 capabilities,
-            } => {
+            } if !options.reusable_invitation => {
                 let member_id = label(&member_id, 128)?;
                 let resource_name = label(&resource_name, 200)?;
                 if expires_at <= now_ms() {
@@ -342,9 +404,49 @@ async fn authenticate_stream(
                     resource_name,
                     expires_at,
                     capabilities,
+                    member_route_id: None,
+                    member_route_token: None,
+                })
+            }
+            Wire::AuthenticatedReusable {
+                member_id,
+                resource_name,
+                expires_at,
+                capabilities,
+                member_route_id,
+                member_route_token,
+            } if options.reusable_invitation => {
+                let member_id = label(&member_id, 128)?;
+                let resource_name = label(&resource_name, 200)?;
+                if expires_at <= now_ms() {
+                    return Err("资源共享已过期".into());
+                }
+                if identity::decode_bounded(&member_route_id, 24)
+                    .map_err(|_| "资源提供者返回的成员连接凭据无效")?
+                    .len()
+                    != 24
+                    || identity::decode_bounded(&member_route_token, 32)
+                        .map_err(|_| "资源提供者返回的成员连接凭据无效")?
+                        .len()
+                        != 32
+                    || member_route_id == options.route_id
+                    || member_route_token == options.route_token
+                {
+                    return Err("资源提供者返回的成员连接凭据无效".into());
+                }
+                Ok(AuthenticatedInfo {
+                    member_id,
+                    resource_name,
+                    expires_at,
+                    capabilities,
+                    member_route_id: Some(member_route_id),
+                    member_route_token: Some(member_route_token),
                 })
             }
             Wire::Rejected { message } => Err(message),
+            Wire::Authenticated { .. } | Wire::AuthenticatedReusable { .. } => {
+                Err("资源提供者返回的邀请码协议版本不匹配".into())
+            }
             _ => Err("资源提供者身份响应无效".into()),
         }
     })
@@ -559,7 +661,102 @@ mod tests {
             device: identity::generate_device_identity(),
             device_name: "Test device".into(),
             invite_secret: Some(identity::random_token()),
+            reusable_invitation: false,
         }
+    }
+
+    fn authenticated_info(
+        member_id: &str,
+        resource_name: &str,
+        expires_at: u64,
+        capabilities: Capabilities,
+        include_member_route: bool,
+    ) -> AuthenticatedInfo {
+        AuthenticatedInfo {
+            member_id: member_id.into(),
+            resource_name: resource_name.into(),
+            expires_at,
+            capabilities,
+            member_route_id: include_member_route.then(identity::random_route_id),
+            member_route_token: include_member_route.then(identity::random_token),
+        }
+    }
+
+    #[test]
+    fn member_reconnection_must_exactly_match_the_pairing_authorization() {
+        let expires_at = now_ms() + 60_000;
+        let capabilities = Capabilities {
+            monitor: true,
+            terminal: true,
+            files: false,
+        };
+        assert!(
+            validate_member_authorization(
+                &authenticated_info("member", "A100", expires_at, capabilities, false),
+                "member",
+                "A100",
+                expires_at,
+                capabilities,
+            )
+            .is_ok()
+        );
+        for mismatched in [
+            authenticated_info("other-member", "A100", expires_at, capabilities, false),
+            authenticated_info("member", "H100", expires_at, capabilities, false),
+            authenticated_info("member", "A100", expires_at + 1, capabilities, false),
+            authenticated_info(
+                "member",
+                "A100",
+                expires_at,
+                Capabilities {
+                    monitor: false,
+                    terminal: true,
+                    files: false,
+                },
+                false,
+            ),
+            authenticated_info(
+                "member",
+                "A100",
+                expires_at,
+                Capabilities {
+                    monitor: true,
+                    terminal: false,
+                    files: false,
+                },
+                false,
+            ),
+            authenticated_info(
+                "member",
+                "A100",
+                expires_at,
+                Capabilities {
+                    monitor: true,
+                    terminal: true,
+                    files: true,
+                },
+                false,
+            ),
+            authenticated_info("member", "A100", expires_at, capabilities, true),
+        ] {
+            assert!(
+                validate_member_authorization(
+                    &mismatched,
+                    "member",
+                    "A100",
+                    expires_at,
+                    capabilities,
+                )
+                .is_err()
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn reusable_invites_cannot_start_a_long_lived_client_session() {
+        let mut options = options();
+        options.reusable_invitation = true;
+        assert!(ClientSession::connect(options, quiet()).await.is_err());
     }
 
     #[tokio::test]
@@ -631,6 +828,274 @@ mod tests {
         let (_, info) = authenticate.await.unwrap().unwrap();
         assert_eq!(info.member_id, "member");
         assert!(info.capabilities.terminal);
+        assert!(info.member_route_id.is_none());
+        assert!(info.member_route_token.is_none());
+    }
+
+    #[tokio::test]
+    async fn member_reconnect_keeps_the_legacy_authentication_message_without_an_invite_secret() {
+        let mut options = options();
+        options.invite_secret = None;
+        let (client, mut remote) = tokio::io::duplex(8192);
+        let authenticate =
+            tokio::spawn(async move { authenticate_stream(Box::new(client), &options).await });
+        write_frame(
+            &mut remote,
+            &Wire::Challenge {
+                nonce: identity::random_token(),
+            },
+        )
+        .await
+        .unwrap();
+        let Wire::Authenticate { invite_secret, .. } = read_frame(&mut remote).await.unwrap()
+        else {
+            panic!("legacy reconnect authenticate");
+        };
+        assert!(invite_secret.is_none());
+        write_frame(
+            &mut remote,
+            &Wire::Authenticated {
+                member_id: "member".into(),
+                resource_name: "A100".into(),
+                expires_at: now_ms() + 60_000,
+                capabilities: Capabilities {
+                    monitor: true,
+                    terminal: true,
+                    files: true,
+                },
+            },
+        )
+        .await
+        .unwrap();
+        let (_, info) = authenticate.await.unwrap().unwrap();
+        assert!(info.member_route_id.is_none());
+        assert!(info.member_route_token.is_none());
+    }
+
+    #[tokio::test]
+    async fn reusable_authentication_returns_a_strictly_validated_independent_member_route() {
+        let mut options = options();
+        options.reusable_invitation = true;
+        let invitation_route = options.route_id.clone();
+        let invitation_token = options.route_token.clone();
+        let public = options.device.public_key.clone();
+        let secret = options.invite_secret.clone().unwrap();
+        let nonce = identity::random_token();
+        let member_route_id = identity::random_route_id();
+        let member_route_token = identity::random_token();
+        let expected_route_id = member_route_id.clone();
+        let expected_route_token = member_route_token.clone();
+        let (client, mut remote) = tokio::io::duplex(8192);
+        let authenticate =
+            tokio::spawn(async move { authenticate_stream(Box::new(client), &options).await });
+        write_frame(
+            &mut remote,
+            &Wire::Challenge {
+                nonce: nonce.clone(),
+            },
+        )
+        .await
+        .unwrap();
+        let Wire::AuthenticateReusable {
+            public_key,
+            signature,
+            invite_secret,
+            ..
+        } = read_frame(&mut remote).await.unwrap()
+        else {
+            panic!("reusable authenticate");
+        };
+        assert_eq!(public_key, public);
+        assert_eq!(invite_secret, secret);
+        identity::verify(
+            &public,
+            &authentication_message(&nonce, &invitation_route, &public),
+            &signature,
+        )
+        .unwrap();
+        write_frame(
+            &mut remote,
+            &Wire::AuthenticatedReusable {
+                member_id: "member".into(),
+                resource_name: "A100".into(),
+                expires_at: now_ms() + 60_000,
+                capabilities: Capabilities {
+                    monitor: true,
+                    terminal: true,
+                    files: true,
+                },
+                member_route_id,
+                member_route_token,
+            },
+        )
+        .await
+        .unwrap();
+        let (_, info) = authenticate.await.unwrap().unwrap();
+        assert_eq!(
+            info.member_route_id.as_deref(),
+            Some(expected_route_id.as_str())
+        );
+        assert_eq!(
+            info.member_route_token.as_deref(),
+            Some(expected_route_token.as_str())
+        );
+        assert_ne!(
+            info.member_route_id.as_deref(),
+            Some(invitation_route.as_str())
+        );
+        assert_ne!(
+            info.member_route_token.as_deref(),
+            Some(invitation_token.as_str())
+        );
+    }
+
+    async fn reusable_authentication_result(
+        member_route_id: String,
+        member_route_token: String,
+        reuse_invitation_route: bool,
+        reuse_invitation_token: bool,
+    ) -> Result<(SharedStream, AuthenticatedInfo), String> {
+        let mut options = options();
+        options.reusable_invitation = true;
+        let member_route_id = if reuse_invitation_route {
+            options.route_id.clone()
+        } else {
+            member_route_id
+        };
+        let member_route_token = if reuse_invitation_token {
+            options.route_token.clone()
+        } else {
+            member_route_token
+        };
+        let (client, mut remote) = tokio::io::duplex(8192);
+        let authenticate =
+            tokio::spawn(async move { authenticate_stream(Box::new(client), &options).await });
+        write_frame(
+            &mut remote,
+            &Wire::Challenge {
+                nonce: identity::random_token(),
+            },
+        )
+        .await
+        .unwrap();
+        let _: Wire = read_frame(&mut remote).await.unwrap();
+        write_frame(
+            &mut remote,
+            &Wire::AuthenticatedReusable {
+                member_id: "member".into(),
+                resource_name: "A100".into(),
+                expires_at: now_ms() + 60_000,
+                capabilities: Capabilities {
+                    monitor: true,
+                    terminal: true,
+                    files: true,
+                },
+                member_route_id,
+                member_route_token,
+            },
+        )
+        .await
+        .unwrap();
+        authenticate.await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn reusable_authentication_rejects_malformed_member_routes() {
+        assert!(
+            reusable_authentication_result("weak".into(), identity::random_token(), false, false,)
+                .await
+                .is_err()
+        );
+        assert!(
+            reusable_authentication_result(
+                identity::random_route_id(),
+                "weak".into(),
+                false,
+                false,
+            )
+            .await
+            .is_err()
+        );
+
+        assert!(
+            reusable_authentication_result(
+                identity::random_route_id(),
+                identity::random_token(),
+                true,
+                false,
+            )
+            .await
+            .is_err()
+        );
+        assert!(
+            reusable_authentication_result(
+                identity::random_route_id(),
+                identity::random_token(),
+                false,
+                true,
+            )
+            .await
+            .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn reusable_authentication_requires_a_secret_and_cannot_be_downgraded() {
+        let mut missing_secret = options();
+        missing_secret.reusable_invitation = true;
+        missing_secret.invite_secret = None;
+        let (client, mut remote) = tokio::io::duplex(8192);
+        let authenticate =
+            tokio::spawn(
+                async move { authenticate_stream(Box::new(client), &missing_secret).await },
+            );
+        write_frame(
+            &mut remote,
+            &Wire::Challenge {
+                nonce: identity::random_token(),
+            },
+        )
+        .await
+        .unwrap();
+        assert!(authenticate.await.unwrap().is_err());
+        assert!(read_frame::<_, Wire>(&mut remote).await.is_err());
+
+        let mut reusable = options();
+        reusable.reusable_invitation = true;
+        let (client, mut remote) = tokio::io::duplex(8192);
+        let authenticate =
+            tokio::spawn(async move { authenticate_stream(Box::new(client), &reusable).await });
+        write_frame(
+            &mut remote,
+            &Wire::Challenge {
+                nonce: identity::random_token(),
+            },
+        )
+        .await
+        .unwrap();
+        let Wire::AuthenticateReusable { .. } = read_frame(&mut remote).await.unwrap() else {
+            panic!("reusable authenticate");
+        };
+        write_frame(
+            &mut remote,
+            &Wire::Authenticated {
+                member_id: "member".into(),
+                resource_name: "A100".into(),
+                expires_at: now_ms() + 60_000,
+                capabilities: Capabilities {
+                    monitor: true,
+                    terminal: true,
+                    files: true,
+                },
+            },
+        )
+        .await
+        .unwrap();
+        let error = match authenticate.await.unwrap() {
+            Err(error) => error,
+            Ok(_) => panic!("legacy response must not downgrade reusable authentication"),
+        };
+        assert!(error.contains("协议版本不匹配"));
     }
 
     #[tokio::test]

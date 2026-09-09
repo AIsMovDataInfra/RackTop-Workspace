@@ -2,7 +2,7 @@
 
 本项目由 **AIsMov** 维护，当前代码与 Linux / macOS 分发位于独立公开仓库 [AIsMovDataInfra/RackTop-Workspace](https://github.com/AIsMovDataInfra/RackTop-Workspace)。桌面应用继续叫 **RackTop**，在线网页为 **AIsMov RackTop 团队工作台**。项目源自 [Tongzh-SEU/RackTop](https://github.com/Tongzh-SEU/RackTop) 及 [原 AIsMov 维护仓库](https://github.com/AIsMovDataInfra/RackTop)，保留原作者 **Tongzh-SEU**、完整 Git 历史、[GPL-3.0](LICENSE) 和[来源说明](NOTICE.md)。
 
-当前版本为 **2.1.1 测试版（Pre-release）**，继续提供 Linux amd64、Mac Apple Silicon 和 Mac Intel 安装包。2.1.1 明确超级管理员职责：超管没有公司归属，可跨公司管理；无需且不能以自己为作者写周报，也不进入周报统计，但仍可代普通成员写周报和审批设备申请。[PR #5](https://github.com/AIsMovDataInfra/RackTop-Workspace/pull/5) 已合并为 `7fdecfa`，[三平台工作流](https://github.com/AIsMovDataInfra/RackTop-Workspace/actions/runs/34320295755)和9个公开附件已验收；在线工作台已切换到2.1.1且未迁移或重写数据库。本机Linux用户目录已安装2.1.1并保持原资料，完整状态见[2.1.1验证记录](docs/VERIFICATION_2_1_1.md)。
+当前源码版本为 **2.2.0 测试候选**，面向 Linux amd64、Mac Apple Silicon 和 Mac Intel。它修复共享资源及其他桌面原生下拉菜单的纵向裁切；同一邀请码在到期前可供多台设备依次加入，每台设备独立授权，撤销成员时轮换邀请码；分享者仅在访客在线时看到公网出口 IP，并明确 NAT、VPN 或代理可能让多人显示同一地址。2.2.0 的公开标签、安装包、更新清单、生产中继部署和本机安装均待后续完成。当前可下载与线上运行的版本仍为 [2.1.1](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/tag/v2.1.1)，其完整状态见[2.1.1验证记录](docs/VERIFICATION_2_1_1.md)。
 
 <div align="right">
   🌐 Language:
@@ -44,7 +44,7 @@ RackTop 是面向个人研究者和小型团队的 GPU 服务器桌面工作台�
 
 ## 下载
 
-**2.1.1 测试版已发布并完成公开下载、GitHub digest、SHA256、源码和更新签名核验。** Mac继续提供两种架构；这是Pre-release，未标记为Latest。完整附件与SHA256见[2.1.1校验表](docs/VERIFICATION_2_1_1.md#公开附件与更新签名)。
+**2.2.0 仍是测试候选，尚无可下载的安装包。** 当前请使用已完成公开下载、GitHub digest、SHA256、源码和更新签名核验的2.1.1测试版；Mac继续提供两种架构。完整附件与SHA256见[2.1.1校验表](docs/VERIFICATION_2_1_1.md#公开附件与更新签名)。
 
 | 平台 | 安装包 |
 | --- | --- |
@@ -111,6 +111,7 @@ AIsMov 维护版增加 Linux 平台识别、系统钥匙串接入、原生窗口
 - **项目资料管理**：按项目管理工作目录，并关联数据集和模型；支持跨服务器检查状态、同步副本和补齐缺失资料。
 - **启动配置与任务管理**：保存项目级启动配置，在不同服务器和 GPU 上切换工作目录、GPU 卡号、Shell 命令、超参数和日志路径，再统一启动和监测任务。
 - **运行状态与历史**：查看 RackTop 任务和外部进程、日志、资源监测、历史热力图，以及离线、高温、空闲和进程退出通知。
+- **资源共享**：通过分享者电脑跨网络使用获准的监控、终端和文件能力，不向接收者提供 SSH 私钥；2.2.0 候选支持同一码多设备独立授权，并让分享者在访客在线时查看公网出口 IP。
 - **安全连接**：支持 SSH Agent、密钥、密码、`~/.ssh/config`、ProxyJump 和 Host Key 指纹核验，不自动接受未知主机。
 - **本机 SSH 密钥管理**：从左下角“密钥管理”入口发现已有密钥、手动生成 Ed25519 或 RSA 4096 密钥对、导入引用、重命名和复制公钥；在服务器设置中选择对应私钥。移出列表会保留原文件。
 

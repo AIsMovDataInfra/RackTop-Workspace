@@ -45,6 +45,45 @@ fn received(id: &str) -> ReceivedShare {
         device_name: "Fixture".into(),
     }
 }
+
+#[test]
+fn reusable_received_credentials_never_fall_back_to_the_invitation_route() {
+    let invitation_route = identity::random_route_id();
+    let invitation_token = identity::random_token();
+    let member_route = identity::random_route_id();
+    let member_token = identity::random_token();
+    let mut invitation = identity::Invitation {
+        relay_url: DEFAULT_RELAY.into(),
+        route_id: invitation_route.clone(),
+        route_token: invitation_token.clone(),
+        owner_cert_der: "fixture".into(),
+        invite_secret: identity::random_token(),
+        resource_name: "A100".into(),
+        reusable: true,
+    };
+    let mut info = AuthenticatedInfo {
+        member_id: "member".into(),
+        resource_name: "A100".into(),
+        expires_at: now_ms() + 60_000,
+        capabilities: Capabilities::default(),
+        member_route_id: Some(member_route.clone()),
+        member_route_token: Some(member_token.clone()),
+    };
+    assert_eq!(
+        received_credentials(&invitation, &info).unwrap(),
+        (member_route, member_token)
+    );
+    info.member_route_id = None;
+    info.member_route_token = None;
+    assert!(received_credentials(&invitation, &info).is_err());
+
+    invitation.reusable = false;
+    assert_eq!(
+        received_credentials(&invitation, &info).unwrap(),
+        (invitation_route, invitation_token)
+    );
+}
+
 fn runtime(data: Persisted) -> (Arc<SharingRuntime>, Arc<AtomicUsize>) {
     let calls = Arc::new(AtomicUsize::new(0));
     let called = calls.clone();
@@ -65,6 +104,7 @@ fn owner_peer(runtime: &SharingRuntime, share: &str, member: &str) -> watch::Rec
         OwnerConnection {
             generation: uuid::Uuid::new_v4().to_string(),
             share_id: share.into(),
+            guest_ip: None,
             stop,
         },
     );
@@ -138,8 +178,19 @@ async fn pausing_denies_requests_and_signals_only_that_shares_sessions_before_re
 async fn revoking_a_member_signals_only_that_device_and_removes_its_authority() {
     let a = member("a");
     let b = member("b");
+    let invitation_route = identity::random_route_id();
+    let invitation_secret = identity::random_token();
+    let mut owned = share("first", vec![a.clone(), b.clone()]);
+    owned.invitations.push(PendingInvitation {
+        route_id: invitation_route,
+        route_token: identity::random_token(),
+        secret_hash: auth::secret_hash(&invitation_secret),
+        expires_at: now_ms() + 30_000,
+        reusable: true,
+        invite_secret: Some(invitation_secret),
+    });
     let (runtime, calls) = runtime(Persisted {
-        shares: vec![share("first", vec![a.clone(), b.clone()])],
+        shares: vec![owned],
         ..Persisted::default()
     });
     let first = owner_peer(&runtime, "first", "a");
@@ -150,6 +201,10 @@ async fn revoking_a_member_signals_only_that_device_and_removes_its_authority() 
         .unwrap();
     assert!(*first.borrow());
     assert!(!*second.borrow());
+    let saved = runtime.store.snapshot().unwrap();
+    assert!(saved.shares[0].invitations.is_empty());
+    assert_eq!(saved.shares[0].members.len(), 1);
+    assert_eq!(saved.shares[0].members[0].id, "b");
     for method in [
         "session.ping",
         "monitor.snapshot",
@@ -171,6 +226,65 @@ async fn revoking_a_member_signals_only_that_device_and_removes_its_authority() 
     );
     assert!(!*second.borrow());
     assert_eq!(calls.load(Ordering::Relaxed), 0);
+}
+
+#[tokio::test]
+async fn status_exposes_guest_ip_only_while_that_member_is_connected() {
+    let a = member("a");
+    let b = member("b");
+    let (runtime, _) = runtime(Persisted {
+        shares: vec![share("first", vec![a, b])],
+        ..Persisted::default()
+    });
+    let (stop, _stopped) = watch::channel(false);
+    runtime.peers.lock().unwrap().insert(
+        "a".into(),
+        OwnerConnection {
+            generation: uuid::Uuid::new_v4().to_string(),
+            share_id: "first".into(),
+            guest_ip: Some("203.0.113.17".parse().unwrap()),
+            stop,
+        },
+    );
+
+    let connected = runtime.status().await.unwrap();
+    assert_eq!(connected["shares"][0]["members"][0]["connected"], true);
+    assert_eq!(
+        connected["shares"][0]["members"][0]["ipAddress"],
+        "203.0.113.17"
+    );
+    assert_eq!(connected["shares"][0]["members"][1]["connected"], false);
+    assert!(
+        connected["shares"][0]["members"][1]
+            .get("ipAddress")
+            .is_none()
+    );
+
+    runtime
+        .peers
+        .lock()
+        .unwrap()
+        .get("a")
+        .unwrap()
+        .stop
+        .send(true)
+        .unwrap();
+    let stopping = runtime.status().await.unwrap();
+    assert_eq!(stopping["shares"][0]["members"][0]["connected"], false);
+    assert!(
+        stopping["shares"][0]["members"][0]
+            .get("ipAddress")
+            .is_none()
+    );
+
+    runtime.peers.lock().unwrap().remove("a");
+    let offline = runtime.status().await.unwrap();
+    assert_eq!(offline["shares"][0]["members"][0]["connected"], false);
+    assert!(
+        offline["shares"][0]["members"][0]
+            .get("ipAddress")
+            .is_none()
+    );
 }
 
 #[tokio::test]

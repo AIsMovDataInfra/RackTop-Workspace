@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import WebSocket from 'ws';
-import { createRelay, readOwnerTokenFile } from '../src/relay.mjs';
+import { createRelay, forwardedGuestIp, readOwnerTokenFile } from '../src/relay.mjs';
 
 const OWNER = randomBytes(32).toString('base64url');
 const BAD = randomBytes(32).toString('base64url');
@@ -81,6 +81,19 @@ async function eventually(predicate) {
     await delay(5);
   }
 }
+
+test('forwarded guest addresses require one valid value from a loopback proxy', () => {
+  assert.equal(forwardedGuestIp('127.0.0.1', '198.51.100.23'), '198.51.100.23');
+  assert.equal(forwardedGuestIp('::1', '2001:db8:2::45'), '2001:db8:2::45');
+  assert.equal(forwardedGuestIp('::ffff:127.0.0.1', '::ffff:203.0.113.18'), '203.0.113.18');
+
+  for (const forwarded of [undefined, '', 'not-an-ip', '198.51.100.1, 203.0.113.2',
+    ['198.51.100.1', '203.0.113.2']]) {
+    assert.equal(forwardedGuestIp('127.0.0.1', forwarded), null);
+  }
+  assert.equal(forwardedGuestIp('198.51.100.90', '203.0.113.4'), null);
+  assert.equal(forwardedGuestIp('::ffff:198.51.100.90', '203.0.113.4'), null);
+});
 
 test('owner credential file must be regular, 0600, correctly formatted, and not a symlink', () => {
   const directory = mkdtempSync(join(tmpdir(), 'racktop-relay-test-'));
@@ -371,6 +384,58 @@ const ownerRequest = (method = 'GET', body) => ({
   method, headers: { Authorization: `Bearer ${OWNER}` }, ...(body === undefined ? {} : { body: JSON.stringify(body) }),
 });
 const guestRequest = route => ({ method: 'POST', headers: { Authorization: `Bearer ${route.routeToken}` } });
+
+test('only owner pending tickets receive normalized proxy-attested guest addresses', async t => {
+  const f = await fixture(t);
+  const route = newRoute();
+  await f.request('/v1/routes', ownerRequest('POST', route));
+  await f.request('/v1/pending', ownerRequest());
+
+  for (const [forwarded, expected] of [
+    ['198.51.100.23', '198.51.100.23'],
+    ['2001:db8:2::45', '2001:db8:2::45'],
+    ['::ffff:203.0.113.18', '203.0.113.18'],
+  ]) {
+    const response = await f.request(`/v1/routes/${route.routeId}/connect`, {
+      ...guestRequest(route), headers: {
+        ...guestRequest(route).headers, 'X-Forwarded-For': forwarded,
+      },
+    });
+    assert.equal(response.status, 201);
+    const guestTicket = await response.json();
+    assert.equal(guestTicket.guestIp, undefined);
+    assert.ok(!JSON.stringify(guestTicket).includes(expected));
+
+    const pendingResponse = await f.request('/v1/pending', ownerRequest());
+    const { tickets } = await pendingResponse.json();
+    assert.equal(tickets.length, 1);
+    assert.equal(tickets[0].guestIp, expected);
+  }
+
+  assert.deepEqual(await (await f.request('/healthz')).json(), { status: 'ok' });
+  assert.deepEqual(Object.keys(f.relay.stats()).sort(), ['connections', 'pending', 'rooms', 'routes']);
+});
+
+test('invalid or multi-value forwarded addresses are omitted from owner tickets', async t => {
+  const f = await fixture(t);
+  const route = newRoute();
+  await f.request('/v1/routes', ownerRequest('POST', route));
+  await f.request('/v1/pending', ownerRequest());
+
+  for (const forwarded of ['not-an-ip', '198.51.100.1, 203.0.113.2', '']) {
+    const response = await f.request(`/v1/routes/${route.routeId}/connect`, {
+      ...guestRequest(route), headers: {
+        ...guestRequest(route).headers, 'X-Forwarded-For': forwarded,
+      },
+    });
+    assert.equal(response.status, 201);
+    const guestTicket = await response.json();
+    assert.equal(guestTicket.guestIp, undefined);
+    const { tickets } = await (await f.request('/v1/pending', ownerRequest())).json();
+    assert.equal(tickets.length, 1);
+    assert.equal(tickets[0].guestIp, undefined);
+  }
+});
 
 test('rendezvous registration and tickets are owner-only; credentials cannot be replaced', async t => {
   const f = await fixture(t);

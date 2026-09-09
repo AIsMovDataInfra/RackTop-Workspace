@@ -5,7 +5,8 @@ use serde::{Deserialize, Serialize};
 
 pub const TRUSTED_RELAY_URL: &str = "https://136.0.110.161";
 pub const INNER_SERVER_NAME: &str = "racktop-share.local";
-const INVITATION_PREFIX: &str = "racktop-share:1:";
+const INVITATION_V1_PREFIX: &str = "racktop-share:1:";
+const INVITATION_V2_PREFIX: &str = "racktop-share:2:";
 
 // These structs intentionally do not implement Debug: key material must stay out of logs.
 #[derive(Clone, Serialize, Deserialize)]
@@ -31,6 +32,10 @@ pub struct Invitation {
     pub owner_cert_der: String,
     pub invite_secret: String,
     pub resource_name: String,
+    // The protocol generation is carried by the textual prefix instead of the
+    // JSON payload so older v1 decoders continue to reject v2 codes cleanly.
+    #[serde(skip)]
+    pub reusable: bool,
 }
 
 pub fn random_token() -> String {
@@ -120,8 +125,13 @@ fn validate_invitation(invitation: &Invitation) -> Result<(), String> {
 pub fn encode_invitation(invitation: &Invitation) -> Result<String, String> {
     validate_invitation(invitation)?;
     let json = serde_json::to_vec(invitation).map_err(|_| "无法生成邀请码")?;
+    let prefix = if invitation.reusable {
+        INVITATION_V2_PREFIX
+    } else {
+        INVITATION_V1_PREFIX
+    };
     Ok(format!(
-        "{INVITATION_PREFIX}{}",
+        "{prefix}{}",
         URL_SAFE_NO_PAD.encode(json)
     ))
 }
@@ -130,12 +140,17 @@ pub fn decode_invitation(code: &str) -> Result<Invitation, String> {
     if code.len() > 16 * 1024 {
         return Err("邀请码过长".into());
     }
-    let payload = code
-        .trim()
-        .strip_prefix(INVITATION_PREFIX)
-        .ok_or("邀请码版本或格式无效")?;
-    let invitation = serde_json::from_slice(&decode_bounded(payload, 12 * 1024)?)
+    let code = code.trim();
+    let (payload, reusable) = if let Some(payload) = code.strip_prefix(INVITATION_V2_PREFIX) {
+        (payload, true)
+    } else if let Some(payload) = code.strip_prefix(INVITATION_V1_PREFIX) {
+        (payload, false)
+    } else {
+        return Err("邀请码版本或格式无效".into());
+    };
+    let mut invitation: Invitation = serde_json::from_slice(&decode_bounded(payload, 12 * 1024)?)
         .map_err(|_| "邀请码内容无效")?;
+    invitation.reusable = reusable;
     validate_invitation(&invitation)?;
     Ok(invitation)
 }
@@ -170,12 +185,21 @@ mod tests {
             owner_cert_der: owner.cert_der,
             invite_secret: random_token(),
             resource_name: "A100".into(),
+            reusable: true,
         };
         let encoded = encode_invitation(&invitation).unwrap();
+        assert!(encoded.starts_with(INVITATION_V2_PREFIX));
         assert_eq!(
-            decode_invitation(&encoded).unwrap().route_id,
-            invitation.route_id
+            (
+                decode_invitation(&encoded).unwrap().route_id,
+                decode_invitation(&encoded).unwrap().reusable,
+            ),
+            (invitation.route_id.clone(), true)
         );
+        invitation.reusable = false;
+        let encoded = encode_invitation(&invitation).unwrap();
+        assert!(encoded.starts_with(INVITATION_V1_PREFIX));
+        assert!(!decode_invitation(&encoded).unwrap().reusable);
         invitation.relay_url = "https://attacker.invalid".into();
         assert!(encode_invitation(&invitation).is_err());
         assert!(decode_invitation(&"x".repeat(20_000)).is_err());

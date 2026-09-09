@@ -1,6 +1,6 @@
 use super::{
     auth,
-    client::{ClientSession, ConnectOptions},
+    client::{AuthenticatedInfo, ClientSession, ConnectOptions, validate_member_authorization},
     gateway, identity,
     store::*,
     transfers::TransferManager,
@@ -15,6 +15,7 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde_json::{Value, json};
 use std::{
     collections::{HashMap, HashSet},
+    net::IpAddr,
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
@@ -28,6 +29,7 @@ pub type EventSink = Arc<dyn Fn(&str, Value) + Send + Sync>;
 pub(super) struct OwnerConnection {
     pub generation: String,
     pub share_id: String,
+    pub guest_ip: Option<IpAddr>,
     pub stop: watch::Sender<bool>,
 }
 struct GuestConnection {
@@ -37,7 +39,28 @@ struct GuestConnection {
     session: Option<Arc<ClientSession>>,
     stop: watch::Sender<bool>,
 }
+enum MemberConnectError {
+    Retry(String),
+    InvalidAuthorization(String),
+}
 type SnapshotCell = Arc<tokio::sync::Mutex<Option<(Instant, Snapshot)>>>;
+
+fn received_credentials(
+    invitation: &identity::Invitation,
+    info: &AuthenticatedInfo,
+) -> Result<(String, String), String> {
+    if invitation.reusable {
+        return Ok((
+            info.member_route_id
+                .clone()
+                .ok_or("资源提供者未签发成员连接凭据")?,
+            info.member_route_token
+                .clone()
+                .ok_or("资源提供者未签发成员连接凭据")?,
+        ));
+    }
+    Ok((invitation.route_id.clone(), invitation.route_token.clone()))
+}
 
 pub struct SharingRuntime {
     pub store: ShareStore,
@@ -170,7 +193,13 @@ impl SharingRuntime {
                     let runtime = self.clone();
                     let relay = relay.clone();
                     jobs.spawn(async move {
-                        let _ = gateway::serve(runtime, relay, ticket).await;
+                        let result = gateway::serve(runtime, relay, ticket).await;
+                        #[cfg(feature = "integration-probe")]
+                        if let Err(error) = result {
+                            eprintln!("Sharing probe owner gateway failed: {error}");
+                        }
+                        #[cfg(not(feature = "integration-probe"))]
+                        let _ = result;
                     });
                 }
                 Ok::<(), String>(())
@@ -194,7 +223,16 @@ impl SharingRuntime {
         let shares: Vec<_> = data
             .shares
             .iter()
-            .map(|s| s.view(|id| peers.contains_key(id)))
+            .map(|s| {
+                s.view(|id| {
+                    peers
+                        .get(id)
+                        .filter(|peer| !*peer.stop.borrow())
+                        .map_or((false, None), |peer| {
+                            (true, peer.guest_ip.map(|ip| ip.to_string()))
+                        })
+                })
+            })
             .collect();
         let received: Vec<_> = data
             .received
@@ -279,81 +317,134 @@ impl SharingRuntime {
             s.shares.push(share.clone());
             Ok(())
         })?;
-        Ok(json!(share.view(|_| false)))
+        Ok(json!(share.view(|_| (false, None))))
     }
     pub async fn invite(&self, share_id: String, expires_in_minutes: u64) -> Result<Value, String> {
         if !(1..=30).contains(&expires_in_minutes) {
             return Err("邀请码有效期应为 1–30 分钟".into());
         }
-        let secret = identity::random_token();
-        let route_id = identity::random_route_id();
-        let route_token = identity::random_token();
         let data = self.store.snapshot()?;
         let token = data.owner_token.as_deref().ok_or("请先配置共享网关")?;
-        let identity = data.owner_identity.as_ref().ok_or("请先配置共享网关")?;
-        let share = data
-            .shares
-            .iter()
-            .find(|s| s.id == share_id)
-            .ok_or("共享不存在")?;
-        if share.paused || share.expires_at <= now_ms() {
-            return Err("共享已暂停或过期".into());
-        }
-        let expires_at = share.expires_at.min(now_ms() + expires_in_minutes * 60_000);
-        let code = identity::encode_invitation(&identity::Invitation {
-            relay_url: data.relay_url.clone(),
-            route_id: route_id.clone(),
-            route_token: route_token.clone(),
-            owner_cert_der: identity.cert_der.clone(),
-            invite_secret: secret.clone(),
-            resource_name: share.name.clone(),
-        })?;
-        self.store.update(|s| {
+        let owner_identity = data.owner_identity.as_ref().ok_or("请先配置共享网关")?;
+        let now = now_ms();
+        let (invitation, resource_name) = self.store.update(|s| {
             for share in &mut s.shares {
-                share.invitations.retain(|i| i.expires_at > now_ms());
+                share.invitations.retain(|i| i.expires_at > now);
             }
-            let count: usize = s
+            let position = s
                 .shares
                 .iter()
-                .map(|s| s.members.len() + s.invitations.len())
-                .sum();
-            if count >= 64 {
-                return Err("共享设备及待使用邀请达到 64 个上限".into());
-            }
-            let share = s
-                .shares
-                .iter_mut()
-                .find(|s| s.id == share_id)
+                .position(|s| s.id == share_id)
                 .ok_or("共享不存在")?;
+            let share = &s.shares[position];
             if share.paused || share.expires_at <= now_ms() {
                 return Err("共享已暂停或过期".into());
             }
-            if share.members.len() >= 8 || share.invitations.len() >= 8 {
-                return Err("当前共享的设备或待使用邀请已达 8 个上限".into());
+            let valid_existing = share
+                .invitations
+                .iter()
+                .find(|candidate| {
+                    candidate.reusable
+                        && candidate.expires_at > now
+                        && identity::decode_bounded(&candidate.route_id, 24)
+                            .is_ok_and(|v| v.len() == 24)
+                        && identity::decode_bounded(&candidate.route_token, 32)
+                            .is_ok_and(|v| v.len() == 32)
+                        && candidate.invite_secret.as_ref().is_some_and(|secret| {
+                            auth::secret_hash(secret) == candidate.secret_hash
+                                && identity::decode_bounded(secret, 32).is_ok_and(|v| v.len() == 32)
+                        })
+                })
+                .cloned();
+            if let Some(existing) = valid_existing {
+                let resource_name = share.name.clone();
+                let share = &mut s.shares[position];
+                let mut kept = false;
+                share.invitations.retain(|candidate| {
+                    if !candidate.reusable {
+                        return true;
+                    }
+                    if !kept && candidate.route_id == existing.route_id {
+                        kept = true;
+                        return true;
+                    }
+                    false
+                });
+                return Ok((existing, resource_name));
             }
-            share.invitations.push(PendingInvitation {
-                route_id: route_id.clone(),
-                route_token: route_token.clone(),
+            if share.members.len() >= 8 {
+                return Err("当前共享的已授权设备已达 8 个上限".into());
+            }
+            let count = auth::active_route_count(s, now);
+            if count >= 64 {
+                return Err("共享设备及待使用邀请达到 64 个上限".into());
+            }
+            let secret = identity::random_token();
+            let pending = PendingInvitation {
+                route_id: identity::random_route_id(),
+                route_token: identity::random_token(),
                 secret_hash: auth::secret_hash(&secret),
-                expires_at,
-            });
-            Ok(())
+                expires_at: share
+                    .expires_at
+                    .min(now.saturating_add(expires_in_minutes * 60_000)),
+                reusable: true,
+                invite_secret: Some(secret),
+            };
+            let resource_name = share.name.clone();
+            // Keep legacy v1 invitations valid during the upgrade window.
+            let share = &mut s.shares[position];
+            share.invitations.retain(|candidate| !candidate.reusable);
+            share.invitations.push(pending.clone());
+            Ok((pending, resource_name))
+        })?;
+        let secret = invitation
+            .invite_secret
+            .as_deref()
+            .ok_or("邀请码凭据已损坏，请暂停后恢复共享再重试")?;
+        let code = identity::encode_invitation(&identity::Invitation {
+            relay_url: data.relay_url.clone(),
+            route_id: invitation.route_id.clone(),
+            route_token: invitation.route_token.clone(),
+            owner_cert_der: owner_identity.cert_der.clone(),
+            invite_secret: secret.into(),
+            resource_name,
+            reusable: true,
         })?;
         let relay = RelayClient::new(&data.relay_url)?;
         if let Err(error) = relay
-            .register_route(token, &route_id, &route_token, expires_at)
+            .register_route(
+                token,
+                &invitation.route_id,
+                &invitation.route_token,
+                invitation.expires_at,
+            )
             .await
         {
-            let _ = self.store.update(|s| {
-                for share in &mut s.shares {
-                    share.invitations.retain(|i| i.route_id != route_id);
-                }
-                Ok(())
-            });
+            // Keep the code in the keyring. Owner polling or a repeated request
+            // can register the same route after a transient relay failure, and
+            // concurrent callers cannot invalidate a code another caller got.
+            self.routes_changed.store(true, Ordering::Release);
             return Err(error);
         }
+        let still_current = self.store.snapshot()?.shares.into_iter().any(|share| {
+            share.id == share_id
+                && !share.paused
+                && share.expires_at > now_ms()
+                && share.invitations.iter().any(|current| {
+                    current.route_id == invitation.route_id
+                        && current.route_token == invitation.route_token
+                        && current.secret_hash == invitation.secret_hash
+                        && current.expires_at == invitation.expires_at
+                        && current.reusable
+                })
+        });
+        if !still_current {
+            let _ = relay.delete_route(token, &invitation.route_id).await;
+            self.routes_changed.store(true, Ordering::Release);
+            return Err("共享状态已变化，请重新获取邀请码".into());
+        }
         self.routes_changed.store(true, Ordering::Release);
-        Ok(json!({"code":code,"expiresAt":expires_at,"shareId":share_id}))
+        Ok(json!({"code":code,"expiresAt":invitation.expires_at,"shareId":share_id}))
     }
     fn stop_owner(&self, share_id: &str, member_id: Option<&str>) {
         if let Ok(peers) = self.peers.lock() {
@@ -406,7 +497,7 @@ impl SharingRuntime {
         Ok(())
     }
     pub async fn revoke_member(&self, share_id: String, member_id: String) -> Result<(), String> {
-        let route = self.store.update(|s| {
+        let routes = self.store.update(|s| {
             let share = s
                 .shares
                 .iter_mut()
@@ -417,10 +508,18 @@ impl SharingRuntime {
                 .iter()
                 .position(|m| m.id == member_id)
                 .ok_or("成员不存在")?;
-            Ok(share.members.remove(i).route_id)
+            let mut routes = vec![share.members.remove(i).route_id];
+            routes.extend(
+                share
+                    .invitations
+                    .drain(..)
+                    .map(|invitation| invitation.route_id),
+            );
+            Ok(routes)
         })?;
         self.stop_owner(&share_id, Some(&member_id));
-        self.delete_routes(vec![route]).await
+        self.routes_changed.store(true, Ordering::Release);
+        self.delete_routes(routes).await
     }
     pub async fn delete(&self, share_id: String) -> Result<(), String> {
         let routes = self.store.update(|s| {
@@ -503,6 +602,37 @@ impl SharingRuntime {
                 .clone())
         })
     }
+    async fn connect_saved_member(
+        &self,
+        resource: &ReceivedShare,
+    ) -> Result<Arc<ClientSession>, MemberConnectError> {
+        let (connected, info) = ClientSession::connect(
+            ConnectOptions {
+                relay_url: resource.relay_url.clone(),
+                route_id: resource.route_id.clone(),
+                route_token: resource.route_token.clone(),
+                owner_cert_der: resource.owner_cert_der.clone(),
+                device: self.device().map_err(MemberConnectError::Retry)?,
+                device_name: resource.device_name.clone(),
+                invite_secret: None,
+                reusable_invitation: false,
+            },
+            self.guest_events(&resource.id),
+        )
+        .await
+        .map_err(MemberConnectError::Retry)?;
+        if let Err(error) = validate_member_authorization(
+            &info,
+            &resource.member_id,
+            &resource.name,
+            resource.expires_at,
+            resource.capabilities,
+        ) {
+            connected.close();
+            return Err(MemberConnectError::InvalidAuthorization(error));
+        }
+        Ok(connected)
+    }
     pub async fn accept(
         self: &Arc<Self>,
         code: String,
@@ -512,36 +642,41 @@ impl SharingRuntime {
         let device_name = auth::label(&device_name, 80)?;
         let device = self.device()?;
         let data = self.store.snapshot()?;
-        if let Some(existing) = data
-            .received
-            .iter()
-            .find(|s| s.route_id == invitation.route_id && s.relay_url == invitation.relay_url)
-        {
-            self.connect(existing.id.clone()).await?;
-            let status = self.status().await?;
-            return status["received"]
-                .as_array()
-                .and_then(|items| items.iter().find(|r| r["id"] == existing.id))
-                .cloned()
-                .ok_or("共享状态不可用".into());
-        }
-        if data.received.len() >= 32 {
-            return Err("最多保存 32 个访客资源".into());
+        if !invitation.reusable {
+            if let Some(existing) = data
+                .received
+                .iter()
+                .find(|s| s.route_id == invitation.route_id && s.relay_url == invitation.relay_url)
+            {
+                self.connect(existing.id.clone()).await?;
+                let status = self.status().await?;
+                return status["received"]
+                    .as_array()
+                    .and_then(|items| items.iter().find(|r| r["id"] == existing.id))
+                    .cloned()
+                    .ok_or("共享状态不可用".into());
+            }
         }
         let id = uuid::Uuid::new_v4().to_string();
-        let (session, info) = ClientSession::connect(
-            ConnectOptions {
-                relay_url: invitation.relay_url.clone(),
-                route_id: invitation.route_id.clone(),
-                route_token: invitation.route_token.clone(),
-                owner_cert_der: invitation.owner_cert_der.clone(),
-                device,
-                device_name: device_name.clone(),
-                invite_secret: Some(invitation.invite_secret),
-            },
-            self.guest_events(&id),
-        )
-        .await?;
+        let reusable = invitation.reusable;
+        let connect_options = ConnectOptions {
+            relay_url: invitation.relay_url.clone(),
+            route_id: invitation.route_id.clone(),
+            route_token: invitation.route_token.clone(),
+            owner_cert_der: invitation.owner_cert_der.clone(),
+            device,
+            device_name: device_name.clone(),
+            invite_secret: Some(invitation.invite_secret.clone()),
+            reusable_invitation: reusable,
+        };
+        let (session, info) = if reusable {
+            (None, ClientSession::pair_reusable(connect_options).await?)
+        } else {
+            let (session, info) =
+                ClientSession::connect(connect_options, self.guest_events(&id)).await?;
+            (Some(session), info)
+        };
+        let (route_id, route_token) = received_credentials(&invitation, &info)?;
         let resource = ReceivedShare {
             id: id.clone(),
             name: info.resource_name,
@@ -550,25 +685,71 @@ impl SharingRuntime {
             default_path: ".".into(),
             capabilities: info.capabilities,
             relay_url: invitation.relay_url,
-            route_id: invitation.route_id,
-            route_token: invitation.route_token,
+            route_id,
+            route_token,
             owner_cert_der: invitation.owner_cert_der,
             member_id: info.member_id,
             device_name,
         };
-        if let Err(error) = self.store.update(|s| {
-            if s.received.len() >= 32 || s.received.iter().any(|r| r.route_id == resource.route_id)
-            {
-                return Err("此共享已加入或访客资源已满，请刷新重试".into());
+        let stored = match self.store.update(|s| {
+            if let Some(existing) = s.received.iter_mut().find(|saved| {
+                saved.member_id == resource.member_id
+                    && saved.relay_url == resource.relay_url
+                    && saved.owner_cert_der == resource.owner_cert_der
+            }) {
+                let mut updated = resource.clone();
+                updated.id = existing.id.clone();
+                updated.owner_label = existing.owner_label.clone();
+                updated.default_path = existing.default_path.clone();
+                *existing = updated.clone();
+                return Ok((updated, true));
+            }
+            if s.received.len() >= 32 {
+                return Err("访客资源已达 32 个上限".into());
+            }
+            if s.received.iter().any(|r| r.route_id == resource.route_id) {
+                return Err("共享授权与本机已有记录冲突，请刷新重试".into());
             }
             s.received.push(resource.clone());
-            Ok(())
+            Ok((resource.clone(), false))
         }) {
-            session.close();
-            return Err(error);
+            Ok(value) => value,
+            Err(error) => {
+                if let Some(session) = session {
+                    session.close();
+                }
+                return Err(error);
+            }
+        };
+        if reusable {
+            // The member grant is durable before any attempt to use its route.
+            // A successful immediate attempt preserves the online fast path;
+            // otherwise attach retries without reusing the invitation.
+            if stored.1 {
+                self.disconnect(stored.0.id.clone()).await?;
+            }
+            let initial = self.connect_saved_member(&stored.0).await.ok();
+            let state = if initial.is_some() {
+                "online"
+            } else {
+                "connecting"
+            };
+            self.attach(stored.0.clone(), initial)?;
+            return Ok(json!(stored.0.view(state, None)));
         }
-        self.attach(resource.clone(), Some(session))?;
-        Ok(json!(resource.view("online", None)))
+        let session = session.ok_or("共享连接状态无效")?;
+        if stored.1 {
+            // The initial session's event sink uses the temporary id. Close it
+            // and reconnect the existing record so terminal events keep their
+            // stable resource id.
+            session.close();
+            self.disconnect(stored.0.id.clone()).await?;
+            self.attach(stored.0.clone(), None)?;
+            Ok(json!(stored.0.view("connecting", None)))
+        } else {
+            self.attach(stored.0.clone(), Some(session))?;
+            Ok(json!(stored.0.view("online", None)))
+        }
     }
     fn attach(
         self: &Arc<Self>,
@@ -638,37 +819,10 @@ impl SharingRuntime {
                 self.transfers.cancel_resource(&resource.id);
             }
             self.guest_state(&resource.id, &generation, "connecting", None, None);
-            let attempt = async {
-                ClientSession::connect(
-                    ConnectOptions {
-                        relay_url: resource.relay_url.clone(),
-                        route_id: resource.route_id.clone(),
-                        route_token: resource.route_token.clone(),
-                        owner_cert_der: resource.owner_cert_der.clone(),
-                        device: self.device()?,
-                        device_name: resource.device_name.clone(),
-                        invite_secret: None,
-                    },
-                    self.guest_events(&resource.id),
-                )
-                .await
-            };
+            let attempt = self.connect_saved_member(&resource);
             let result = tokio::select! {_=stopped.changed()=>break,result=attempt=>result};
             match result {
-                Ok((connected, info)) => {
-                    if info.member_id != resource.member_id
-                        || info.expires_at != resource.expires_at
-                    {
-                        connected.close();
-                        self.guest_state(
-                            &resource.id,
-                            &generation,
-                            "error",
-                            Some("设备授权与已保存记录不一致".into()),
-                            None,
-                        );
-                        break;
-                    }
+                Ok(connected) => {
                     if !self.guest_state(
                         &resource.id,
                         &generation,
@@ -682,7 +836,11 @@ impl SharingRuntime {
                     session = Some(connected);
                     delay = 2;
                 }
-                Err(error) => {
+                Err(MemberConnectError::InvalidAuthorization(error)) => {
+                    self.guest_state(&resource.id, &generation, "error", Some(error), None);
+                    break;
+                }
+                Err(MemberConnectError::Retry(error)) => {
                     self.guest_state(&resource.id, &generation, "error", Some(error), None);
                     tokio::select! {_=stopped.changed()=>break,_=tokio::time::sleep(Duration::from_secs(delay))=>{}}
                     delay = (delay * 2).min(30);

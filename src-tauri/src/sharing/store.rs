@@ -42,6 +42,12 @@ pub struct PendingInvitation {
     pub route_token: String,
     pub secret_hash: String,
     pub expires_at: u64,
+    #[serde(default)]
+    pub reusable: bool,
+    // This remains inside the existing OS-keyring record. Public projections
+    // intentionally omit invitations and therefore never expose the secret.
+    #[serde(default)]
+    pub invite_secret: Option<String>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -196,6 +202,8 @@ pub struct MemberView {
     pub paired_at: u64,
     pub last_seen_at: Option<u64>,
     pub connected: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ip_address: Option<String>,
 }
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -210,7 +218,10 @@ pub struct OwnedShareView {
     pub members: Vec<MemberView>,
 }
 impl OwnedShare {
-    pub fn view(&self, connected: impl Fn(&str) -> bool) -> OwnedShareView {
+    pub fn view(
+        &self,
+        presence: impl Fn(&str) -> (bool, Option<String>),
+    ) -> OwnedShareView {
         OwnedShareView {
             id: self.id.clone(),
             server_id: self.server_id.clone(),
@@ -222,12 +233,16 @@ impl OwnedShare {
             members: self
                 .members
                 .iter()
-                .map(|m| MemberView {
-                    id: m.id.clone(),
-                    device_name: m.device_name.clone(),
-                    paired_at: m.paired_at,
-                    last_seen_at: m.last_seen_at,
-                    connected: connected(&m.id),
+                .map(|m| {
+                    let (connected, ip_address) = presence(&m.id);
+                    MemberView {
+                        id: m.id.clone(),
+                        device_name: m.device_name.clone(),
+                        paired_at: m.paired_at,
+                        last_seen_at: m.last_seen_at,
+                        connected,
+                        ip_address: connected.then_some(ip_address).flatten(),
+                    }
                 })
                 .collect(),
         }
@@ -296,7 +311,7 @@ mod tests {
             invitations: vec![],
         };
         assert!(
-            !serde_json::to_string(&share.view(|_| false))
+            !serde_json::to_string(&share.view(|_| (false, None)))
                 .unwrap()
                 .contains("PRIVATE_MARKER")
         );
