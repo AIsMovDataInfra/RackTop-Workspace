@@ -15,6 +15,7 @@ const author: Member = { id: 'author', username: '作者', name: '李同学', ro
 const reviewer: Member = { ...author, id: 'reviewer', name: '评审同事' }
 const admin: Member = { ...author, id: 'admin', name: '超级管理员', role: 'admin', isSuperAdmin: true, company: null }
 const outsider: Member = { ...author, id: 'outsider', name: '其他公司成员', company: 'B公司' }
+const pending: Member = { ...author, id: 'pending', name: '待分配成员', company: null }
 const session: Session = { user: author, authMode: 'account', csrfToken: 'fixture', feishuConfigured: false, notifications: { configured: false }, timezone: 'Asia/Shanghai' }
 const state: PreferencesState = { t: zh => zh, preferences: { locale: 'zh-CN', theme: 'light', largeText: false }, setPreferences: vi.fn() }
 const report: WeeklyReport = { id: 'report', authorId: author.id, authorName: author.name, company: 'A公司', weekStart: '2030-01-07', todos: [{ text: '调试机械臂', completion: 80, unfinishedReason: '等待夹爪', effect: '完成联调' }], nextPlan: '补齐测试', status: 'draft', reviewerId: reviewer.id, reviewerName: reviewer.name, score: null, reviewComment: '', reviewedBy: null, reviewedName: null, reviewedAt: null, submittedAt: null, version: 1, createdAt: stamp, updatedAt: stamp }
@@ -25,8 +26,9 @@ function statistics(weekStart = '2030-01-07'): WeeklyStatistics {
     { ...row, authorId: author.id, name: author.name, company: 'A公司', status: 'reviewed', reportId: report.id, todoCount: 2, completedCount: 1, unfinishedCount: 1, averageCompletion: 50, score: 0 },
     { ...row, authorId: reviewer.id, name: reviewer.name, company: 'A公司', status: 'draft', reportId: 'draft', todoCount: 1, unfinishedCount: 1, averageCompletion: 80 },
     { ...row, authorId: outsider.id, name: outsider.name, company: 'B公司', status: 'submitted', reportId: 'submitted', todoCount: 1, completedCount: 1, averageCompletion: 100 },
+    { ...row, authorId: pending.id, name: pending.name, company: null, status: 'missing' },
     { ...row, authorId: admin.id, name: admin.name, company: null, status: 'missing' },
-  ], summary: { expectedCount: 4, submittedCount: 2, unsubmittedCount: 2, reviewedCount: 1, averageCompletion: 75, averageScore: 0 } }
+  ], summary: { expectedCount: 5, submittedCount: 2, unsubmittedCount: 3, reviewedCount: 1, averageCompletion: 75, averageScore: 0 } }
 }
 let container: HTMLDivElement, root: ReturnType<typeof createRoot>
 const expired = vi.fn()
@@ -35,7 +37,7 @@ async function click(text: string) { const button = [...container.querySelectorA
 function enter(name: string, value: string) { const input = container.querySelector<HTMLInputElement | HTMLTextAreaElement>(`[name="${name}"]`)!; expect(input, name).toBeTruthy(); act(() => { const prototype = input instanceof HTMLInputElement ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype; Object.getOwnPropertyDescriptor(prototype, 'value')!.set!.call(input, value); input.dispatchEvent(new Event('input', { bubbles: true })) }) }
 function select(name: string, value: string) { act(() => { const input = container.querySelector<HTMLSelectElement>(`select[name="${name}"]`)!; input.value = value; input.dispatchEvent(new Event('change', { bubbles: true })) }) }
 async function submit(selector: string) { await act(async () => container.querySelector(selector)!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))) }
-beforeEach(() => { container = document.createElement('div'); document.body.append(container); root = createRoot(container); vi.spyOn(workspaceApi, 'reports').mockResolvedValue({ reports: [report] }); vi.spyOn(workspaceApi, 'report').mockResolvedValue({ report, history: [] }); vi.spyOn(workspaceApi, 'reportStatistics').mockImplementation(async filters => statistics(filters.weekStart)); vi.spyOn(api, 'members').mockResolvedValue({ members: [author, reviewer, admin, outsider] }); expired.mockClear() })
+beforeEach(() => { container = document.createElement('div'); document.body.append(container); root = createRoot(container); vi.spyOn(workspaceApi, 'reports').mockResolvedValue({ reports: [report] }); vi.spyOn(workspaceApi, 'report').mockResolvedValue({ report, history: [] }); vi.spyOn(workspaceApi, 'reportStatistics').mockImplementation(async filters => statistics(filters.weekStart)); vi.spyOn(api, 'members').mockResolvedValue({ members: [author, reviewer, admin, outsider, pending] }); expired.mockClear() })
 afterEach(() => { act(() => root.unmount()); container.remove(); vi.restoreAllMocks() })
 
 it('saves an author draft and submits explicit todo completion, reason, outcome and next plan without fetching the member directory', async () => {
@@ -71,10 +73,10 @@ it('lets the author read review results without displaying scoring controls', as
 
 it('limits reviewer choices to other same-company members and super administrators, and lets a super administrator choose any active author company', async () => {
   const assign = vi.spyOn(workspaceApi, 'assignReviewer').mockResolvedValue({ report: { ...report, reviewerId: admin.id, reviewerName: admin.name, version: 2 } })
-  await mount(admin); await click('打开周报')
+  await mount({ ...admin, company: '西浦' }); await click('打开周报')
   expect([...container.querySelectorAll<HTMLOptionElement>('[name="reviewerId"] option')].map(item => item.value)).toEqual(['', reviewer.id, admin.id])
   select('reviewerId', admin.id); await submit('.work-assignment'); expect(assign).toHaveBeenCalledWith(report.id, 1, admin.id)
-  await click('关闭'); await click('写周报')
+  await click('关闭'); await click('代写成员周报')
   expect([...container.querySelectorAll<HTMLOptionElement>('[name="authorId"] option')].map(item => item.value)).toEqual(['', author.id, reviewer.id, outsider.id])
 })
 
@@ -128,6 +130,8 @@ it('renders administrator statistics with four distinct states, safe names, zero
   expect(table.querySelectorAll('thead th[scope="col"]')).toHaveLength(9)
   const rows = [...table.querySelectorAll('tbody tr')]
   expect(rows.map(row => row.querySelectorAll('td')[1].textContent)).toEqual(['已评分', '草稿', '已提交', '缺报'])
+  expect(table.textContent).not.toContain(admin.name)
+  expect([...container.querySelectorAll<HTMLOptionElement>('[name="statisticsMember"] option')].map(item => item.value)).not.toContain(admin.id)
   expect(rows[0].querySelectorAll('td')[6].textContent).toBe('0 / 100')
   expect(rows[3].querySelectorAll('td')[0].textContent).toContain('待管理员分配')
   expect([...rows[3].querySelectorAll('td')].slice(2).map(cell => cell.textContent)).toEqual(['—', '—', '—', '—', '—', '—'])

@@ -70,6 +70,7 @@ test('only explicitly assigned same-company reviewers can read and score submitt
 test('super administrators create reports for any assigned company and drafts validate only on submission', t => {
   const { store, members } = fixture(t);
   members.get(admin.id).company = null;
+  assert.throws(() => store.createReport(reportInput(), admin), { status: 403, code: 'SUPERADMIN_REPORT_NOT_REQUIRED' });
   const report = store.createReport({ authorId: outsider.id, weekStart: '2026-09-07', todos: [], nextPlan: '' }, admin);
   assert.equal(report.company, 'B公司'); assert.equal(report.authorName, outsider.name);
   assert.throws(() => store.updateReport(report.id, { version: 1, status: 'submitted' }, outsider), { status: 422 });
@@ -99,10 +100,10 @@ function statisticsFixture(t, options = {}) {
   const users = Object.fromEntries([...result.members].map(([key, value]) => [key, { ...value, id: randomUUID() }]));
   result.members.clear(); Object.values(users).forEach(value => result.members.set(value.id, value));
   const db = new DatabaseSync(result.dbPath); t.after(() => db.close());
-  db.exec('CREATE TABLE account_users(id TEXT PRIMARY KEY,name TEXT,company TEXT,created_at INTEGER,deleted_at INTEGER)');
+  db.exec('CREATE TABLE account_users(id TEXT PRIMARY KEY,name TEXT,company TEXT,created_at INTEGER,deleted_at INTEGER,is_super_admin INTEGER NOT NULL DEFAULT 0)');
   const addMember = (user, createdAt = '2026-01-01T00:00:00Z') => {
     result.members.set(user.id, user);
-    db.prepare('INSERT INTO account_users VALUES(?,?,?,?,NULL)').run(user.id, user.name, user.company, Date.parse(createdAt));
+    db.prepare('INSERT INTO account_users VALUES(?,?,?,?,NULL,?)').run(user.id, user.name, user.company, Date.parse(createdAt), user.isSuperAdmin ? 1 : 0);
     return user;
   };
   Object.values(users).forEach(user => addMember(user));
@@ -110,7 +111,7 @@ function statisticsFixture(t, options = {}) {
 }
 
 test('superadmin statistics distinguish missing, draft, submitted and reviewed with explicit filtered averages', t => {
-  const { store, users } = statisticsFixture(t);
+  const { store, users, members, db, addMember } = statisticsFixture(t);
   const submitted = store.createReport({ ...reportInput(), status: 'submitted', todos: [
     { text: '完成工作', completion: 100, unfinishedReason: '', effect: '' },
     { text: '未开始工作', completion: 0, unfinishedReason: '等待设备', effect: '' },
@@ -119,9 +120,13 @@ test('superadmin statistics distinguish missing, draft, submitted and reviewed w
   store.reviewReport(submitted.id, { version: 2, score: 0, comment: '' }, users.reviewer);
   store.createReport({ ...reportInput(), status: 'submitted', todos: [{ text: '实验', completion: 100, unfinishedReason: '', effect: '' }] }, users.outsider);
   store.createReport({ ...reportInput(), todos: [] }, users.peer);
+  const formerMember = addMember({ id: randomUUID(), name: '历史超管', role: 'admin', company: 'C公司' });
+  store.createReport({ ...reportInput(), todos: [] }, formerMember);
+  members.get(formerMember.id).isSuperAdmin = true;
+  db.prepare('UPDATE account_users SET is_super_admin=1 WHERE id=?').run(formerMember.id);
   const result = store.reportStatistics({ weekStart: '2026-09-11' }, users.super);
   assert.equal(result.weekStart, '2026-09-07'); assert.equal(result.weekEnd, '2026-09-13'); assert.equal(result.timezone, 'Asia/Shanghai');
-  assert.deepEqual(result.summary, { expectedCount: 5, submittedCount: 2, unsubmittedCount: 3, reviewedCount: 1, averageCompletion: 75, averageScore: 0 });
+  assert.deepEqual(result.summary, { expectedCount: 4, submittedCount: 2, unsubmittedCount: 2, reviewedCount: 1, averageCompletion: 75, averageScore: 0 });
   const row = result.rows.find(value => value.authorId === users.author.id);
   assert.deepEqual(row, { authorId: users.author.id, name: users.author.name, company: 'A公司', weekStart: '2026-09-07', weekEnd: '2026-09-13',
     status: 'reviewed', reportId: submitted.id, todoCount: 2, completedCount: 1, unfinishedCount: 1, averageCompletion: 50, score: 0, reviewerName: users.reviewer.name });
@@ -129,9 +134,12 @@ test('superadmin statistics distinguish missing, draft, submitted and reviewed w
     assert.equal(result.rows.find(value => value.authorId === user.id).status, status);
   }
   assert.equal(result.rows.find(value => value.authorId === users.peer.id).averageCompletion, null);
+  assert.equal(result.rows.some(value => value.authorId === users.super.id || value.authorId === formerMember.id), false);
   const company = store.reportStatistics({ company: 'A公司' }, users.super);
-  assert.deepEqual(company.summary, { expectedCount: 4, submittedCount: 1, unsubmittedCount: 3, reviewedCount: 1, averageCompletion: 50, averageScore: 0 });
+  assert.deepEqual(company.summary, { expectedCount: 3, submittedCount: 1, unsubmittedCount: 2, reviewedCount: 1, averageCompletion: 50, averageScore: 0 });
   assert.equal(store.reportStatistics({ memberId: users.author.id }, users.super).rows.length, 1);
+  assert.deepEqual(store.reportStatistics({ memberId: users.super.id }, users.super).rows, []);
+  assert.deepEqual(store.reportStatistics({ memberId: formerMember.id }, users.super).rows, []);
   const noMatch = store.reportStatistics({ memberId: users.author.id, company: 'B公司' }, users.super);
   assert.deepEqual(noMatch.summary, { expectedCount: 0, submittedCount: 0, unsubmittedCount: 0, reviewedCount: 0, averageCompletion: null, averageScore: null });
   for (const user of [users.author, users.reviewer, users.peer, { ...users.peer, isSuperAdmin: true }]) {
@@ -161,7 +169,7 @@ test('statistics use Beijing week boundaries, registration cutoff and historical
   const rawBefore = db.prepare('SELECT * FROM weekly_reports ORDER BY id').all();
   const result = store.reportStatistics({}, users.super);
   assert.equal(result.weekStart, '2026-09-07'); assert.equal(result.weekEnd, '2026-09-13');
-  assert.equal(result.summary.expectedCount, 8);
+  assert.equal(result.summary.expectedCount, 7);
   assert.ok(result.rows.some(row => row.authorId === sunday.id));
   assert.equal(result.rows.some(row => row.authorId === monday.id), false);
   assert.equal(result.rows.find(row => row.authorId === users.author.id).name, users.author.name);
@@ -183,11 +191,12 @@ test('a failed statistics read rolls back its transaction and accepts the next r
   db.exec('ALTER TABLE account_users RENAME TO temporarily_unavailable');
   assert.throws(() => store.reportStatistics({}, users.super), /no such table/);
   db.exec('ALTER TABLE temporarily_unavailable RENAME TO account_users');
-  assert.equal(store.reportStatistics({}, users.super).summary.expectedCount, 5);
+  assert.equal(store.reportStatistics({}, users.super).summary.expectedCount, 4);
 });
 
 test('requests reveal only submission acknowledgement to ordinary employees and preserve immutable original contents', t => {
   const { store, members } = fixture(t);
+  assert.throws(() => store.createRequest(requestInput(), admin), { status: 403, code: 'SUPERADMIN_REQUEST_NOT_REQUIRED' });
   const receipt = store.createRequest(requestInput(), author);
   assert.deepEqual(Object.keys(receipt).sort(), ['id', 'submitted']); assert.equal(receipt.submitted, true);
   for (const user of [author, peer, outsider]) {

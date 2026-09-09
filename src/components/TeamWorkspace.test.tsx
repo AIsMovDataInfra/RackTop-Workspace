@@ -103,11 +103,13 @@ describe('team workspace',()=>{
     expect(container.textContent).not.toContain('成员预约记录')
     await act(async()=>resolveData({ resources: [], reservations: [] }))
   })
-  it('lets the super administrator access data without a company',async()=>{
-    vi.mocked(teamApi.status).mockResolvedValue({ ...admin, user: { ...admin.user!, company: null, isSuperAdmin: true, version: 1 } })
+  it('lets the super administrator access data globally and ignores a historical company value',async()=>{
+    vi.mocked(teamApi.status).mockResolvedValue({ ...admin, user: { ...admin.user!, company: 'A公司', isSuperAdmin: true, version: 1 } })
     vi.mocked(teamApi.data).mockResolvedValue(privateData)
     await mount()
     expect(container.textContent).toContain('超级管理员')
+    expect(container.querySelector('.team-account-company')?.textContent).toContain('所属公司跨公司管理')
+    expect(container.querySelector('.team-account-company')?.textContent).not.toContain('A公司')
     expect(container.textContent).toContain('同步本机资源')
     expect(container.textContent).toContain('成员预约记录')
     expect(container.textContent).not.toContain('等待分配公司')

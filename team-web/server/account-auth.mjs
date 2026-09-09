@@ -209,7 +209,7 @@ export function createAccountAuth(config) {
   }
   function userView(row) {
     return row?.id && row.deleted_at == null ? { id: row.id, name: row.name, role: row.role, username: row.username,
-      isSuperAdmin: Boolean(row.is_super_admin), company: row.company ?? null, version: row.version ?? 1, avatar: row.avatar_choice ?? row.avatar ?? 'user' } : null;
+      isSuperAdmin: Boolean(row.is_super_admin), company: row.is_super_admin ? null : row.company ?? null, version: row.version ?? 1, avatar: row.avatar_choice ?? row.avatar ?? 'user' } : null;
   }
   function recordFor(req, browserOnly = false) {
     purge();
@@ -373,6 +373,7 @@ export function createAccountAuth(config) {
       const expectedVersion = version(body.version), selectedCompany = company(body.company);
       const row = transaction(() => {
         const previous = editableMember(id, expectedVersion, actor.user.id, true);
+        if (previous.is_super_admin) throw fail(403, 'SUPERADMIN_COMPANY_NOT_REQUIRED', '超级管理员无需分配公司。');
         if (previous.company !== selectedCompany) {
           db.prepare('UPDATE account_users SET company = ?, version = version + 1 WHERE id = ?').run(selectedCompany, id);
           audit(actor.user.id, previous, 'company-changed', previous.version + 1, selectedCompany);
@@ -400,11 +401,10 @@ export function createAccountAuth(config) {
   }
   // Explicit deployment operation; never called on server startup or via HTTP.
   async function provisionSuperAdmin(options) {
-    fields(options, ['mode', 'username', 'name', 'password', 'company']);
+    fields(options, ['mode', 'username', 'name', 'password']);
     if (!['create', 'reset'].includes(options.mode)) throw fail(422, 'INVALID_INPUT', '必须明确指定 create 或 reset 模式。');
     const normalizedUsername = username(options.username ?? 'admin');
     const displayName = memberName(options.name ?? '超级管理员');
-    const selectedCompany = options.company === undefined ? null : company(options.company);
     const supplied = password(options.password);
     function check() {
       const superAdmin = db.prepare('SELECT * FROM account_users WHERE is_super_admin = 1').get();
@@ -428,7 +428,7 @@ export function createAccountAuth(config) {
         audit(null, fresh, 'super-admin-password-reset', fresh.version + 1);
         return { created: false, reset: true, member: memberView(activeMember(fresh.id)) };
       }
-      return { created: true, reset: false, member: memberView(insertMember(normalizedUsername, displayName, passwordHash, selectedCompany, null, true)) };
+      return { created: true, reset: false, member: memberView(insertMember(normalizedUsername, displayName, passwordHash, null, null, true)) };
     });
   }
   async function handle(req, res, url, body) {

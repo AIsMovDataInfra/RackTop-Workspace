@@ -65,6 +65,20 @@ it('saves only an allowlisted icon while showing the member company as read-only
   expect(container.textContent).toContain('头像已保存')
 })
 
+it.each([null, '西浦'] as const)('shows a super administrator with company %s as global in both languages', async (company) => {
+  const account: Session = { ...session, user: { ...session.user!, role: 'admin', isSuperAdmin: true, company } }
+  const save = vi.spyOn(api, 'setMemberCompany')
+  await act(async () => root.render(<SettingsDialog state={state} session={account} onClose={vi.fn()} />))
+  expect(container.querySelector('.member-company-readonly')?.textContent).toBe('跨公司管理，无需分配公司')
+  expect(container.querySelector('.member-company-readonly')?.textContent).not.toMatch(/待分配|由超级管理员管理|西浦/)
+  const english: PreferencesState = { ...state, preferences: { ...state.preferences, locale: 'en' }, t: (_zh, en) => en }
+  await act(async () => root.render(<SettingsDialog state={english} session={account} onClose={vi.fn()} />))
+  expect(container.querySelector('.member-company-readonly')?.textContent).toBe('Cross-company management; no company assignment needed')
+  expect(container.querySelector('select[name="company"],input[name="company"]')).toBeNull()
+  expect(save).not.toHaveBeenCalled()
+  expect(account.user?.company).toBe(company)
+})
+
 it('saves a new colorful avatar and restores it when account settings reopen', async () => {
   const account = { ...session, user: { ...session.user!, version: 1, avatar: 'robot' } }
   const updated = { ...account, user: { ...account.user, version: 2, avatar: 'satellite' } }

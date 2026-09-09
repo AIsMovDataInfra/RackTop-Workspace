@@ -7,7 +7,7 @@ import type { Company, Resource, Translate, User } from './types'
 
 export function ResourceDialog({ resource, user, onClose, onSaved, t }: { resource?: Resource; user?: User | null; onClose: () => void; onSaved: () => void; t: Translate }) {
   const synchronized = Boolean(resource?.inventoryVersion)
-  const [company, setCompany] = useState<Company | ''>(resource?.company || user?.company || '')
+  const [company, setCompany] = useState<Company | ''>(resource?.company || (user?.isSuperAdmin ? '' : user?.company || ''))
   const [accepting, setAccepting] = useState(false)
   const [name, setName] = useState(resource?.name || '')
   const [cluster, setCluster] = useState(resource?.cluster || '')

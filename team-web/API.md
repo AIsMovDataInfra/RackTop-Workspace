@@ -1,4 +1,4 @@
-# AIsMov RackTop 团队工作台 API（2.1.0）
+# AIsMov RackTop 团队工作台 API（2.1.1）
 
 接口实现位于 `team-web/server/`，使用 Node.js 24+、单服务进程和本地 SQLite。正式默认模式为 `account`（用户名＋密码），另保留本机 `demo` 与可选 `feishu`。已部署的公网入口是 `https://136.0.110.161`，路径均以根级 `/api` 开始。
 
@@ -22,7 +22,7 @@
 
 ## 数据结构
 
-- `User`：account 模式返回 `{id,username,name,role:'admin'|'member',isSuperAdmin:boolean,company:Company|null,version:number,avatar:Avatar}`；demo／feishu 仍可省略账号专有字段。`Company` 只能为 `A公司`、`B公司`、`C公司`、`西浦`，null 表示尚未分配。`role:'admin'` 是资源管理员身份，只有 `isSuperAdmin:true` 才能管理成员。`Avatar` 为 `user|cat|dog|rocket|robot|flower|star|engineer|explorer|rabbit|bird|fish|turtle|squirrel|bug|satellite|planet|moon|sun|computer|circuit|headphones|sprout|gem`，旧记录默认user，原7个ID保持兼容。新增nullable `avatar_choice`用于扩展选择，不重建账号表或改写旧头像；公开User仍只有 `avatar` 字段，优先返回新选择。没有邮箱字段；客户端不能自报 `role`、`isSuperAdmin` 或 `ownerId`。
+- `User`：account 模式返回 `{id,username,name,role:'admin'|'member',isSuperAdmin:boolean,company:Company|null,version:number,avatar:Avatar}`；demo／feishu 仍可省略账号专有字段。`Company` 只能为 `A公司`、`B公司`、`C公司`、`西浦`。普通账号的 null 表示尚未分配；超级管理员固定返回 null，表示跨公司管理且无需公司，历史数据库值不会进入身份投影或权限判断。`role:'admin'` 是资源管理员身份，只有 `isSuperAdmin:true` 才能管理成员。`Avatar` 为 `user|cat|dog|rocket|robot|flower|star|engineer|explorer|rabbit|bird|fish|turtle|squirrel|bug|satellite|planet|moon|sun|computer|circuit|headphones|sprout|gem`，旧记录默认user，原7个ID保持兼容。新增nullable `avatar_choice`用于扩展选择，不重建账号表或改写旧头像；公开User仍只有 `avatar` 字段，优先返回新选择。没有邮箱字段；客户端不能自报 `role`、`isSuperAdmin` 或 `ownerId`。
 - `Member`：仅超级管理员成员接口返回 `{...User,createdAt,recoveryRequestedAt}`；后两项为 UTC ISO8601，尚无找回申请时 `recoveryRequestedAt=null`。只含账号业务信息，不返回密码、密码哈希、会话／设备令牌或内部管理审计记录。
 - `Gpu`：`{id,uuid,index,model,memoryTotalMb}`。`id` 是服务端稳定 ID，`uuid` 是规范化为小写的真实 NVIDIA 完整硬件 UUID，`index` 是当前显示编号；预约不要用编号代替稳定身份。
 - `Resource`：`{id,company,companyVersion,cluster,name,gpuModel,gpuCount,notes,enabled,gpus,inventoryVersion,inventoryState,lastSeenAt,observedAt,status,pendingGpus}`。`company` 为 Company 或旧未分配记录的空串，`companyVersion` 为正整数。清单状态为 `manual|synced|conflict`，在线状态为 `online|offline|unknown`；超过 90 秒的采集显示 unknown。手工资源 `gpus=[]`，CPU 资源 `gpuCount=0`。待确认清单的 GPU 没有已确认的稳定 ID。
@@ -62,13 +62,13 @@ account 模式提供的 `/api/admin/members` 接口仅接受超级管理员身�
 | --- | --- |
 | `GET /api/admin/members` | `200 {members:Member[]}`，返回全部未删除账号，按创建时间、ID 排序，包含超级管理员。 |
 | `POST /api/admin/members` | `{name,password,company,username?}` → `201 {member:Member}`；创建 `role:'member',isSuperAdmin:false` 员工，company 必选。 |
-| `PATCH /api/admin/members/:id` | `{version,company}` → `200 {member:Member}`；只修改公司，不能清空或修改用户名、姓名、角色。公司相同则不递增版本。 |
+| `PATCH /api/admin/members/:id` | `{version,company}` → `200 {member:Member}`；只修改普通员工公司，不能清空或修改用户名、姓名、角色。公司相同则不递增版本；超级管理员返回 `403 SUPERADMIN_COMPANY_NOT_REQUIRED`。 |
 | `POST /api/admin/members/:id/reset-password` | `{version,newPassword}` → `200 {member:Member}`；设置新密码，清除找回申请、递增版本并撤销该员工所有网页登录与设备令牌。 |
 | `DELETE /api/admin/members/:id` | `{version}` → `200 {ok:true}`；撤销登录、删除登录凭据并将账号标记为已删除，保留历史业务记录。 |
 
-修改／重置／删除必须携带当前正整数 version，过期返回 `409 VERSION_CONFLICT`。找回申请也会改变版本，管理员应刷新后核对再操作。重置／删除不能针对超级管理员或操作者自己，返回 `403 SUPER_ADMIN_PROTECTED`；超级管理员可在自己的“设置”中凭当前密码改密，遗忘时由部署端显式执行 `team-admin.mjs reset`。公司 PATCH 允许给超级管理员设置公司，但其业务资格不依赖公司。
+修改／重置／删除必须携带当前正整数 version，过期返回 `409 VERSION_CONFLICT`。找回申请也会改变版本，管理员应刷新后核对再操作。重置／删除不能针对超级管理员或操作者自己，返回 `403 SUPER_ADMIN_PROTECTED`；超级管理员可在自己的“设置”中凭当前密码改密，遗忘时由部署端显式执行 `team-admin.mjs reset`。超级管理员固定为跨公司管理身份，不分配公司；历史数据库中曾保存的公司值不会进入身份响应或业务范围判断。
 
-删除会释放原用户名与显示姓名，新注册同名账号取得新的 UUID，不继承旧账号身份。原预约、设备、负责人／使用人文字和修改历史保留，不自动取消预约或删除设备。创建、公司修改、重置和删除与内部审计同事务提交；审计不保存密码。新增错误含 `INVALID_COMPANY`、`INVALID_AVATAR`、`INVALID_VERSION`、`MEMBER_NOT_FOUND`、`SUPERADMIN_REQUIRED`、`SUPER_ADMIN_PROTECTED`。
+删除会释放原用户名与显示姓名，新注册同名账号取得新的 UUID，不继承旧账号身份。原预约、设备、负责人／使用人文字和修改历史保留，不自动取消预约或删除设备。创建、公司修改、重置和删除与内部审计同事务提交；审计不保存密码。新增错误含 `INVALID_COMPANY`、`INVALID_AVATAR`、`INVALID_VERSION`、`MEMBER_NOT_FOUND`、`SUPERADMIN_REQUIRED`、`SUPER_ADMIN_PROTECTED`、`SUPERADMIN_COMPANY_NOT_REQUIRED`。
 
 ## 成员访问边界
 
@@ -220,7 +220,7 @@ account 资源创建时普通管理员公司由会话确定，不能指定别家
 | 请求 | 输入／权限与返回 |
 | --- | --- |
 | `GET /api/workspace/reports` | `{reports:Report[]}`；仅作者、同公司指定评审人可见其对应记录，超管可见全部，普通同事不因 role=admin 获得访问。 |
-| `POST /api/workspace/reports` | `{authorId?,weekStart,todos,nextPlan,status?}` → `201 {report}`；weekStart 可传所选周的任意有效 `YYYY-MM-DD` 日期，服务器以 UTC 纯日期运算归到该周周一；默认作者为自己、状态 draft，只有超管可指定其他已分配公司成员。 |
+| `POST /api/workspace/reports` | `{authorId?,weekStart,todos,nextPlan,status?}` → `201 {report}`；weekStart 可传所选周的任意有效 `YYYY-MM-DD` 日期，服务器以 UTC 纯日期运算归到该周周一；普通成员默认作者为自己、状态 draft，只有超管可指定其他已分配公司成员。超管不能作为作者，返回 `403 SUPERADMIN_REPORT_NOT_REQUIRED`。 |
 | `GET /api/workspace/reports/:id` | `{report,history}`；遵守同一读取权限，草稿也受保护，越权返回 404。 |
 | `PATCH /api/workspace/reports/:id` | `{version,todos?,nextPlan?,status?}` → `{report}`；仅作者或超管，且记录须仍为 draft。 |
 | `POST /api/workspace/reports/:id/reviewer` | `{version,reviewerId}` → `{report}`；reviewerId 为 UUID 或 null，仅超管，非超管评审人须与周报同公司且不能为作者。 |
@@ -247,7 +247,7 @@ account 资源创建时普通管理员公司由会话确定，不能指定别家
 
 `status` 为 `missing|draft|submitted|reviewed`：分别表示缺报、草稿、已提交待评分、已评分。`reportId` 缺报时为 null；完成项按 completion=100 计数，其余为未完成项；`averageCompletion` 为本报告各工作项完成度的算术平均，缺报或无工作项的草稿为 null。未评分的 score 为 null，0 分仍是有效已评分；未指定评审人时 reviewerName 为 null。
 
-应报名册包含该周结束前已注册的**当前活跃账号**，以及该周已有报告的全部作者（含补写报告和已删除的历史作者），每位作者一行。注册时间以北京时间下周一 00:00 为排除边界；此后注册且没有当周报告的成员不算该周应报。待分配公司的账号也可列入名册，但仍须先分配公司才能提交周报。已删除作者只在实际有报告的周次保留，不为后续周次制造缺报。已有报告使用报告创建时的姓名、公司快照；缺报行使用当前账号资料。公司筛选遵从行上的公司，不改写历史记录。
+应报名册包含该周结束前已注册的**当前活跃普通账号**，以及该周已有报告的普通历史作者（含补写报告和已删除的历史作者），每位作者一行；超级管理员不参与应报、提交、完成度或评分统计，历史超管周报也被排除。注册时间以北京时间下周一 00:00 为排除边界；此后注册且没有当周报告的成员不算该周应报。待分配公司的普通账号也可列入名册，但仍须先分配公司才能提交周报。已删除作者只在实际有报告的周次保留，不为后续周次制造缺报。已有报告使用报告创建时的姓名、公司快照；缺报行使用当前账号资料。公司筛选遵从行上的公司，不改写历史记录。
 
 `summary` 为 `{expectedCount,submittedCount,unsubmittedCount,reviewedCount,averageCompletion,averageScore}`，全部在公司／成员筛选之后计算。应报数等于行数；已提交数包含 submitted 与 reviewed，未提交数包含 missing 与 draft；已评分数仅 reviewed。汇总完成度只对**已提交报告**的各自平均完成度再按报告等权平均，草稿与缺报不计入；平均分只计算已评分报告，没有已评分报告时为 null。无报告、无评分都不会自动记成 0 分，也不标逾期或自动生成绩效结论。统计只读同一数据库事务快照，不返回账号密码、令牌或其他账号安全字段。
 
@@ -257,12 +257,12 @@ account 资源创建时普通管理员公司由会话确定，不能指定别家
 
 | 请求 | 输入／权限与返回 |
 | --- | --- |
-| `POST /api/workspace/requests` | `{category,quantity,purpose,equipmentId?}` → `201 {id,submitted:true}`；有公司成员可提交，**只返回确认，不返回申请正文**。 |
+| `POST /api/workspace/requests` | `{category,quantity,purpose,equipmentId?}` → `201 {id,submitted:true}`；有公司普通成员可提交，**只返回确认，不返回申请正文**；超级管理员只负责处理，提交返回 `403 SUPERADMIN_REQUEST_NOT_REQUIRED`。 |
 | `GET /api/workspace/requests` | `{requests:Request[]}`，仅超管。 |
 | `GET /api/workspace/requests/:id` | `{request,history}`，仅超管，提交者也无读权限。 |
 | `PATCH /api/workspace/requests/:id` | `{version,status,comment}` → `{request}`，仅超管；status 只接受 approved、rejected、collected。 |
 
-类别使用设备七类枚举，quantity 为 1–999 整数，purpose 非空且最多 4000 字符。可关联本公司可用设备，设备类别须一致，关联时 quantity 必须为 1；不存在或跨公司返回 `404 EQUIPMENT_NOT_FOUND`。超管提交自己的申请也必须先给自己分配公司。
+类别使用设备七类枚举，quantity 为 1–999 整数，purpose 非空且最多 4000 字符。可关联本公司可用设备，设备类别须一致，关联时 quantity 必须为 1；不存在或跨公司返回 `404 EQUIPMENT_NOT_FOUND`。超级管理员无需公司，也不提交自己的设备申请，可直接处理成员申请。
 
 普通成员与资源管理员读取目录/详情或审批返回 `403 SUPERADMIN_REQUIRED`。员工只保存提交编号确认，不能通过编号、筛选参数或本人身份读取正文/处理进度。原始用途、数量、类别和设备绑定不接受 PATCH；comment 为处理备注，最多 4000 字符，可为空。
 

@@ -77,8 +77,9 @@ test('only the single super administrator sees member profiles; ordinary admin c
   await assert.rejects(admin.call('/api/admin/members', 'POST', { username: '伪造', name: '伪造', password: '密', company: '西浦', role: 'admin' }), { status: 422 });
 });
 
-test('company choices, own-company updates, CAS, CSRF, and permanent super-admin protection', async t => {
-  const { admin, seeded } = await setup(t);
+test('employee company choices, CAS, CSRF, and permanent super-admin protection', async t => {
+  const dbPath = temporary(t), { admin, seeded } = await setup(t, { dbPath });
+  const db = new DatabaseSync(dbPath); t.after(() => db.close());
   const row = await employee(admin);
   for (const invalid of [null, '', '上海', 'D公司']) await assert.rejects(admin.call(`/api/admin/members/${row.id}`, 'PATCH', { version: row.version, company: invalid }), { code: 'INVALID_COMPANY' });
   for (const headers of [{ origin: 'https://evil.test' }, { 'x-csrf-token': undefined }]) {
@@ -87,10 +88,13 @@ test('company choices, own-company updates, CAS, CSRF, and permanent super-admin
   const updated = (await admin.call(`/api/admin/members/${row.id}`, 'PATCH', { version: row.version, company: ACCOUNT_COMPANIES[0] })).payload.member;
   assert.equal(updated.company, 'A公司'); assert.equal(updated.version, row.version + 1);
   await assert.rejects(admin.call(`/api/admin/members/${row.id}`, 'DELETE', { version: row.version }), { status: 409 });
-  const own = (await admin.call(`/api/admin/members/${seeded.id}`, 'PATCH', { version: seeded.version, company: '西浦' })).payload.member;
-  assert.equal(own.company, '西浦');
-  await assert.rejects(admin.call(`/api/admin/members/${seeded.id}`, 'DELETE', { version: own.version }), { code: 'SUPER_ADMIN_PROTECTED' });
-  await assert.rejects(admin.call(`/api/admin/members/${seeded.id}/reset-password`, 'POST', { version: own.version, newPassword: '新' }), { code: 'SUPER_ADMIN_PROTECTED' });
+  db.prepare("UPDATE account_users SET company='西浦' WHERE id=?").run(seeded.id);
+  await assert.rejects(admin.call(`/api/admin/members/${seeded.id}`, 'PATCH', { version: seeded.version, company: 'A公司' }), { status: 403, code: 'SUPERADMIN_COMPANY_NOT_REQUIRED' });
+  assert.equal((await admin.call('/api/session')).payload.user.company, null);
+  assert.equal((await admin.call('/api/session')).payload.user.version, seeded.version);
+  assert.equal(db.prepare('SELECT company FROM account_users WHERE id=?').get(seeded.id).company, '西浦');
+  await assert.rejects(admin.call(`/api/admin/members/${seeded.id}`, 'DELETE', { version: seeded.version }), { code: 'SUPER_ADMIN_PROTECTED' });
+  await assert.rejects(admin.call(`/api/admin/members/${seeded.id}/reset-password`, 'POST', { version: seeded.version, newPassword: '新' }), { code: 'SUPER_ADMIN_PROTECTED' });
 });
 
 test('reset revokes all browser/device sessions; deletion preserves a UUID tombstone and permits fresh identity reuse', async t => {
@@ -220,6 +224,12 @@ test('deployment CLI creates once, explicit reset revokes sessions, and no passw
   assert.equal(auth.resolve(prior), null); await admin.login('admin', '新');
   const empty = await cli(['create', ...args], '\n'); assert.equal(empty.code, 1);
   const duplicate = await cli(['create', ...args, '--username', 'another-admin'], SECRET); assert.equal(duplicate.code, 1); assert.match(duplicate.err, /SUPER_ADMIN_EXISTS/);
+  const company = await cli(['create', ...args, '--company', '西浦'], `${SECRET}\n`); assert.equal(company.code, 1);
+});
+
+test('super administrator provisioning rejects company assignment', async t => {
+  const { auth } = await setup(t);
+  await assert.rejects(auth.provisionSuperAdmin({ mode: 'reset', password: SECRET, company: '西浦' }), { status: 422, code: 'INVALID_INPUT' });
 });
 
 test('super administrator creates employees from one fixed name and preserves case with canonical uniqueness', async t => {

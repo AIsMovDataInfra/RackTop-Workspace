@@ -196,7 +196,7 @@ describe('equipment inventory', () => {
     expect([...company.options].filter(option => !option.disabled).map(option => option.value)).toEqual(['A公司'])
     await click('取消')
     expect(container.textContent).not.toContain('成员管理')
-    const superAdmin: Session = { ...member, user: { ...member.user!, role: 'admin', isSuperAdmin: true, company: null } }
+    const superAdmin: Session = { ...member, user: { ...member.user!, role: 'admin', isSuperAdmin: true, company: 'A公司' } }
     await act(async () => root.render(<EquipmentWorkspace session={superAdmin} state={state} navigate={vi.fn()} onSessionChanged={vi.fn()} onSessionExpired={vi.fn()} onLogout={vi.fn()} />))
     expect(container.textContent).toContain('成员管理')
     expect(container.querySelector('.profile small')?.textContent).toBe('跨公司管理 · 超级管理员')
