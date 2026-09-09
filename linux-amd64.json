@@ -1,11 +1,11 @@
 {
-  "version": "2.2.0",
-  "notes": "- 修复共享资源及其他桌面页面的原生下拉菜单纵向裁切，选项文字不再偏下或被遮挡。\n- 同一邀请码在到期前可供多台设备依次加入，每台设备保持独立身份、在线状态和撤销权限；撤销成员时自动轮换邀请码。\n- 分享者仅在访客在线时看到该连接的公网出口 IP；NAT、VPN、代理或公司统一出口可能让多人显示同一地址。\n- Linux、Mac Apple Silicon 和 Mac Intel 使用统一的 2.2.0 版本、标签与 Release，安装包继续按平台和架构区分。",
-  "pub_date": "2026-09-09T10:49:19Z",
+  "version": "2.2.1",
+  "notes": "- 支持选择并一键复制全局日志和单台服务器日志中的失败信息，保留中文、换行与完整诊断内容。\n- 支持在任务实时日志中选择文本或复制整份日志，加载中和空日志不会复制占位文字。\n- 优化复制成功、重复复制和剪贴板不可用时的反馈，复制受限时可直接手动选择文字。\n- 修复快速切换任务时旧日志可能覆盖新任务日志的问题，避免显示或复制错任务内容。",
+  "pub_date": "2026-09-09T15:01:08Z",
   "platforms": {
     "linux-x86_64-deb": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTVThDMjZnT3Yrc2hnMHhCaDFIV1djMnNlWW03aU5RNWRMalF2WktRYVpNNFZCaklRaC9tY1Judyt1dmovZ1NGUjdHSHI3Tk5laW9iRjZ0MlZha0VET1ZCZk5FT1o0M2djPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4OTUwNjExCWZpbGU6UmFja1RvcF8yLjIuMF9saW51eC1hbWQ2NC5kZWIKWEdEd25HdXh1R2V1QkJFbkRrS2JkVmRUKzlrajlKS09nTkk0T2g5Vkxhenhld1ZKeEZYTXNJd0dvRDQyV2VwNE44dlZoQ1pqWlJkRVBSN21BZ2UwRGc9PQo=",
-      "url": "https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.2.0/RackTop_2.2.0_linux-amd64.deb"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTVThDMjZnT3Yrc2lHYkhYZHhQcmwybnhCNEFKTXZWNk5PQjlGbVdLd1NtQ1JsckQ5dDZaWlBoNno4bS9USGwxMFFTeExuQWNGMng2S1Y4RHczemE1eXVpZ01sVHFNTndrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4OTY1NTczCWZpbGU6UmFja1RvcF8yLjIuMV9saW51eC1hbWQ2NC5kZWIKai9hUVF2a1BkQUQ5eHljandjMUN6d1F6RVBqVHh4NlRESm1RT0JTTWx3QTFTY2FodHdoc0Y5MmhQM0FDWUEySDVHcFBFbkttczBPaWI2SjJvYUtaQlE9PQo=",
+      "url": "https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.2.1/RackTop_2.2.1_linux-amd64.deb"
     }
   }
 }
