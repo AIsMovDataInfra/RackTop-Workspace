@@ -1,13 +1,13 @@
 # Linux 客户端（实验版）
 
-RackTop 2.1.1 测试候选版由独立仓库 [AIsMovDataInfra/RackTop-Workspace](https://github.com/AIsMovDataInfra/RackTop-Workspace) 维护，面向 Ubuntu 22.04 x86_64 / amd64 图形桌面。Linux 与 Mac 使用相同版本号，安装包名区分平台。2.1.1公开发布与本机安装仍待完成；当前可下载的是已核验公开下载、摘要、签名、版本与amd64架构的上一版 [v2.1.0测试版Release](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/tag/v2.1.0)。项目源自上游及旧 AIsMov 维护版，保留 Tongzh-SEU 原作者署名、完整历史及 GPL-3.0。
+RackTop 2.1.1由独立仓库 [AIsMovDataInfra/RackTop-Workspace](https://github.com/AIsMovDataInfra/RackTop-Workspace) 分发，面向 Ubuntu 22.04 x86_64 / amd64 图形桌面。Linux 与 Mac 使用相同版本号，安装包名区分平台。[v2.1.1测试版Release](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/tag/v2.1.1)已发布，Deb的公开下载、GitHub digest、SHA256、签名、版本与amd64架构均已核验；本机Linux用户目录也已完成安装。项目源自上游及旧 AIsMov 维护版，保留 Tongzh-SEU 原作者署名、完整历史及 GPL-3.0。
 
 ## 安装与启动
 
 从 [Linux / Mac Release](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases) 下载 `.deb` 后，在其所在目录执行（将文件名替换为实际下载的文件名）：
 
 ```bash
-sudo apt install ./RackTop_2.1.0_linux-amd64.deb
+sudo apt install ./RackTop_2.1.1_linux-amd64.deb
 racktop
 ```
 
@@ -24,7 +24,7 @@ racktop
 
 ## 一键更新与首次升级
 
-从旧 `1.30.0-linux.12` 或其他旧维护版迁入当前新仓库分发，必须先下载新仓库 Deb 并手动安装一次。当前可安装的上一版是 **2.1.0**；2.1.1安装包尚未公开。旧仓库及旧更新清单保持原状，不会自动将旧客户端引导到新仓库。新版本保留 `com.racktop.desktop` 标识与数据目录，服务器、项目、密钥引用和本机历史继续使用原资料；更换安装前可先备份应用数据。
+从旧 `1.30.0-linux.12` 或其他旧维护版迁入 **2.1.1**，必须先下载新仓库Deb并手动安装一次。旧仓库及旧更新清单保持原状，不会自动将旧客户端引导到新仓库。新版本保留 `com.racktop.desktop` 标识与数据目录，服务器、项目、密钥引用和本机历史继续使用原资料；更换安装前可先备份应用数据。
 
 安装新分发后，启动和每 24 小时检查新仓库更新，也可点击左上角手动检查。选择“更新到 v…”后先下载、验证新仓库的专用签名、包名、版本和架构，再通过系统授权窗口安装；拒绝降级。安装取消、网络或授权失败可重试或手动下载。系统安装需要 `pkexec`、APT 和可用的桌面授权代理，系统管理员密码与服务器 SSH 密码无关。
 
@@ -102,7 +102,9 @@ npm run bundle:linux -- --locked
 
 ## 验证范围
 
-2.1.1候选代码的桌面322项、团队网页119项、团队后端140项和两套生产构建通过；Linux Rust 160项通过，3项既有外部环境测试忽略。公开三平台CI、Deb附件与更新签名、在线部署和本机安装仍待完成。
+2.1.1的[标签工作流](https://github.com/AIsMovDataInfra/RackTop-Workspace/actions/runs/34320295755)三平台构建与发布成功。Linux通过桌面322项、Rust160项、中继27项、签名下载器9项、真实中继重连及至少15秒隔离原生启动。公开Deb的版本/amd64架构、7份包内MD5、许可证与来源说明均核验通过；9个公开附件和三个更新签名通过，完整文件名及SHA256见[2.1.1校验表](VERIFICATION_2_1_1.md#公开附件与更新签名)。
+
+本机已将核验过的2.1.1 Deb安装至用户目录，启动器和应用菜单指向新版本，3个数据库与5个配置文件已一致性备份且安装前后摘要、行数和权限保持；7个既有版本二进制未改。系统级dpkg仍为 `1.26.0-linux.8`。安装前后均无活动RackTop主进程，因此没有停止或重启进程；用户下次启动使用2.1.1。详情见[本机Linux安装记录](VERIFICATION_2_1_1.md#本机linux安装)。
 
 ### 上一版 2.1.0 验证记录
 

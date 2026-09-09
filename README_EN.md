@@ -2,7 +2,7 @@
 
 **AIsMov** maintains RackTop in the independent public repository [AIsMovDataInfra/RackTop-Workspace](https://github.com/AIsMovDataInfra/RackTop-Workspace). The desktop app remains **RackTop**; the online product is **AIsMov RackTop Team Workspace**. The project derives from [Tongzh-SEU/RackTop](https://github.com/Tongzh-SEU/RackTop) and the [previous AIsMov maintenance repository](https://github.com/AIsMovDataInfra/RackTop). **Tongzh-SEU** remains the original author, and the full Git history, attribution, [GPL-3.0 license](LICENSE) and [NOTICE](NOTICE.md) are preserved.
 
-The current code version is the **2.1.1 pre-release candidate**, targeting Ubuntu 22.04 amd64 and both Apple Silicon and Intel Macs. Version 2.1.1 defines the super-administrator boundary: the super administrator has no company assignment and manages all companies; they are neither required nor allowed to author a report for themselves and are excluded from weekly statistics, while retaining the ability to write reports for ordinary members and approve equipment requests. Local automated tests, both production builds, and browser checks passed. Public release, online deployment, and local installation are still pending. The previous [2.1.0 release](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/tag/v2.1.0) remains the current downloadable and deployed version, with its [verification record](docs/VERIFICATION_2_1.md).
+The current version is the **2.1.1 pre-release**, for Ubuntu 22.04 amd64 and both Apple Silicon and Intel Macs. Version 2.1.1 defines the super-administrator boundary: the super administrator has no company assignment and manages all companies; they are neither required nor allowed to author a report for themselves and are excluded from weekly statistics, while retaining the ability to write reports for ordinary members and approve equipment requests. [PR #5](https://github.com/AIsMovDataInfra/RackTop-Workspace/pull/5) merged as `7fdecfa`; the [three-platform workflow](https://github.com/AIsMovDataInfra/RackTop-Workspace/actions/runs/34320295755) and all nine public assets passed verification. The online workspace now runs 2.1.1 without a schema migration or history rewrite, and the local Linux user installation has been updated while preserving its data. See the [2.1.1 verification record](docs/VERIFICATION_2_1_1.md).
 
 The [online workspace guide](docs/WORKSPACE.md) covers equipment photos and QR labels, compute reservations, private weekly work reports with designated reviewers and manual scores, and equipment requests readable only by the super administrator. New ordinary members register with one name and password, then receive a company assignment from the super administrator. Business access is restricted to that company. The super administrator itself has no company assignment and manages all companies. Weekly submission and task statistics include ordinary members only; the super administrator may write for an ordinary member, assign reviewers, score reports, and approve equipment requests, but cannot create a report with itself as the author. Remembered web sessions last 360 days; desktop device tokens remain valid for 30 days.
 
@@ -45,13 +45,17 @@ Find the right GPU before launching a job, monitor resources and processes while
 
 ## Download
 
-**2.1.1 is still a pre-release candidate; its installers have not been published.** Use the verified 2.1.0 installers below for now. Both Mac architectures remain supported. See the [2.1.0 checksum table](docs/VERIFICATION_2_1.md#公开附件与更新签名).
+**2.1.1 has been published as a pre-release.** Anonymous downloads, GitHub digests, SHA256 values, source correspondence, and updater signatures have been verified. Both Mac architectures remain supported. See the [2.1.1 checksum table](docs/VERIFICATION_2_1_1.md#公开附件与更新签名).
 
 | Platform | Installer |
 | --- | --- |
-| Linux amd64 | [RackTop_2.1.0_linux-amd64.deb](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.1.0/RackTop_2.1.0_linux-amd64.deb) |
-| Mac Apple Silicon | [RackTop_2.1.0_macos-arm64-unsigned.dmg](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.1.0/RackTop_2.1.0_macos-arm64-unsigned.dmg) |
-| Mac Intel | [RackTop_2.1.0_macos-x64-unsigned.dmg](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.1.0/RackTop_2.1.0_macos-x64-unsigned.dmg) |
+| Linux amd64 | [RackTop_2.1.1_linux-amd64.deb](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.1.1/RackTop_2.1.1_linux-amd64.deb) |
+| Mac Apple Silicon | [RackTop_2.1.1_macos-arm64-unsigned.dmg](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.1.1/RackTop_2.1.1_macos-arm64-unsigned.dmg) |
+| Mac Intel | [RackTop_2.1.1_macos-x64-unsigned.dmg](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.1.1/RackTop_2.1.1_macos-x64-unsigned.dmg) |
+
+### Previous 2.1.0 release
+
+The [v2.1.0 release](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/tag/v2.1.0) and its [verification record](docs/VERIFICATION_2_1.md) remain available.
 
 ### Older historical installers
 
@@ -69,7 +73,7 @@ These 2.0.0 installers are available and their public downloads have been verifi
 Migration from the previous Linux `1.30.0-linux.12` or Mac distribution requires one manual installation because the new repository has dedicated signing keys and update feeds. The old feeds will not redirect to it. On Mac, quit RackTop and replace the app using the DMG for your processor. On Linux:
 
 ```bash
-sudo apt install ./RackTop_2.1.0_linux-amd64.deb
+sudo apt install ./RackTop_2.1.1_linux-amd64.deb
 racktop
 ```
 
