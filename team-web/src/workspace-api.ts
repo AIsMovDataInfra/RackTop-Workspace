@@ -1,8 +1,14 @@
 import { request } from './api'
-import type { DeviceRequestInput, EquipmentRequest, ReportInput, RequestStatus, WeeklyReport, WorkAudit } from './workspace-types'
+import type { DeviceRequestInput, EquipmentRequest, ReportInput, RequestStatus, WeeklyReport, WeeklyStatistics, WeeklyStatisticsFilter, WorkAudit } from './workspace-types'
 
 export const workspaceApi = {
   reports: () => request<{ reports: WeeklyReport[] }>('/workspace/reports'),
+  reportStatistics: (filters: WeeklyStatisticsFilter) => {
+    const query = new URLSearchParams({ weekStart: filters.weekStart })
+    if (filters.company) query.set('company', filters.company)
+    if (filters.memberId) query.set('memberId', filters.memberId)
+    return request<WeeklyStatistics>(`/workspace/reports/statistics?${query}`)
+  },
   report: (id: string) => request<{ report: WeeklyReport; history: WorkAudit[] }>(`/workspace/reports/${encodeURIComponent(id)}`),
   createReport: (body: ReportInput) => request<{ report: WeeklyReport }>('/workspace/reports', 'POST', body),
   updateReport: (id: string, body: { version: number; todos: ReportInput['todos']; nextPlan: string; status: ReportInput['status'] }) => request<{ report: WeeklyReport }>(`/workspace/reports/${encodeURIComponent(id)}`, 'PATCH', body),

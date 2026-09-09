@@ -1,5 +1,6 @@
+import { Brand } from './Brand'
 import { useEffect, useRef, useState } from 'react'
-import { Activity, Building2, KeyRound, FileText, HandHelping, LayoutGrid, LogOut, Package, Plus, RefreshCw, Settings, ShieldCheck, Trash2, Users } from 'lucide-react'
+import { Building2, KeyRound, FileText, HandHelping, LayoutGrid, LogOut, Package, Plus, RefreshCw, Settings, ShieldCheck, Trash2, Users } from 'lucide-react'
 import { MemberAvatar } from './MemberAvatar'
 import { api, ApiError } from './api'
 import { Dialog } from './Dialog'
@@ -110,7 +111,7 @@ export function MembersWorkspace({ session, state, navigate, onLogout, onSession
   return <>
     <div className="workspace-shell members-workspace" inert={Boolean(editor) || settings}>
       <aside className="sidebar">
-        <div className="brand"><span><Activity size={24} /></span><div><strong>AIsMov RackTop</strong><small>{t('团队工作台', 'Team workspace')}</small></div></div>
+        <Brand t={t} />
         <nav className="main-nav" aria-label={t('主导航', 'Main navigation')}><button onClick={() => navigate('/')}><LayoutGrid size={18} />{t('算力预约', 'Compute bookings')}</button><button onClick={() => navigate('/equipment')}><Package size={18} />{t('设备管理', 'Equipment')}</button><button onClick={() => navigate('/reports')}><FileText size={18}/>{t('周报与绩效', 'Weekly reports')}</button><button onClick={() => navigate('/requests')}><HandHelping size={18}/>{t('设备申请与领取', 'Device requests')}</button><button className="is-active" aria-current="page"><Users size={18} />{t('成员管理', 'Members')}</button></nav>
         <div className="sidebar-bottom"><div className="sidebar-note"><ShieldCheck size={18} /><p>{t('成员名册与账号管理仅超级管理员可访问。', 'Only the super administrator can access the member directory and account management.')}</p></div><button className="sidebar-settings" onClick={() => setSettings(true)}><Settings size={17} />{t('设置', 'Settings')}</button><div className="profile"><span className="profile-avatar"><MemberAvatar avatar={session.user?.avatar} size={19} /></span><div><strong>{session.user!.name}</strong><small>{t('超级管理员', 'Super administrator')}</small></div><button className="icon-button" aria-label={t('退出登录', 'Sign out')} disabled={busy} onClick={async () => { generation.current++; setMembers([]); setBusy(true); try { await onLogout() } catch (reason) { setError(reason) } finally { setBusy(false) } }}><LogOut size={16} /></button></div></div>
       </aside>

@@ -137,7 +137,7 @@ describe('equipment inventory', () => {
     act(() => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(search, '办公室'); search.dispatchEvent(new Event('input', { bubbles: true })) })
     expect(container.querySelectorAll('.equipment-row')).toHaveLength(1)
     expect(container.querySelector('.equipment-row')?.textContent).toContain('备用显示器')
-    act(() => { const select = container.querySelector('select')!; select.value = 'available'; select.dispatchEvent(new Event('change', { bubbles: true })) })
+    act(() => { const select = container.querySelector<HTMLSelectElement>('select[name="status"]')!; select.value = 'available'; select.dispatchEvent(new Event('change', { bubbles: true })) })
     expect(container.textContent).toContain('没有匹配的设备')
     await click('清除筛选')
     await act(async () => container.querySelector<HTMLAnchorElement>('.equipment-row')!.click())
@@ -206,6 +206,46 @@ describe('equipment inventory', () => {
     await submit(); expect(create).not.toHaveBeenCalled()
     select('company', '西浦'); await submit()
     expect(create).toHaveBeenCalledWith(expect.objectContaining({ name: '管理设备', company: '西浦' }))
+  })
+
+  it('lists every company for super administrators even when C has no equipment and presets C on creation', async () => {
+    const superAdmin: Session = { ...member, user: { ...member.user!, role: 'admin', isSuperAdmin: true, company: 'A公司' } }
+    await act(async () => root.render(<EquipmentWorkspace session={superAdmin} state={state} navigate={vi.fn()} onSessionChanged={vi.fn()} onSessionExpired={vi.fn()} onLogout={vi.fn()} />))
+    const filter = container.querySelector<HTMLSelectElement>('select[name="companyFilter"]')!
+    expect([...filter.options].map(option => option.value)).toEqual(['', 'A公司', 'B公司', 'C公司', '西浦', 'unassigned'])
+    expect([...filter.options].find(option => option.value === 'C公司')?.textContent).toBe('C公司 (0)')
+    expect(container.querySelector('.equipment-row-company')?.textContent).toContain('A公司')
+    select('companyFilter', 'C公司')
+    expect(container.querySelectorAll('.equipment-row')).toHaveLength(0)
+    expect(container.textContent).toContain('C公司暂无设备')
+    await click('新增设备')
+    expect(container.querySelector<HTMLSelectElement>('select[name="company"]')?.value).toBe('C公司')
+    await click('取消'); await click('查看全部公司')
+    expect(container.querySelectorAll('.equipment-row')).toHaveLength(1)
+  })
+
+  it('filters C and unassigned equipment explicitly and combines company with status', async () => {
+    const superAdmin: Session = { ...member, user: { ...member.user!, role: 'admin', isSuperAdmin: true } }
+    vi.mocked(api.equipment).mockResolvedValue({ equipment: [equipment, { ...equipment, id: 'c-device', company: 'C公司', name: 'C组显示屏', status: 'maintenance' }, { ...equipment, id: 'legacy-device', company: '', name: '旧设备' }] })
+    await act(async () => root.render(<EquipmentWorkspace session={superAdmin} state={state} navigate={vi.fn()} onSessionChanged={vi.fn()} onSessionExpired={vi.fn()} onLogout={vi.fn()} />))
+    select('companyFilter', 'C公司')
+    expect(container.querySelectorAll('.equipment-row')).toHaveLength(1)
+    expect(container.querySelector('.equipment-row')?.textContent).toContain('C组显示屏')
+    select('status', 'available')
+    expect(container.textContent).toContain('没有匹配的设备')
+    await click('清除筛选'); select('companyFilter', 'unassigned')
+    expect(container.querySelectorAll('.equipment-row')).toHaveLength(1)
+    expect(container.querySelector('.equipment-row-company')?.textContent).toContain('待分配')
+    expect(container.querySelector('.equipment-row')?.textContent).toContain('旧设备')
+  })
+
+  it('keeps a member company filter read-only and explains the assigned-company scope', async () => {
+    await act(async () => root.render(<EquipmentWorkspace session={member} state={state} navigate={vi.fn()} onSessionChanged={vi.fn()} onSessionExpired={vi.fn()} onLogout={vi.fn()} />))
+    const filter = container.querySelector<HTMLSelectElement>('select[name="companyFilter"]')!
+    expect(filter.disabled).toBe(true)
+    expect([...filter.options].map(option => option.value)).toEqual(['A公司'])
+    expect(container.querySelector('.equipment-company-scope')?.textContent).toContain('仅显示A公司的设备')
+    expect(container.querySelector('.equipment-company-scope')?.textContent).toContain('超级管理员分配')
   })
 
   it('closes the editor with Escape and restores the originating button focus', async () => {

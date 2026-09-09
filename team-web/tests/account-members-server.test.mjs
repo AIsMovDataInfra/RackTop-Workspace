@@ -241,3 +241,58 @@ test('workspace HTTP saves private requests and approved collection atomically u
   assert.equal((await call(`/api/workspace/reports/${report.body.report.id}`, { session })).status, 200);
   assert.equal((await call('/api/workspace/reports', { session })).body.reports.length, 1);
 });
+
+test('weekly statistics HTTP protects the full roster and retains deleted authors without exposing account secrets', async t => {
+  const { call, admin, login, register, anonymous, bootstrapToken } = await fixture(t);
+  const add = async name => {
+    const result = await call('/api/admin/members', { method: 'POST', session: admin, body: { name, password: '密', company: 'A公司' } });
+    assert.equal(result.status, 201, result.text);
+    return { member: result.body.member, session: (await login(name, '密')).session };
+  };
+  const author = await add('周报作者'), reviewer = await add('指定评审人');
+  const ordinaryAdmin = await register('资源管理员', { bootstrapToken });
+  assert.equal(ordinaryAdmin.user.role, 'admin'); assert.equal(ordinaryAdmin.user.isSuperAdmin, false);
+  const assigned = await call(`/api/admin/members/${ordinaryAdmin.user.id}`, { method: 'PATCH', session: admin, body: { version: 1, company: 'B公司' } });
+  assert.equal(assigned.status, 200, assigned.text);
+  const pending = await register('尚未分配');
+  const reportInput = { weekStart: '2026-09-09', todos: [{ text: '机械臂联调', completion: 100, unfinishedReason: '', effect: '调试完成' }], nextPlan: '回归测试', status: 'submitted' };
+  const created = await call('/api/workspace/reports', { method: 'POST', session: author.session, body: reportInput });
+  assert.equal(created.status, 201, created.text); assert.equal(created.body.report.weekStart, '2026-09-07');
+  assert.equal((await call('/api/workspace/reports', { method: 'POST', session: author.session, body: { ...reportInput, weekStart: '2026-09-13' } })).status, 409);
+  const id = created.body.report.id;
+  assert.equal((await call(`/api/workspace/reports/${id}/reviewer`, { method: 'POST', session: admin, body: { version: 1, reviewerId: reviewer.member.id } })).status, 200);
+  assert.equal((await call(`/api/workspace/reports/${id}/review`, { method: 'POST', session: reviewer.session, body: { version: 2, score: 0, comment: '人工评分' } })).status, 200);
+  const path = '/api/workspace/reports/statistics';
+  assert.equal((await call(path, { session: await anonymous() })).status, 401);
+  for (const session of [author.session, reviewer.session, ordinaryAdmin]) {
+    for (const query of ['', '?company=A%E5%85%AC%E5%8F%B8', `?memberId=${session.user.id}`, '?secret=1&weekStart=invalid']) {
+      const result = await call(`${path}${query}`, { session });
+      assert.equal(result.status, 403, result.text); assert.equal(result.body.error.code, 'SUPERADMIN_REQUIRED');
+      assert.equal(result.text.includes('周报作者'), false);
+    }
+  }
+  assert.equal((await call(path, { session: pending })).status, 403);
+  const result = await call(`${path}?weekStart=2026-09-10`, { session: admin });
+  assert.equal(result.status, 200, result.text); assert.equal(result.headers['cache-control'], 'no-store');
+  assert.deepEqual(result.body.summary, { expectedCount: 5, submittedCount: 1, unsubmittedCount: 4, reviewedCount: 1, averageCompletion: 100, averageScore: 0 });
+  assert.equal(result.body.rows.find(row => row.authorId === author.member.id).reviewerName, '指定评审人');
+  assert.deepEqual(Object.keys(result.body.rows[0]).sort(), ['authorId', 'name', 'company', 'weekStart', 'weekEnd', 'status', 'reportId', 'todoCount', 'completedCount', 'unfinishedCount', 'averageCompletion', 'score', 'reviewerName'].sort());
+  for (const query of ['?unknown=x', '?weekStart=2026-09-07&weekStart=2026-09-14', '?company=A%E5%85%AC%E5%8F%B8&company=B%E5%85%AC%E5%8F%B8', '?memberId=bad', '?weekStart=', '?company=']) {
+    assert.equal((await call(`${path}${query}`, { session: admin })).status, 422, query);
+  }
+  assert.equal((await call(path, { method: 'POST', body: {}, session: admin })).status, 405);
+  assert.equal((await call('/api/workspace/reports?weekStart=2026-09-07', { session: admin })).status, 422, 'other workspace routes still reject queries');
+  const company = await call(`${path}?company=${encodeURIComponent('A公司')}&memberId=${author.member.id}`, { session: admin });
+  assert.equal(company.body.rows.length, 1); assert.equal(company.body.rows[0].score, 0);
+  const unassigned = await call(`${path}?company=unassigned`, { session: admin });
+  assert.equal(unassigned.body.rows.length, 2); assert.ok(unassigned.body.rows.every(row => row.company === null));
+  const earlier = await call(`${path}?weekStart=2026-08-31`, { session: admin });
+  assert.equal(earlier.body.rows.length, 0, 'accounts registered later do not acquire missing reports');
+  const removed = await call(`/api/admin/members/${author.member.id}`, { method: 'DELETE', session: admin, body: { version: author.member.version } });
+  assert.equal(removed.status, 200, removed.text);
+  assert.equal((await call(path, { session: author.session })).status, 401, 'deleted sessions cannot access statistics');
+  const historical = await call(`${path}?memberId=${author.member.id}`, { session: admin });
+  assert.equal(historical.body.rows[0].name, '周报作者'); assert.equal(historical.body.rows[0].company, 'A公司');
+  assert.equal(historical.body.summary.reviewedCount, 1); assert.equal(historical.body.summary.expectedCount, 1);
+  assert.equal((await call(`${path}?weekStart=2026-09-14&memberId=${author.member.id}`, { session: admin })).body.rows.length, 0);
+});

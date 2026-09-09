@@ -1,5 +1,6 @@
+import { Brand } from './Brand'
 import { useState, type ReactNode } from 'react'
-import { Activity, ClipboardList, FileText, LayoutGrid, LogOut, Package, Settings, Users } from 'lucide-react'
+import { ClipboardList, FileText, LayoutGrid, LogOut, Package, Settings, Users } from 'lucide-react'
 import { SettingsDialog } from './SettingsDialog'
 import { MemberAvatar } from './MemberAvatar'
 import { errorText } from './errors'
@@ -13,7 +14,7 @@ export function WorkModuleFrame({ children, title, subtitle, section, actions, m
   const [loggingOut, setLoggingOut] = useState(false)
   const [logoutError, setLogoutError] = useState<unknown>(null)
   return <><div className="workspace-shell work-module" inert={Boolean(modal || settings)}>
-    <aside className="sidebar"><div className="brand"><span><Activity size={24}/></span><div><strong>AIsMov RackTop</strong><small>{t('团队工作台', 'Team workspace')}</small></div></div>
+    <aside className="sidebar"><Brand t={t} />
       <nav className="main-nav" aria-label={t('主导航', 'Main navigation')}>
         <button onClick={() => navigate('/')}><LayoutGrid size={18}/>{t('资源看板', 'Resource board')}</button>
         <button onClick={() => navigate('/equipment')}><Package size={18}/>{t('设备管理', 'Equipment')}</button>

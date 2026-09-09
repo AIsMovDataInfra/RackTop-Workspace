@@ -2,7 +2,7 @@
 
 本项目由 **AIsMov** 维护，当前代码与 Linux / macOS 分发位于独立公开仓库 [AIsMovDataInfra/RackTop-Workspace](https://github.com/AIsMovDataInfra/RackTop-Workspace)。桌面应用继续叫 **RackTop**，在线网页为 **AIsMov RackTop 团队工作台**。项目源自 [Tongzh-SEU/RackTop](https://github.com/Tongzh-SEU/RackTop) 及 [原 AIsMov 维护仓库](https://github.com/AIsMovDataInfra/RackTop)，保留原作者 **Tongzh-SEU**、完整 Git 历史、[GPL-3.0](LICENSE) 和[来源说明](NOTICE.md)。
 
-本轮统一版本为 **2.0.0**：Linux 面向 Ubuntu 22.04 amd64，Mac 提供 Apple Silicon 和 Intel 两种包。三平台安装包已发布至 [2.0.0 Release](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/tag/v2.0.0)，公开下载、摘要与更新签名均已核验；在线团队工作台已于 2026-09-09 部署，生产迁移与原管理员登录通过；各项验证见[本轮记录](docs/VERIFICATION.md)。旧仓库和旧更新清单保持原状，首次迁入请手动安装新包，原本机资料继续保留。
+本轮开发版本为 **2.1.0**，继续提供Linux amd64及Mac Apple Silicon、Intel两种安装包。新增24种彩色头像、完整公司筛选、超管周报统计和明确的周一至周日报告窗口；网页以 **RackTop** 为主字、**AIsMov · 团队工作台** 为辅助字。本地自动化与两套生产构建已通过，浏览器剩余流程、部署和发布验收继续进行，见[2.1.0验证记录](docs/VERIFICATION_2_1.md)。上一版[2.0.0 Release](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/tag/v2.0.0)仍可下载，其[历史验证记录](docs/VERIFICATION.md)保留。
 
 <div align="right">
   🌐 Language:
@@ -44,6 +44,18 @@ RackTop 是面向个人研究者和小型团队的 GPU 服务器桌面工作台�
 
 ## 下载
 
+**2.1.0目标安装包，待发布验收。** 以下链接在发布完成前可能不可下载；Mac继续提供两种架构。
+
+| 平台 | 目标安装包 |
+| --- | --- |
+| Linux amd64 | [RackTop_2.1.0_linux-amd64.deb](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.1.0/RackTop_2.1.0_linux-amd64.deb) |
+| Mac Apple Silicon | [RackTop_2.1.0_macos-arm64-unsigned.dmg](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.1.0/RackTop_2.1.0_macos-arm64-unsigned.dmg) |
+| Mac Intel | [RackTop_2.1.0_macos-x64-unsigned.dmg](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.1.0/RackTop_2.1.0_macos-x64-unsigned.dmg) |
+
+### 已发布的上一版
+
+以下2.0.0安装包仍可下载，已有验证不代替2.1.0验收。
+
 | 客户端平台 | 提供方 | 安装包与下载 |
 | --- | --- | --- |
 | **Ubuntu 22.04 x86_64 / amd64** | **AIsMov 2.0.0 测试版** | [下载 Linux .deb](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.0.0/RackTop_2.0.0_linux-amd64.deb) |
@@ -64,12 +76,14 @@ racktop
 
 ## 在线团队工作台
 
-打开 [AIsMov RackTop](https://136.0.110.161)，用一个成员名称和密码注册，不需要邮箱。超级管理员分配公司后即可使用本公司的设备台账和算力预约；设置中可选择 7 种头像，网页“记住登录”为 360 天，桌面设备登录仍为 30 天。
+以下包含2.1.0功能说明；线上升级状态以[本轮验证记录](docs/VERIFICATION_2_1.md)为准。
+
+打开 [AIsMov RackTop](https://136.0.110.161)，用一个成员名称和密码注册，不需要邮箱。超级管理员分配公司后即可使用本公司的设备台账和算力预约；2.1.0设置中可选择24种彩色头像，原7种保持兼容，网页“记住登录”为 360 天，桌面设备登录仍为 30 天。
 
 | 功能 | 使用方式 |
 | --- | --- |
-| 设备管理 | 目录显示照片缩略图，手机扫码查看档案，登记负责人、使用人和位置，打印固定资产标签。 |
-| 周报与绩效 | 成员保存工作清单、完成度、未完成原因、效果和下周计划；只有作者、指定同公司评审人及超管可看，评分由人填写。 |
+| 设备管理 | 目录显示照片和公司；超管始终可筛选四家公司及零数量状态，手机扫码登记负责人、使用人和位置，打印资产标签。 |
+| 周报与绩效 | 明确本周与下周日期范围；超管按周、公司、成员查看提交、任务与人工评分汇总，单份周报仍限作者、指定评审人和超管查看。 |
 | 算力预约 | 同公司整机或指定 GPU 排期、冲突检查、续约与取消；管理员同步桌面 GPU 清单或手工登记资源。 |
 | 设备申请与领取 | 员工提交申请后只得到编号确认；只有超管能读申请内容和审批，关联现有设备的领取会同步使用人及设备状态。 |
 

@@ -10,7 +10,8 @@ const REMEMBERED_SESSION_MS = 360 * 24 * 60 * 60_000;
 const ANONYMOUS_MS = 10 * 60_000;
 const DEVICE_MS = 30 * 24 * 60 * 60_000;
 export const ACCOUNT_COMPANIES = Object.freeze(['A公司', 'B公司', 'C公司', '西浦']);
-export const ACCOUNT_AVATARS = Object.freeze(['user', 'cat', 'dog', 'rocket', 'robot', 'flower', 'star']);
+const LEGACY_AVATARS = Object.freeze(['user', 'cat', 'dog', 'rocket', 'robot', 'flower', 'star']);
+export const ACCOUNT_AVATARS = Object.freeze([...LEGACY_AVATARS, 'engineer', 'explorer', 'rabbit', 'bird', 'fish', 'turtle', 'squirrel', 'bug', 'satellite', 'planet', 'moon', 'sun', 'computer', 'circuit', 'headphones', 'sprout', 'gem']);
 // OWASP Password Storage Cheat Sheet: equivalent 32 MiB scrypt configuration.
 // https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html#scrypt
 const SCRYPT = Object.freeze({ N: 32768, r: 8, p: 3, maxmem: 64 * 1024 * 1024 });
@@ -125,6 +126,8 @@ export function createAccountAuth(config) {
       version: 'INTEGER NOT NULL DEFAULT 1 CHECK(version > 0)',
       recovery_requested_at: 'INTEGER', deleted_at: 'INTEGER',
       avatar: "TEXT NOT NULL DEFAULT 'user' CHECK(avatar IN ('user','cat','dog','rocket','robot','flower','star'))",
+      // Preserve the old CHECK and its values so upgrades never rebuild account identities.
+      avatar_choice: `TEXT CHECK(avatar_choice IS NULL OR avatar_choice IN (${ACCOUNT_AVATARS.map(value => `'${value}'`).join(',')}))`,
     })) if (!columns.has(column)) db.exec(`ALTER TABLE account_users ADD COLUMN ${column} ${definition}`);
     for (const row of db.prepare('SELECT id,username FROM account_users WHERE username_key IS NULL').all()) {
       db.prepare('UPDATE account_users SET username_key = ? WHERE id = ?').run(username(row.username), row.id);
@@ -206,14 +209,14 @@ export function createAccountAuth(config) {
   }
   function userView(row) {
     return row?.id && row.deleted_at == null ? { id: row.id, name: row.name, role: row.role, username: row.username,
-      isSuperAdmin: Boolean(row.is_super_admin), company: row.company ?? null, version: row.version ?? 1, avatar: row.avatar ?? 'user' } : null;
+      isSuperAdmin: Boolean(row.is_super_admin), company: row.company ?? null, version: row.version ?? 1, avatar: row.avatar_choice ?? row.avatar ?? 'user' } : null;
   }
   function recordFor(req, browserOnly = false) {
     purge();
     const hasBearer = !browserOnly && req.headers?.authorization !== undefined;
     const token = hasBearer ? bearerToken(req) : browserToken(req);
     if (!token) return null;
-    const row = db.prepare(`SELECT s.token_hash, s.kind, s.expires_at, s.remember_me, a.id, a.name, a.username, a.role, a.is_super_admin, a.company, a.version, a.deleted_at, a.avatar
+    const row = db.prepare(`SELECT s.token_hash, s.kind, s.expires_at, s.remember_me, a.id, a.name, a.username, a.role, a.is_super_admin, a.company, a.version, a.deleted_at, a.avatar, a.avatar_choice
       FROM account_sessions s LEFT JOIN account_users a ON a.id = s.user_id
       WHERE s.token_hash = ? AND s.kind = ? AND s.expires_at > ?`).get(digest(token), hasBearer ? 'device' : 'browser', now());
     return row ? { user: userView(row), csrfToken: row.kind === 'browser' ? csrfFor(token) : null,
@@ -523,12 +526,13 @@ export function createAccountAuth(config) {
       verifyWrite(req, current);
       fields(body, ['version', 'avatar']);
       const expectedVersion = version(body.version);
-      if (!ACCOUNT_AVATARS.includes(body.avatar)) throw fail(422, 'INVALID_AVATAR', '请选择列表中的头像。');
+      if (typeof body.avatar !== 'string' || !ACCOUNT_AVATARS.includes(body.avatar)) throw fail(422, 'INVALID_AVATAR', '请选择列表中的头像。');
       transaction(() => {
         const previous = activeMember(current.user.id);
         if (previous.version !== expectedVersion) throw fail(409, 'VERSION_CONFLICT', '账号信息已变化，请刷新后重试。');
-        if (previous.avatar !== body.avatar) {
-          db.prepare('UPDATE account_users SET avatar = ?, version = version + 1 WHERE id = ?').run(body.avatar, previous.id);
+        if ((previous.avatar_choice ?? previous.avatar) !== body.avatar) {
+          const legacyAvatar = LEGACY_AVATARS.includes(body.avatar) ? body.avatar : previous.avatar;
+          db.prepare('UPDATE account_users SET avatar_choice = ?, avatar = ?, version = version + 1 WHERE id = ?').run(body.avatar, legacyAvatar, previous.id);
           audit(previous.id, previous, 'avatar-changed', previous.version + 1);
         }
       });

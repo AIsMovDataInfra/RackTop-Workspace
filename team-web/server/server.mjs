@@ -173,6 +173,14 @@ export function createTeamServer(overrides = {}) {
       const requestMatch = /^\/api\/workspace\/requests\/([^/]+)$/.exec(url.pathname);
       if (url.pathname.startsWith('/api/workspace/')) {
         if (config.mode !== 'account') throw new ApiError(403, 'ACCOUNT_REQUIRED', '请使用团队账号登录此功能');
+        if (url.pathname === '/api/workspace/reports/statistics') {
+          if (!user.isSuperAdmin) throw new ApiError(403, 'SUPERADMIN_REQUIRED', '仅超级管理员可查看周报统计');
+          if (req.method !== 'GET') throw new ApiError(405, 'METHOD_NOT_ALLOWED', '周报统计仅支持读取');
+          for (const key of url.searchParams.keys()) {
+            if (!['weekStart', 'company', 'memberId'].includes(key) || url.searchParams.getAll(key).length !== 1) throw new ApiError(422, 'INVALID_INPUT', '周报统计查询参数无效');
+          }
+          json(res, 200, workspaceStore.reportStatistics(Object.fromEntries(url.searchParams), user)); return;
+        }
         if ([...url.searchParams].length) throw new ApiError(422, 'INVALID_INPUT', '工作台接口不支持查询参数');
         if (url.pathname === '/api/workspace/reports') {
           if (req.method === 'GET') { json(res, 200, { reports: workspaceStore.listReports(user) }); return; }

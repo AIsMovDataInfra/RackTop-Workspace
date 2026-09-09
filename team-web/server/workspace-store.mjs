@@ -23,12 +23,21 @@ function identifier(value) {
   if (typeof value !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)) invalid('记录标识符无效');
   return value.toLowerCase();
 }
+const dayMilliseconds = 24 * 60 * 60 * 1000;
+const beijingOffset = 8 * 60 * 60 * 1000;
+const dateOnly = value => value.toISOString().split('T')[0];
 function week(value) {
-  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) invalid('请选择周报所在周的周一');
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) invalid('请选择有效的周报日期');
   const date = new Date(`${value}T00:00:00Z`);
-  if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== value || date.getUTCDay() !== 1) invalid('周报周期必须为有效的周一日期');
-  return value;
+  if (!Number.isFinite(date.getTime()) || dateOnly(date) !== value) invalid('周报日期无效');
+  date.setUTCDate(date.getUTCDate() - (date.getUTCDay() + 6) % 7);
+  const weekStart = dateOnly(date), weekEnd = dateOnly(new Date(date.getTime() + 6 * dayMilliseconds));
+  if (![weekStart, weekEnd].every(day => /^\d{4}-\d{2}-\d{2}$/.test(day))) invalid('请选择四位年份范围内的完整周');
+  return { weekStart, weekEnd,
+    // Account registration timestamps are compared with Monday 00:00 in Beijing.
+    endExclusive: date.getTime() + 7 * dayMilliseconds - beijingOffset };
 }
+const average = values => values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
 function content(value, submitted) {
   if (!Array.isArray(value.todos) || value.todos.length > 20) invalid('周报最多填写 20 项工作');
   const todos = value.todos.map(item => {
@@ -126,7 +135,7 @@ export function createWorkspaceStore({ dbPath = ':memory:', now = Date.now, reso
     fields(input, ['authorId', 'weekStart', 'todos', 'nextPlan', 'status']);
     const status = input.status ?? 'draft';
     if (!['draft', 'submitted'].includes(status)) invalid('周报状态无效');
-    const data = content(input, status === 'submitted'), weekStart = week(input.weekStart);
+    const data = content(input, status === 'submitted'), { weekStart } = week(input.weekStart);
     return transaction(() => {
       const user = actor(claim), author = target(input.authorId ?? user.id);
       if (!user.isSuperAdmin && author.id !== user.id) fail(403, 'FORBIDDEN', '只能为自己创建周报');
@@ -137,6 +146,39 @@ export function createWorkspaceStore({ dbPath = ':memory:', now = Date.now, reso
       audit('report', id, user, status === 'submitted' ? 'report-submitted' : 'report-created', { authorId: author.id, weekStart, ...data }, at);
       return reportView(reportRow(id));
     });
+  }
+  function reportStatistics(query, claim) {
+    return transaction(() => {
+      const user = actor(claim); superAdmin(user);
+      fields(query, ['weekStart', 'company', 'memberId']);
+      const { weekStart, weekEnd, endExclusive } = week(query.weekStart ?? dateOnly(new Date(now() + beijingOffset)));
+      if (own(query, 'company') && query.company !== 'unassigned' && !companies.has(query.company)) invalid('公司筛选无效');
+      const memberId = own(query, 'memberId') ? identifier(query.memberId) : null;
+      // Read only profile columns, on this same connection and snapshot as the reports.
+      const members = db.prepare('SELECT id,name,company FROM account_users WHERE deleted_at IS NULL AND created_at<?').all(endExclusive);
+      const reports = db.prepare(`SELECT id,author_id,author_name,company,todos,status,score,reviewer_name
+        FROM weekly_reports WHERE week_start=?`).all(weekStart);
+      const rows = new Map(members.map(member => [member.id, { authorId: member.id, name: member.name, company: member.company,
+        weekStart, weekEnd, status: 'missing', reportId: null, todoCount: 0, completedCount: 0, unfinishedCount: 0,
+        averageCompletion: null, score: null, reviewerName: null }]));
+      // Actual reports retain their historical identity/company, including deleted and backfilled authors.
+      for (const report of reports) {
+        const todos = JSON.parse(report.todos), completedCount = todos.filter(todo => todo.completion === 100).length;
+        rows.set(report.author_id, { authorId: report.author_id, name: report.author_name, company: report.company,
+          weekStart, weekEnd, status: report.score == null ? report.status : 'reviewed', reportId: report.id,
+          todoCount: todos.length, completedCount, unfinishedCount: todos.length - completedCount,
+          averageCompletion: average(todos.map(todo => todo.completion)), score: report.score, reviewerName: report.reviewer_name });
+      }
+      const selected = [...rows.values()].filter(row => (!memberId || row.authorId === memberId)
+        && (!own(query, 'company') || row.company === (query.company === 'unassigned' ? null : query.company)))
+        .sort((a, b) => a.name.localeCompare(b.name, 'zh-CN') || a.authorId.localeCompare(b.authorId));
+      const submitted = selected.filter(row => ['submitted', 'reviewed'].includes(row.status));
+      const reviewed = selected.filter(row => row.status === 'reviewed');
+      return { weekStart, weekEnd, timezone: 'Asia/Shanghai', rows: selected,
+        summary: { expectedCount: selected.length, submittedCount: submitted.length, unsubmittedCount: selected.length - submitted.length,
+          reviewedCount: reviewed.length, averageCompletion: average(submitted.map(row => row.averageCompletion).filter(value => value != null)),
+          averageScore: average(reviewed.map(row => row.score)) } };
+    }, false);
   }
   function updateReport(id, input, claim) {
     fields(input, ['version', 'todos', 'nextPlan', 'status']);
@@ -242,7 +284,7 @@ export function createWorkspaceStore({ dbPath = ':memory:', now = Date.now, reso
     });
   }
   return {
-    createReport, updateReport, assignReviewer, reviewReport, createRequest, updateRequest,
+    createReport, updateReport, assignReviewer, reviewReport, reportStatistics, createRequest, updateRequest,
     listReports(claim) { return transaction(() => { const user = actor(claim); return db.prepare('SELECT * FROM weekly_reports ORDER BY week_start DESC,created_at DESC').all().filter(row => readable(row, user)).map(reportView); }, false); },
     getReport(id, claim) { return transaction(() => { const user = actor(claim), row = readReport(id, user); return { report: reportView(row), history: history('report', row.id) }; }, false); },
     listRequests(claim) { return transaction(() => { const user = actor(claim); superAdmin(user); return db.prepare('SELECT * FROM equipment_requests ORDER BY created_at DESC,id').all().map(requestView); }, false); },

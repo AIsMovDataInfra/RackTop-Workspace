@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { version as currentVersion } from '../../package.json'
 
 const macUserAgent = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15'
 const macFeed = 'https://raw.githubusercontent.com/AIsMovDataInfra/RackTop-Workspace/updater/macos.json'
@@ -56,7 +57,7 @@ describe('release metadata platform routing', () => {
     Reflect.deleteProperty(window, '__TAURI_INTERNALS__')
     const { api } = await import('./api')
     expect(api.isDesktop).toBe(false)
-    expect((await api.getLatestRelease()).version).toBe('2.0.0')
+    expect((await api.getLatestRelease()).version).toBe(currentVersion)
     expect(fetch).not.toHaveBeenCalled()
   })
 })
