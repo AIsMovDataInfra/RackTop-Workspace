@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { AlertCircle, Box, CheckCircle2, ChevronDown, ChevronRight, CircleDot, Database, FolderGit2, LoaderCircle, MoreHorizontal, Play, Plus, RefreshCw, RotateCcw, Save, ScrollText, Server as ServerIcon, SlidersHorizontal, Square, TerminalSquare, Trash2, X } from 'lucide-react'
 import { api } from '../services/api'
+import { CopyTextButton } from './CopyTextButton'
 import type { LaunchProfile, ManagedRun, ManagedRunRemoteStatus, Project, Server, Snapshot } from '../types/models'
 import { hasOtherUserGpuWorkload } from '../utils/gpu'
 import { currentUserProcessCount } from '../utils/processRelations'
@@ -153,6 +154,7 @@ export function ManagedProcessView({ servers, snapshots, projects, warnings, lau
   const [logRun, setLogRun] = useState<ManagedRun | null>(null)
   const [logContent, setLogContent] = useState('')
   const [loadingLog, setLoadingLog] = useState(false)
+  const logRequestId = useRef(0)
   const [pendingStop, setPendingStop] = useState<ManagedRun | null>(null)
   const [pendingUnmanagedStop, setPendingUnmanagedStop] = useState<{ server: Server; group: UnmanagedProcessGroup } | null>(null)
   const [pendingAssociation, setPendingAssociation] = useState<{ server: Server; group: UnmanagedProcessGroup } | null>(null)
@@ -162,6 +164,7 @@ export function ManagedProcessView({ servers, snapshots, projects, warnings, lau
 
   useEffect(() => { saveLaunchProfiles(profiles) }, [profiles])
   useEffect(() => { saveManagedRuns(runs) }, [runs])
+  useEffect(() => () => { logRequestId.current += 1 }, [])
 
   useEffect(() => {
     setRuns((current) => {
@@ -395,10 +398,25 @@ export function ManagedProcessView({ servers, snapshots, projects, warnings, lau
   }
 
   async function openLog(run: ManagedRun) {
+    const requestId = ++logRequestId.current
     setLogRun(run)
     setLogContent('')
     setLoadingLog(true)
-    try { setLogContent(await api.readManagedRunLog(run.serverId, run.id)) } catch (reason) { setLogContent(`无法读取日志：${String(reason).replace(/^Error:\s*/, '')}`) } finally { setLoadingLog(false) }
+    try {
+      const content = await api.readManagedRunLog(run.serverId, run.id)
+      if (logRequestId.current === requestId) setLogContent(content)
+    } catch (reason) {
+      if (logRequestId.current === requestId) setLogContent(`无法读取日志：${String(reason).replace(/^Error:\s*/, '')}`)
+    } finally {
+      if (logRequestId.current === requestId) setLoadingLog(false)
+    }
+  }
+
+  function closeLog() {
+    logRequestId.current += 1
+    setLogRun(null)
+    setLogContent('')
+    setLoadingLog(false)
   }
 
   async function stopRun() {
@@ -585,7 +603,7 @@ export function ManagedProcessView({ servers, snapshots, projects, warnings, lau
       </section>
     </div>}
 
-    {logRun && <aside className="managed-log-inspector"><header><div><p className="eyebrow">实时日志</p><h2>{logRun.name}</h2></div><button className="icon-button" onClick={() => setLogRun(null)} aria-label="关闭"><X size={16} /></button></header><div className="managed-log-meta"><span>{servers.find((server) => server.id === logRun.serverId)?.name ?? '服务器已移除'}</span><span>{logRun.gpuIndices.length ? `GPU ${logRun.gpuIndices.join(', ')}` : 'CPU'}</span></div><pre>{loadingLog ? '正在读取远端日志…' : logContent || '日志暂时为空。'}</pre><footer><button className="button button--secondary" onClick={() => void openLog(logRun)}><RefreshCw size={13} />刷新日志</button><button className="button button--primary" onClick={() => onOpenTerminal(logRun.serverId)}><TerminalSquare size={13} />打开终端</button></footer></aside>}
+    {logRun && <aside className="managed-log-inspector"><header><div><p className="eyebrow">实时日志</p><h2>{logRun.name}</h2></div><button className="icon-button" onClick={closeLog} aria-label="关闭"><X size={16} /></button></header><div className="managed-log-meta"><span>{servers.find((server) => server.id === logRun.serverId)?.name ?? '服务器已移除'}</span><span>{logRun.gpuIndices.length ? `GPU ${logRun.gpuIndices.join(', ')}` : 'CPU'}</span></div><pre className="selectable-text">{loadingLog ? '正在读取远端日志…' : logContent || '日志暂时为空。'}</pre><footer><CopyTextButton text={logContent} label="复制日志" disabled={loadingLog || !logContent} /><button className="button button--secondary" onClick={() => void openLog(logRun)}><RefreshCw size={13} />刷新日志</button><button className="button button--primary" onClick={() => onOpenTerminal(logRun.serverId)}><TerminalSquare size={13} />打开终端</button></footer></aside>}
 
     {pendingAssociation && <div className="scrim"><section className="sheet managed-association-sheet" role="dialog" aria-modal="true" aria-labelledby="managed-association-title"><header className="sheet__header"><div><p className="eyebrow">关联项目</p><h2 id="managed-association-title">将外部进程纳入任务视图</h2></div><button className="icon-button" onClick={() => setPendingAssociation(null)} aria-label="关闭"><X size={17} /></button></header><div className="managed-association-body"><div><span>当前进程</span><strong>{pendingAssociation.group.root.command}</strong><small>{pendingAssociation.server.name} · 根 PID {pendingAssociation.group.rootPid}</small></div><label>关联项目<select value={associationProjectId} onChange={(event) => setAssociationProjectId(event.target.value)}><option value="">请选择项目</option>{projects.filter((project) => project.kind === 'project').map((project) => <option value={project.id} key={project.id}>{project.name}</option>)}</select></label><p>进程的工作目录和日志无法从当前采样中确定，关联后未知字段会显示为“未获取”。</p></div><footer className="sheet__footer"><button className="button button--secondary" onClick={() => setPendingAssociation(null)}>取消</button><button className="button button--primary" onClick={associateProcess} disabled={!associationProjectId}><FolderGit2 size={13} />确认关联</button></footer></section></div>}
 

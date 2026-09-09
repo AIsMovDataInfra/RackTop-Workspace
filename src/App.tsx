@@ -72,6 +72,7 @@ import { isRackTopManagedIdentity } from './utils/sshSetup'
 import { DeleteServerDialog } from './components/DeleteServerDialog'
 import { SshConfigSheet, SshExportSheet, SshImportSourceSheet } from './components/SshTransferSheet'
 import { AppUpdateDialog } from './components/AppUpdateDialog'
+import { CopyTextButton } from './components/CopyTextButton'
 import { HistoryHeatmaps, StorageWaffleList } from './components/HistoryHeatmap'
 import { MetricBar } from './components/MetricBar'
 import { ManagedProcessView, type ManagedLaunchIntent } from './components/ManagedProcessView'
@@ -2164,7 +2165,7 @@ function HistoryView({ server, snapshot }: { server: Server; snapshot: Snapshot 
   </div>
 }
 
-function LogsView({ server, snapshot }: { server: Server; snapshot: Snapshot }) {
+export function LogsView({ server, snapshot }: { server: Server; snapshot: Snapshot }) {
   const dataItems = acquiredDataItems(server, snapshot)
   const [traffic, setTraffic] = useState<InteractionLogSummary['servers'][number] | null>(null)
   useEffect(() => {
@@ -2181,7 +2182,7 @@ function LogsView({ server, snapshot }: { server: Server; snapshot: Snapshot }) 
     const timer = window.setInterval(() => void refresh(), 1_000)
     return () => { active = false; window.clearInterval(timer) }
   }, [server.id])
-  return <section className="panel logs-panel"><PanelHeader icon={<ListFilter />} title="采集与连接日志" subtitle={`${server.lastError ? 2 : 1} 条最近记录`} /><div className="log-list"><article className="log-entry log-entry--success"><header><span aria-hidden="true" /><time dateTime={new Date(snapshot.timestamp * 1000).toISOString()}>{new Date(snapshot.timestamp * 1000).toLocaleTimeString()}</time><strong>采集成功</strong>{traffic && <p className="log-entry__traffic"><span>发送 {formatDataBytes(traffic.sentBytes)}</span><span>接收 {formatDataBytes(traffic.responseBytes)}</span><span>本次写入 {formatDataBytes(traffic.storedBytes)}</span></p>}</header><div className="activity-log-data"><h3>获得的数据</h3><dl>{dataItems.map((item) => <div key={item.label}><dt>{item.label}</dt><dd>{item.value}</dd></div>)}</dl></div></article>{server.lastError && <article className="log-entry log-entry--error"><header><span aria-hidden="true" /><time dateTime={new Date(snapshot.timestamp * 1000).toISOString()}>{new Date(snapshot.timestamp * 1000).toLocaleTimeString()}</time><p className="log-entry__message">{server.lastError}</p></header></article>}</div></section>
+  return <section className="panel logs-panel"><PanelHeader icon={<ListFilter />} title="采集与连接日志" subtitle={`${server.lastError ? 2 : 1} 条最近记录`} /><div className="log-list"><article className="log-entry log-entry--success"><header><span aria-hidden="true" /><time dateTime={new Date(snapshot.timestamp * 1000).toISOString()}>{new Date(snapshot.timestamp * 1000).toLocaleTimeString()}</time><strong>采集成功</strong>{traffic && <p className="log-entry__traffic"><span>发送 {formatDataBytes(traffic.sentBytes)}</span><span>接收 {formatDataBytes(traffic.responseBytes)}</span><span>本次写入 {formatDataBytes(traffic.storedBytes)}</span></p>}</header><div className="activity-log-data"><h3>获得的数据</h3><dl>{dataItems.map((item) => <div key={item.label}><dt>{item.label}</dt><dd>{item.value}</dd></div>)}</dl></div></article>{server.lastError && <article className="log-entry log-entry--error"><header><span aria-hidden="true" /><time dateTime={new Date(snapshot.timestamp * 1000).toISOString()}>{new Date(snapshot.timestamp * 1000).toLocaleTimeString()}</time><div className="log-entry__feedback"><p className="log-entry__message selectable-text" role="alert">{server.lastError}</p><CopyTextButton text={server.lastError} label="复制连接错误" /></div></header></article>}</div></section>
 }
 
 export function ServerNotificationSettingsMenu({ settings, onChange, openRequested = false, onOpenRequestHandled }: { settings: ServerNotificationSettings; onChange: (settings: ServerNotificationSettings) => void; openRequested?: boolean; onOpenRequestHandled?: () => void }) {
@@ -2600,7 +2601,7 @@ export function SettingsSheet({ settings, onboardingVisible, onClose, onSave }: 
   </div>
 }
 
-function ActivityLogSheet({ servers, snapshots, onClose }: { servers: Server[]; snapshots: Record<string, Snapshot>; onClose: () => void }) {
+export function ActivityLogSheet({ servers, snapshots, onClose }: { servers: Server[]; snapshots: Record<string, Snapshot>; onClose: () => void }) {
   const [summary, setSummary] = useState<InteractionLogSummary>({ sentBytes: 0, responseBytes: 0, storedBytes: 0, localStorageBytes: 0, failureCount: 0, servers: [] })
   const [error, setError] = useState<string | null>(null)
   const [now, setNow] = useState(Date.now())
@@ -2630,7 +2631,7 @@ function ActivityLogSheet({ servers, snapshots, onClose }: { servers: Server[]; 
           <div><dt>本地历史占用</dt><dd>{formatDataBytes(summary.localStorageBytes)}</dd></div>
           <div><dt>失败</dt><dd>{summary.failureCount}</dd></div>
         </dl>
-        {error && <p className="form-error activity-log-error" role="alert">无法读取实时日志：{error}</p>}
+        {error && <div className="form-error activity-log-error copyable-log-feedback"><p className="selectable-text" role="alert">无法读取实时日志：{error}</p><CopyTextButton text={`无法读取实时日志：${error}`} label="复制日志读取错误" /></div>}
         <div className="activity-log-servers">
           {summary.servers.map((entry) => {
             const visualStatus = interactionVisualStatus(entry.status, entry.lastStartedAt, now)
@@ -2642,7 +2643,7 @@ function ActivityLogSheet({ servers, snapshots, onClose }: { servers: Server[]; 
               <p className="activity-log-server__traffic"><span>最后交互：{latestLabel}</span><span>发送 {formatDataBytes(entry.sentBytes)}</span><span>接收 {formatDataBytes(entry.responseBytes)}</span><span>本次写入 {formatDataBytes(entry.storedBytes)}</span></p>
               <div className="activity-log-data"><h3>获得的数据</h3><dl>{dataItems.map((item) => <div key={item.label}><dt>{item.label}</dt><dd>{item.value}</dd></div>)}</dl></div>
               <details className="activity-log-command"><summary><span>最近命令</span><time>{latestLabel} · 耗时 {interactionDurationSeconds(entry.lastStartedAt, entry.lastFinishedAt, now).toFixed(2)} 秒</time><em>展开</em></summary><pre><code>{entry.lastCommand}</code></pre></details>
-              {entry.error && <p className="activity-log-server__error">{entry.error}</p>}
+              {entry.error && <div className="activity-log-server__error copyable-log-feedback"><p className="selectable-text" role="alert">{entry.error}</p><CopyTextButton text={entry.error} label="复制失败信息" ariaLabel={`复制 ${entry.serverName} 的失败信息`} /></div>}
             </article>
           })}
           {!error && summary.servers.length === 0 && <div className="activity-log-empty-state"><ScrollText size={24} /><strong>等待首次服务器交互</strong><p>发送、接收和本地写入数据会在这里按服务器汇总。</p></div>}
