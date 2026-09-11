@@ -16,6 +16,7 @@ Ubuntu 20.04 缺少当前 Debian 包要求的 WebKitGTK 4.1，glibc 2.31 也无�
 ### 本版本修改
 
 - 增加 GNOME 50 Flatpak 兼容包，包含 SSH 客户端、密钥工具和托盘依赖。
+- 增加含 GNOME 与 Mesa 运行时的离线套件，避免 Ubuntu 20.04 自带 Flatpak 读取 Flathub 索引超过大小上限。
 - Flatpak 环境中禁止检查、安装和重启 Debian 更新，避免选择与当前安装方式不兼容的软件包。
 - 补充 Ubuntu 20.04 安装、更新、权限及数据目录说明。
 

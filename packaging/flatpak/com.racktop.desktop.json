@@ -82,6 +82,7 @@
       "name": "ayatana-ido",
       "buildsystem": "cmake-ninja",
       "config-opts": [
+        "-DCMAKE_INSTALL_LIBDIR=lib",
         "-DENABLE_TESTS=OFF"
       ],
       "post-install": [
@@ -99,6 +100,7 @@
       "name": "libayatana-indicator",
       "buildsystem": "cmake-ninja",
       "config-opts": [
+        "-DCMAKE_INSTALL_LIBDIR=lib",
         "-DENABLE_TESTS=OFF",
         "-DENABLE_LOADER=OFF"
       ],
@@ -117,6 +119,7 @@
       "name": "libayatana-appindicator",
       "buildsystem": "cmake-ninja",
       "config-opts": [
+        "-DCMAKE_INSTALL_LIBDIR=lib",
         "-DENABLE_TESTS=OFF",
         "-DENABLE_GTKDOC=OFF",
         "-DENABLE_BINDINGS_MONO=OFF",
@@ -170,5 +173,6 @@
         }
       ]
     }
-  ]
+  ],
+  "appstream-compose": false
 }

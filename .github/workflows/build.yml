@@ -85,12 +85,42 @@ jobs:
           echo "RACKTOP_VERSION=$(node -p "require('./package.json').version")" >> "$GITHUB_ENV"
       - name: Install Flatpak build and application runtimes
         run: |
+          flatpak config --user --set languages 'en;zh'
           flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
           flatpak install --user --noninteractive flathub org.gnome.Platform//50 org.gnome.Sdk//50
       - name: Build Ubuntu 20.04 compatibility bundle and verify runtime dependencies
         run: scripts/package-flatpak.sh "$PWD/src-tauri/target/release/bundle/deb/RackTop_${RACKTOP_VERSION}_linux-amd64.deb" "$PWD/src-tauri/target/release/bundle/flatpak"
       - name: Verify installed Flatpak native startup and WebKit
         run: scripts/test-flatpak.sh "$PWD/src-tauri/target/release/bundle/flatpak/RackTop_${RACKTOP_VERSION}_linux-amd64.flatpak" "$RUNNER_TEMP/flatpak-verification"
+      - name: Build Ubuntu 20.04 offline Flatpak runtime kit
+        run: scripts/package-flatpak-runtime.sh "$PWD/src-tauri/target/release/bundle/flatpak/RackTop_${RACKTOP_VERSION}_linux-amd64.flatpak" "$PWD/src-tauri/target/release/bundle/flatpak"
+      - name: Verify offline kit installation without cached runtimes or network
+        shell: bash
+        run: |
+          set -euo pipefail
+          isolated="$(mktemp -d "$RUNNER_TEMP/racktop-flatpak-offline.XXXXXX")"
+          trap 'rm -rf "$isolated"' EXIT
+          tar -xzf "$PWD/src-tauri/target/release/bundle/flatpak/RackTop_${RACKTOP_VERSION}_linux-amd64-flatpak-offline.tar.gz" -C "$isolated"
+          mkdir -p "$RUNNER_TEMP/flatpak-verification"
+          # A fresh user installation prevents the build runner's already
+          # installed GNOME/Mesa runtimes from satisfying kit dependencies.
+          FLATPAK_USER_DIR="$isolated/flatpak" XDG_DATA_HOME="$isolated/data" \
+            XDG_CONFIG_HOME="$isolated/config" XDG_CACHE_HOME="$isolated/cache" \
+            unshare -Urn bash -euo pipefail -c '
+              python3 -c "import socket; assert socket.if_nameindex() == [(1, \"lo\")]"
+              test ! -e "$FLATPAK_USER_DIR/repo"
+              test -z "$(flatpak list --user --columns=ref)"
+              bash "$1/install.sh"
+              bash "$1/install.sh"
+              while read -r ref commit; do
+                test "$(flatpak info --user --show-commit "$ref")" = "$commit"
+              done < "$1/RUNTIME-COMMITS.txt"
+              test "$(flatpak info --user --show-runtime com.racktop.desktop//stable)" = org.gnome.Platform/x86_64/50
+              test "$(flatpak info --user --show-commit com.racktop.desktop//stable)" = "$(cat "$1/APP-COMMIT.txt")"
+              flatpak list --user --columns=ref
+              echo "Offline installation passed in an empty user installation with no external network interface."
+            ' bash "$isolated/RackTop_${RACKTOP_VERSION}_flatpak_offline" \
+            2>&1 | tee "$RUNNER_TEMP/flatpak-verification/offline-install.log"
       - name: Upload Flatpak startup evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -105,7 +135,16 @@ jobs:
           if-no-files-found: error
           path: |
             src-tauri/target/release/bundle/flatpak/*.flatpak
-            src-tauri/target/release/bundle/flatpak/*.sha256
+            src-tauri/target/release/bundle/flatpak/*.flatpak.sha256
+            src-tauri/target/release/bundle/flatpak/*.flatpak.commit
+      - name: Upload verified Ubuntu 20.04 offline Flatpak kit
+        uses: actions/upload-artifact@v4
+        with:
+          name: RackTop_${{ env.RACKTOP_VERSION }}_linux-amd64-flatpak-offline
+          if-no-files-found: error
+          path: |
+            src-tauri/target/release/bundle/flatpak/*-flatpak-offline.tar.gz
+            src-tauri/target/release/bundle/flatpak/*-flatpak-offline.tar.gz.sha256
       - uses: actions/upload-artifact@v4
         with:
           name: RackTop_${{ env.RACKTOP_VERSION }}_linux-amd64-deb

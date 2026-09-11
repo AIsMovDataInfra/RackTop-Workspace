@@ -14,14 +14,16 @@ bash scripts/package-flatpak.sh src-tauri/target/release/bundle/deb/RackTop_X.Y.
 
 Use the actual current version in the final command. An optional second argument selects the output directory. The script checks the input Debian package name, version and architecture, stages its RackTop executable, and builds the pinned OpenSSH client and Ayatana tray libraries in the GNOME SDK. It retains third-party license files and tests dependency resolution, SSH key generation and the RackTop password helper against the **Platform** runtime before exporting. This build check does not replace an Ubuntu 20.04 desktop launch, keyring, connection and terminal acceptance test.
 
-Install a downloaded bundle using a current Flatpak installation:
+For Ubuntu 20.04 with stock Flatpak 1.6.5, use the offline runtime kit described in [the Linux guide](../../docs/LINUX.md). Its client can run GNOME 50 but cannot read today's Flathub summary, which exceeds its 10 MiB limit. Build that kit from the verified application bundle with `scripts/package-flatpak-runtime.sh RACKTOP.flatpak OUTPUT_DIRECTORY`. The kit includes GNOME 50 and the two Mesa GL.default extensions, verifies local SHA-256 checksums, and installs with `--no-deps --no-related` without network lookup. Existing runtime deployments are preserved.
+
+Install a downloaded application bundle using a current Flatpak installation:
 
 ```sh
 flatpak install --user ./RackTop_X.Y.Z_linux-amd64.flatpak
 flatpak run com.racktop.desktop
 ```
 
-The bundle identifies Flathub as its runtime source. Its first installation downloads GNOME and graphics runtimes. This repository does not publish an application update remote on Flathub: install the next RackTop `.flatpak` bundle to update RackTop; `flatpak update` updates the installed runtimes. The in-app Debian installer is unavailable in this package.
+The application bundle identifies Flathub as its runtime source. Its online first installation downloads GNOME and graphics runtimes. This repository does not publish an application update remote on Flathub: install the next RackTop `.flatpak` bundle to update RackTop. `flatpak update` updates runtimes installed from Flathub; the offline kit's runtimes have no update remote and must be replaced explicitly using the local bundle commands in the Linux guide. Its installer preserves existing runtimes. The in-app Debian installer is unavailable in this package.
 
 ## Host integration and limits
 
@@ -35,3 +37,5 @@ The intltool Perl compatibility patch is retained from [Flathub shared-modules](
 - The runtime does not replace the host kernel, display server or graphics driver. Validate both X11 and Wayland where support is claimed, along with saved passwords, host-key trust, direct/jump SSH, the integrated terminal, project transfers and application restart.
 
 Dependency archives are pinned by SHA-256. Runtime maintenance comes from GNOME/Flathub; update the pinned OpenSSH and Ayatana source versions when their upstream releases require it. Primary references: [Tauri Flatpak packaging](https://v2.tauri.app/distribute/flatpak/), [Flatpak permissions](https://docs.flatpak.org/en/latest/sandbox-permissions.html), [GNOME 50 runtime components](https://gitlab.gnome.org/GNOME/gnome-build-meta/-/blob/gnome-50/elements/sdk-platform.bst), [OpenSSH Portable](https://www.openssh.org/portable.html).
+
+The manifest disables legacy automatic AppStream composition because Ubuntu 22.04 flatpak-builder expects `appstream-compose`, which GNOME 50 replaced with `appstreamcli`. The local bundle still includes its desktop launcher, icon and versioned metainfo; this workflow does not publish a Flathub catalog. CMake library directories are explicitly `/app/lib` so dependent tray modules and the runtime loader find them.

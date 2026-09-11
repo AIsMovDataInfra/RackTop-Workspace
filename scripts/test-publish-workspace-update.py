@@ -32,6 +32,8 @@ class WorkspaceRelease(unittest.TestCase):
         self.package.write_bytes(b'fixture deb')
         self.flatpak = self.assets / f'RackTop_{self.version}_linux-amd64.flatpak'
         self.flatpak.write_bytes(b'fixture flatpak')
+        self.offline = self.assets / f'RackTop_{self.version}_linux-amd64-flatpak-offline.tar.gz'
+        self.offline.write_bytes(b'fixture offline kit')
         Path(str(self.package) + '.sig').write_text(self.signature)
         self.manifest = {'version': self.version, 'platforms': {'linux-x86_64-deb': {
             'signature': self.signature,
@@ -41,19 +43,21 @@ class WorkspaceRelease(unittest.TestCase):
     def write_manifest(self):
         (self.assets / 'linux-amd64.json').write_text(json.dumps(self.manifest))
 
-    def test_packages_have_six_binaries_and_flatpak_stays_out_of_updater(self):
+    def test_packages_have_seven_downloads_and_flatpak_stays_out_of_updater(self):
         packages, mac, linux, signing = publisher.collect_packages(self.assets, self.version)
-        self.assertEqual(len(packages), 6)
+        self.assertEqual(len(packages), 7)
         self.assertIn(self.flatpak, packages)
+        self.assertIn(self.offline, packages)
         self.assertEqual(set(mac), {'darwin-aarch64', 'darwin-x86_64'})
         self.assertEqual(set(linux), {'linux-x86_64-deb'})
         self.assertEqual(signing, '-unsigned')
         for entry in (mac | linux).values():
             self.assertIn('/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.0.0/', entry['url'])
             self.assertFalse(entry['url'].endswith('.flatpak'))
+            self.assertFalse(entry['url'].endswith('-flatpak-offline.tar.gz'))
 
     def test_missing_linux_or_either_mac_cannot_publish(self):
-        for path in [self.package, self.flatpak, *self.assets.glob('*.dmg')]:
+        for path in [self.package, self.flatpak, self.offline, *self.assets.glob('*.dmg')]:
             original = path.read_bytes()
             path.unlink()
             with self.assertRaises(ValueError):
@@ -76,6 +80,19 @@ class WorkspaceRelease(unittest.TestCase):
         other.unlink()
         self.flatpak.touch()
         with self.assertRaisesRegex(ValueError, 'exactly one.*Flatpak'):
+            publisher.collect_packages(self.assets, self.version)
+
+    def test_rejects_extra_wrong_version_or_empty_offline_kit(self):
+        other = self.assets / 'RackTop_1.0.0_linux-amd64-flatpak-offline.tar.gz'
+        other.write_bytes(b'old')
+        with self.assertRaisesRegex(ValueError, 'exactly one.*offline kit'):
+            publisher.collect_packages(self.assets, self.version)
+        self.offline.unlink()
+        with self.assertRaisesRegex(ValueError, 'exactly one.*offline kit'):
+            publisher.collect_packages(self.assets, self.version)
+        other.unlink()
+        self.offline.touch()
+        with self.assertRaisesRegex(ValueError, 'exactly one.*offline kit'):
             publisher.collect_packages(self.assets, self.version)
 
     def test_rejects_old_repository_or_wrong_manifest_version(self):
@@ -105,13 +122,13 @@ class WorkspaceRelease(unittest.TestCase):
             publisher.check_feed({'version': '2.0.0', 'platforms': {}}, self.manifest)
 
     def test_recovery_requires_identical_complete_public_artifacts(self):
-        files = [self.package, self.flatpak]
+        files = [self.package, self.flatpak, self.offline]
         release = {'assets': [{'name': path.name, 'size': path.stat().st_size,
                               'digest': 'sha256:' + hashlib.sha256(path.read_bytes()).hexdigest()}
                              for path in files]}
         publisher.verify_release_assets(release, files)
         bad = copy.deepcopy(release)
-        bad['assets'][1]['digest'] = 'sha256:other'
+        bad['assets'][2]['digest'] = 'sha256:other'
         with self.assertRaisesRegex(ValueError, 'digest'):
             publisher.verify_release_assets(bad, files)
         with self.assertRaisesRegex(ValueError, 'asset set'):
@@ -141,7 +158,7 @@ class WorkspaceRelease(unittest.TestCase):
             packages, _, _, _ = publisher.collect_packages(self.assets, self.version)
             files = packages + [self.assets / f'RackTop_{self.version}_source.tar.gz',
                                 self.assets / 'LICENSE', self.assets / 'NOTICE.md', self.assets / 'SHA256SUMS']
-            self.assertEqual(len(files), 10)
+            self.assertEqual(len(files), 11)
             return {'tag_name': 'v2.0.0', 'published_at': '2026-09-11T00:00:00Z',
                     'html_url': 'https://example.invalid/release',
                     'assets': [{'name': file.name, 'size': file.stat().st_size,
@@ -160,12 +177,14 @@ class WorkspaceRelease(unittest.TestCase):
             publisher.main()
 
         checksums = (self.assets / 'SHA256SUMS').read_text().splitlines()
-        self.assertEqual(len(checksums), 9)
+        self.assertEqual(len(checksums), 10)
         self.assertIn(f'{hashlib.sha256(self.flatpak.read_bytes()).hexdigest()}  {self.flatpak.name}', checksums)
+        self.assertIn(f'{hashlib.sha256(self.offline.read_bytes()).hexdigest()}  {self.offline.name}', checksums)
         self.assertFalse(any('.sig' in line for line in checksums))
         body = (self.assets / 'release-notes.md').read_text()
         self.assertIn(self.flatpak.name, body)
-        self.assertIn('Flatpak（Ubuntu 20.04 及以上）', body)
+        self.assertIn(self.offline.name, body)
+        self.assertIn('Flatpak 离线安装包（Ubuntu 20.04，含运行时）', body)
         self.assertIn('DEB（Ubuntu 22.04）', body)
         self.assertIn('Flatpak 使用独立配置目录', body)
         feeds = publish_feeds.call_args.args[0]

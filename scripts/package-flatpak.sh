@@ -59,5 +59,6 @@ flatpak build --runtime --readonly "$stage/build" /bin/sh -s < "$root/packaging/
 flatpak build-export "$stage/repo" "$stage/build" stable
 bundle="$output/RackTop_${version}_linux-amd64.flatpak"
 flatpak build-bundle --runtime-repo=https://flathub.org/repo/flathub.flatpakrepo "$stage/repo" "$bundle" com.racktop.desktop stable
+cp "$stage/repo/refs/heads/app/com.racktop.desktop/x86_64/stable" "$bundle.commit"
 (cd "$output" && sha256sum "$(basename "$bundle")" > "$(basename "$bundle").sha256")
 printf 'Flatpak bundle: %s\nBuild directory: %s\n' "$bundle" "$stage/build"

@@ -2,7 +2,7 @@
 # Run against org.gnome.Platform, not the SDK: SDK-only libraries can hide
 # missing runtime dependencies. This check does not launch the GUI or use keys.
 set -eu
-for binary in /app/bin/racktop /app/bin/ssh /app/bin/ssh-keygen /app/bin/ssh-keyscan /app/lib/libayatana-appindicator3.so.1; do
+for binary in /app/bin/racktop /app/bin/ssh /app/bin/ssh-keygen /app/bin/ssh-keyscan /app/libexec/ssh-pkcs11-helper /app/libexec/ssh-sk-helper /app/lib/libayatana-appindicator3.so.1; do
   test -f "$binary"
   dependencies="$(ldd "$binary")"
   printf '%s\n' "$dependencies"

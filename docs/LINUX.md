@@ -17,21 +17,41 @@ racktop
 
 Ubuntu 20.04 桌面不能直接安装当前 `.deb`：Tauri 2 使用 WebKitGTK 4.1，而 20.04 标准软件源提供的是 WebKitGTK 4.0；22.04 构建的 RackTop 还要求 `GLIBC_2.34`，高于 20.04 的 glibc 2.31。不能通过强制安装、改包依赖、为 4.0 建立 4.1 软链接或混入 22.04 软件源解决。这里说的是运行客户端的桌面系统；被 SSH 管理的服务器不需要安装 WebKitGTK。
 
-2.2.2 增加独立的 `RackTop_2.2.2_linux-amd64.flatpak` 构建，使用 GNOME 50 运行时提供 glibc、GTK 和 WebKitGTK 4.1。源码仍为 Tauri 2，Ubuntu 22.04 的 `.deb` 通道继续保留。兼容包与运行时均为 x86_64；需要图形桌面、Flatpak 和首次安装时的联网下载。
+2.2.2 增加独立的 `RackTop_2.2.2_linux-amd64.flatpak` 构建，使用 GNOME 50 运行时提供 glibc、GTK 和 WebKitGTK 4.1。源码仍为 Tauri 2，Ubuntu 22.04 的 `.deb` 通道继续保留。兼容包与运行时均为 x86_64；需要图形桌面、Flatpak，以及预先下载的完整离线套件。
 
 本节描述开发中的兼容包；本轮实测结果及尚未覆盖的场景见 [2.2.2 验证记录](VERIFICATION_2_2_2.md)，未发布的包不能从历史 Release 获取。
 
-在 Ubuntu 20.04 上准备 Flatpak，下载经过校验的兼容包后执行：
+Ubuntu 20.04 标准仓库的 Flatpak 1.6.5 能运行 GNOME 50，但读取当前 Flathub 索引时会超过 10 MiB 大小上限。首次安装请下载含运行时的 `RackTop_2.2.2_linux-amd64-flatpak-offline.tar.gz`，不要直接依赖在线解析运行时：
 
 ```bash
 sudo apt update
 sudo apt install flatpak xdg-desktop-portal xdg-desktop-portal-gtk
-flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
-flatpak install --user ./RackTop_2.2.2_linux-amd64.flatpak
+tar -xzf RackTop_2.2.2_linux-amd64-flatpak-offline.tar.gz
+cd RackTop_2.2.2_flatpak_offline
+bash install.sh
 flatpak run com.racktop.desktop
 ```
 
-首次安装需要下载 GNOME 运行时，体积大于 `.deb`。Flatpak 版通过重新下载新版 `.flatpak` 并执行 `flatpak install --user ./新版文件.flatpak` 升级应用；`flatpak update --user` 用于更新已配置源中的运行时。当前没有 RackTop Flathub 应用仓库，不应把运行时更新描述为 RackTop 自动更新。应用内 Debian 更新器会提示使用 Flatpak 包，且不会下载或安装 `.deb`。
+套件包含 RackTop、GNOME 50 和 Mesa 图形运行时，体积较大。安装脚本先验证套件中的 SHA-256，再以用户级方式仅安装本地文件，不查询在线仓库。已有对应运行时会保留，避免用套件降级更新过的运行时。闭源 NVIDIA 硬件加速需要另外安装与驱动匹配的 Flatpak 扩展；扩展不可用时可尝试 `flatpak run --env=LIBGL_ALWAYS_SOFTWARE=1 com.racktop.desktop`。
+
+已安装运行时后，可用较小的应用包更新：
+
+```bash
+flatpak install --user --bundle --no-deps --no-related --or-update ./RackTop_2.2.2_linux-amd64.flatpak
+```
+
+Ubuntu 20.04 的 Flatpak 1.6 对重复安装完全相同的小应用包会提示“already installed”，表示无需更新；离线套件安装器会按提交编号自动跳过这个情况。安装不同提交的新版包会原位更新并保留 Flatpak 应用资料。
+
+安装脚本只补齐缺失的运行时，不更新已有运行时。更新 GNOME/Mesa 时，应下载较新的套件，核对其发布日期及 `RUNTIME-COMMITS.txt`，然后在解压目录执行下列替换命令。这会使用套件中的版本，可能回退已经更新过的运行时；已有版本可用 `flatpak info --user --show-commit ID//分支` 查看。
+
+```bash
+sha256sum --check SHA256SUMS
+flatpak install --user --bundle --no-deps --no-related --or-update org.gnome.Platform_50_x86_64.flatpak
+flatpak install --user --bundle --no-deps --no-related --or-update org.freedesktop.Platform.GL.default_25.08_x86_64.flatpak
+flatpak install --user --bundle --no-deps --no-related --or-update org.freedesktop.Platform.GL.default_25.08-extra_x86_64.flatpak
+```
+
+当前没有 RackTop Flathub 应用仓库。应用内 Debian 更新器会提示使用 Flatpak 包，且不会下载或安装 `.deb`。
 
 兼容包包含 `ssh`、`ssh-keygen`、`ssh-keyscan`，支持应用内终端、SSH Agent、密码助手及 ProxyJump；宿主机独有的 ProxyCommand 程序不会自动进入沙箱，使用这类配置时需检查该程序是否在沙箱中可用。SSH 快速配置窗口通过宿主机 `x-terminal-emulator` 打开，宿主机需安装 OpenSSH 客户端和图形终端。
 
@@ -44,6 +64,7 @@ Flatpak 的应用数据默认位于 `~/.var/app/com.racktop.desktop/data/com.rac
 ```bash
 flatpak install --user flathub org.gnome.Platform//50 org.gnome.Sdk//50
 bash scripts/package-flatpak.sh /absolute/path/RackTop_2.2.2_linux-amd64.deb /absolute/path/output
+bash scripts/package-flatpak-runtime.sh /absolute/path/output/RackTop_2.2.2_linux-amd64.flatpak /absolute/path/output
 ```
 
 参考：[Tauri 的 Linux 运行环境限制](https://v2.tauri.app/distribute/appimage/)、[Tauri Flatpak 分发](https://v2.tauri.app/distribute/flatpak/)、[Flatpak 运行时与沙箱](https://docs.flatpak.org/en/latest/basic-concepts.html)。

@@ -26,6 +26,15 @@ versions = module('racktop_release_versions', 'check-release-version.py')
 run, api = mac.run, mac.api
 
 
+def sha256(path):
+    # The offline runtime kit can be large; do not load it into memory.
+    digest = hashlib.sha256()
+    with path.open('rb') as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b''):
+            digest.update(block)
+    return digest.hexdigest()
+
+
 def version_key(version):
     # Read older Linux feed versions during migration, but publish neutral versions only.
     match = re.fullmatch(r'(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-linux\.(0|[1-9][0-9]*))?', version)
@@ -44,6 +53,9 @@ def collect_packages(assets, version):
     flatpak = assets / f'RackTop_{version}_linux-amd64.flatpak'
     if list(assets.glob('*.flatpak')) != [flatpak] or not flatpak.is_file() or not flatpak.stat().st_size:
         raise ValueError('Require exactly one matching Linux amd64 Flatpak package')
+    offline = assets / f'RackTop_{version}_linux-amd64-flatpak-offline.tar.gz'
+    if list(assets.glob('*flatpak-offline.tar.gz')) != [offline] or not offline.is_file() or not offline.stat().st_size:
+        raise ValueError('Require exactly one matching Linux amd64 Flatpak offline kit')
     manifest = json.loads((assets / 'linux-amd64.json').read_text())
     expected_url = f'https://github.com/{REPO}/releases/download/v{version}/{package.name}'
     if manifest.get('version') != version or set(manifest.get('platforms', {})) != {'linux-x86_64-deb'}:
@@ -55,7 +67,7 @@ def collect_packages(assets, version):
     if entry.get('signature') != signature or not base64.b64decode(signature, validate=True).startswith(b'untrusted comment:'):
         raise ValueError('Linux manifest signature mismatch')
     # Flatpak manages its own deployments; never offer its bundle to the DEB updater.
-    return packages + [package, flatpak], platforms, manifest['platforms'], signing
+    return packages + [package, flatpak, offline], platforms, manifest['platforms'], signing
 
 
 def verify_release_assets(release, files):
@@ -64,7 +76,7 @@ def verify_release_assets(release, files):
     if len(actual) != len(release['assets']) or set(actual) != expected_names:
         raise ValueError('Release asset set differs; published artifacts are immutable')
     for path in files:
-        expected = 'sha256:' + hashlib.sha256(path.read_bytes()).hexdigest()
+        expected = 'sha256:' + sha256(path)
         if actual[path.name].get('digest') != expected or actual[path.name].get('size') != path.stat().st_size:
             raise ValueError(f'GitHub asset digest/size mismatch: {path.name}; feeds were not advanced')
 
@@ -132,7 +144,7 @@ def main():
         (assets / name).write_bytes((ROOT / name).read_bytes())
     files = packages + [source, assets / 'LICENSE', assets / 'NOTICE.md']
     checksums = assets / 'SHA256SUMS'
-    checksums.write_text(''.join(f'{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.name}\n' for path in files))
+    checksums.write_text(''.join(f'{sha256(path)}  {path.name}\n' for path in files))
     files.append(checksums)
     overview = (ROOT / 'docs/Version_overview.md').read_text()
     section = overview.split(f'## {version}\n', 1)[1].split('\n## ', 1)[0]
@@ -143,7 +155,7 @@ def main():
     for path in packages:
         if path.suffix in ('.dmg', '.deb', '.flatpak'):
             if path.suffix == '.flatpak':
-                label = 'Linux amd64 Flatpak（Ubuntu 20.04 及以上）'
+                label = 'Linux amd64 Flatpak 应用包（已有运行时）'
             elif path.suffix == '.deb':
                 label = 'Linux amd64 DEB（Ubuntu 22.04）'
             else:
@@ -152,10 +164,12 @@ def main():
         elif path.name.endswith('.app.tar.gz'):
             label = 'Mac Apple Silicon 自动更新附件' if 'macos-arm64' in path.name else 'Mac Intel 自动更新附件'
             body += f'- [{label}](https://github.com/{REPO}/releases/download/{tag}/{path.name})\n'
+        elif path.name.endswith('-flatpak-offline.tar.gz'):
+            body += f'- [Linux amd64 Flatpak 离线安装包（Ubuntu 20.04，含运行时）](https://github.com/{REPO}/releases/download/{tag}/{path.name})\n'
     body += f'- [对应源码（GPL-3.0）](https://github.com/{REPO}/releases/download/{tag}/{source.name})\n'
     for name, label in [('LICENSE', 'GPL-3.0 许可证'), ('NOTICE.md', '项目来源与署名'), ('SHA256SUMS', '文件校验清单')]:
         body += f'- [{label}](https://github.com/{REPO}/releases/download/{tag}/{name})\n'
-    body += '\nLinux：Ubuntu 20.04 使用 Flatpak；Ubuntu 22.04 也可用系统软件安装器打开 DEB。Flatpak 安装与更新步骤见 [Linux 安装说明](https://github.com/' + REPO + '/blob/' + tag + '/docs/LINUX.md)。Mac：打开对应芯片的 DMG，将 RackTop 拖入「应用程序」。\n'
+    body += '\nLinux：Ubuntu 20.04 首次安装请选择含运行时的 Flatpak 离线安装包；已有运行时可用较小的 `.flatpak` 应用包。Ubuntu 22.04 也可用系统软件安装器打开 DEB。安装与更新步骤见 [Linux 安装说明](https://github.com/' + REPO + '/blob/' + tag + '/docs/LINUX.md)。Mac：打开对应芯片的 DMG，将 RackTop 拖入「应用程序」。\n'
     body += '\n旧仓库的 1.x 客户端首次迁移需下载安装此版本；DEB 和 Mac 安装保留原应用数据，后续使用独立仓库更新。Flatpak 使用独立配置目录，通过重新安装新版 `.flatpak` 更新。\n'
     if signing:
         body += '\n本次 Mac 测试包未通过 Apple 公证；首次启动被阻止时，请在「系统设置 → 隐私与安全性」允许打开。\n'

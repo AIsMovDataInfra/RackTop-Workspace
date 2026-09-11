@@ -11,7 +11,7 @@
   <launchable type="desktop-id">com.racktop.desktop.desktop</launchable>
   <url type="homepage">https://github.com/AIsMovDataInfra/RackTop-Workspace</url>
   <url type="bugtracker">https://github.com/AIsMovDataInfra/RackTop-Workspace/issues</url>
-  <developer id="io.github.AIsMovDataInfra"><name>AIsMov</name></developer>
+  <developer id="io.github.aismovdatainfra"><name>AIsMov</name></developer>
   <provides><binary>racktop</binary></provides>
   <content_rating type="oars-1.1"/>
   <releases><release version="@VERSION@" date="@DATE@"/></releases>
