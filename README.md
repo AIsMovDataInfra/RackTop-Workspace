@@ -6,21 +6,28 @@
 
 ## 安装
 
-打开下载页，按电脑系统选择安装包，无需下载源码或配置开发环境。
+**当前版本：2.5.0 测试版（Pre-release）。** Ubuntu 20.04 / 22.04 推荐在终端运行统一安装命令；Mac 打开下载页，按芯片选择 DMG。无需下载源码或配置开发环境。
 
-| 电脑 | 安装方式 |
-| --- | --- |
-| Ubuntu 20.04，Intel / AMD 64 位 | Flatpak 兼容套件 |
-| Ubuntu 22.04，Intel / AMD 64 位 | DEB 安装包 |
-| Mac，M 系列芯片 | Apple Silicon DMG |
-| Mac，Intel 芯片 | Intel DMG |
+```bash
+curl --proto '=https' --proto-redir '=https' -fL https://136.0.110.161/downloads/install-racktop.sh -o install-racktop.sh && bash install-racktop.sh
+```
 
-**2.5.0 及统一一键安装入口正在准备，尚未发布。** 当前下载页仍提供 Ubuntu 20.04 的 2.2.2 开发兼容包，以及 Ubuntu 22.04 / Mac 的 2.2.1 测试版。[查看安装步骤与升级说明](docs/DOWNLOADS.md)。
+使用普通用户运行，不要在整条命令前加 `sudo`。缺少 `curl` 或 `python3` 时，先运行 `sudo apt install curl python3`。
+
+| 电脑 | 云端安装包 | GitHub 备用 |
+| --- | --- | --- |
+| Ubuntu 20.04，Intel / AMD 64 位 | [Flatpak 离线套件](https://136.0.110.161/downloads/RackTop_2.5.0_linux-amd64-flatpak-offline.tar.gz) | [下载](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.5.0/RackTop_2.5.0_linux-amd64-flatpak-offline.tar.gz) |
+| Ubuntu 22.04，Intel / AMD 64 位 | [DEB 安装包](https://136.0.110.161/downloads/RackTop_2.5.0_linux-amd64.deb) | [下载](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.5.0/RackTop_2.5.0_linux-amd64.deb) |
+| Mac，M 系列芯片 | [Apple Silicon DMG](https://136.0.110.161/downloads/RackTop_2.5.0_macos-arm64-unsigned.dmg) | [下载](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.5.0/RackTop_2.5.0_macos-arm64-unsigned.dmg) |
+| Mac，Intel 芯片 | [Intel DMG](https://136.0.110.161/downloads/RackTop_2.5.0_macos-x64-unsigned.dmg) | [下载](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.5.0/RackTop_2.5.0_macos-x64-unsigned.dmg) |
+
+旧 2.2.2 Flatpak 先用统一安装器升级一次，再使用新版应用内更新；已有 Flatpak 会保留原用户级或系统级安装范围。[安装步骤、资料保留与升级说明](docs/DOWNLOADS.md)。
 
 ## 开始使用
 
 - **管理服务器**：打开桌面 RackTop，添加 SSH 连接，查看 GPU / CPU、使用终端、同步项目和管理任务。
-- **团队协作**：打开在线工作台，登录后管理设备、扫码标签、预约算力和填写周报。
+- **团队协作**：打开在线工作台，登录后选择当前组织，管理设备、扫码标签、预约算力和填写周报。
+- **团队 SSH**：管理员在网页维护目录并授权；成员在桌面登录、选择组织后接收连接资料，在本机配置认证再连接。[操作步骤](docs/WORKSPACE.md#统一管理-ssh-服务器)。
 - **查看操作方法**：[Linux](docs/LINUX.md) · [Mac](docs/MACOS.md) · [设备管理](docs/EQUIPMENT.md) · [资源共享](docs/SHARING.md)。
 
 升级前退出旧程序；同一种安装方式会继续使用原资料。DEB 与 Flatpak 的资料目录不同，切换格式前请先备份，详见安装说明。

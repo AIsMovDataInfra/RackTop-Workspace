@@ -1,36 +1,40 @@
 # macOS 安装与构建说明
 
-RackTop 2.2.0 是 [AIsMovDataInfra/RackTop-Workspace](https://github.com/AIsMovDataInfra/RackTop-Workspace) 已发布的统一测试版，与 Linux 共用版本、标签和 Release，并分别提供 Apple Silicon 与 Intel 原生安装包。两种 Mac 架构与 Linux 均已完成原生构建和发布验证，生产共享中继 `0.3.0` 已部署，本机 Linux 已完成 2.2.0 用户级安装。下载见 [v2.2.0 Release](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/tag/v2.2.0)，完整证据见[2.2.0 验证记录](VERIFICATION_2_2.md)。桌面名称仍为 RackTop，保留 SSH、本机密钥管理、共享网关及团队工作台。项目沿用 Tongzh-SEU 原作和旧 AIsMov 维护版的历史、[GPL-3.0](../LICENSE)及[来源说明](../NOTICE.md)。
+RackTop 当前分发为 **2.5.0 测试版（Pre-release）**，与 Linux 共用版本、标签和 Release，分别提供 Apple Silicon 与 Intel 安装包。推荐从[统一下载页](https://136.0.110.161/downloads/)按芯片选择，也可使用 [v2.5.0 GitHub Release](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/tag/v2.5.0)。桌面名称仍为 RackTop，保留 SSH、本机密钥管理、共享网关及团队工作台。项目沿用 Tongzh-SEU 原作和旧 AIsMov 维护版的历史、[GPL-3.0](../LICENSE)及[来源说明](../NOTICE.md)。
 
 ## 下载与系统要求
 
-**发布状态：2.2.0 测试版已发布。** [v2.2.0 Release](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/tag/v2.2.0) 提供两种 DMG、对应更新归档，并与 Linux 共享源码、许可证、NOTICE 及 `SHA256SUMS`。9 个公开附件可匿名下载且本地 SHA256 均匹配 GitHub digest，`SHA256SUMS` 覆盖并匹配其余 8 个附件；标签源码对应关系及更新签名也已核验，见[2.2.0 验证记录](VERIFICATION_2_2.md)。
+选择与你的 Mac 芯片匹配的 DMG；手动安装不要下载 `.app.tar.gz` 自动更新归档。
 
-| Mac 机型 | 安装包 |
-| --- | --- |
-| Apple Silicon（M1 / M2 / M3 / M4 等 M 系列） | [RackTop_2.2.0_macos-arm64-unsigned.dmg](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.2.0/RackTop_2.2.0_macos-arm64-unsigned.dmg) |
-| Intel 处理器 | [RackTop_2.2.0_macos-x64-unsigned.dmg](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.2.0/RackTop_2.2.0_macos-x64-unsigned.dmg) |
+| Mac 机型 | 云端安装包 | GitHub 备用 |
+| --- | --- | --- |
+| Apple Silicon（M 系列） | [2.5.0 arm64 DMG](https://136.0.110.161/downloads/RackTop_2.5.0_macos-arm64-unsigned.dmg) | [下载](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.5.0/RackTop_2.5.0_macos-arm64-unsigned.dmg) |
+| Intel 处理器 | [2.5.0 x64 DMG](https://136.0.110.161/downloads/RackTop_2.5.0_macos-x64-unsigned.dmg) | [下载](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.5.0/RackTop_2.5.0_macos-x64-unsigned.dmg) |
+
+云端与 GitHub 提供对应源码、许可证、NOTICE 和 `SHA256SUMS`，集中链接见[下载说明](DOWNLOADS.md)。
 
 在 Apple 菜单的「关于本机」查看芯片类型。两个安装包均为原生架构构建，选择与本机芯片对应的文件。项目配置的最低系统版本为 **macOS 11.0**；这表示构建目标，实际验证范围见文末。
 
 ## 安装与首次打开
 
-1. 下载对应的 DMG；如需校验，同时下载同一 Release 的 `SHA256SUMS` 文件，在下载目录运行 `shasum -a 256 RackTop_2.2.0_macos-arm64-unsigned.dmg`。在 `SHA256SUMS` 中找到文件名完全匹配的那一行，确认其第一列摘要与命令输出一致。Intel 版替换为对应的 `x64` 文件名。
+1. 下载对应的 DMG；如需校验，同时下载同一 Release 的 `SHA256SUMS` 文件，在下载目录运行 `shasum -a 256 RackTop_2.5.0_macos-arm64-unsigned.dmg`。在 `SHA256SUMS` 中找到文件名完全匹配的那一行，确认其第一列摘要与命令输出一致。Intel 版替换为对应的 `x64` 文件名。
 2. 打开 DMG，将 **RackTop** 拖入 **应用程序**。升级已有安装时，先退出 RackTop 再替换应用。
 3. 从「应用程序」启动 RackTop。
 4. 如果 macOS 提示无法验证开发者或无法检查恶意软件，确认下载来源后，打开「系统设置 → 隐私与安全性」，在本次被阻止的应用旁选择「仍要打开」，再确认「打开」。此入口通常需要先尝试打开一次才出现。操作依据 [Apple 的安全打开 App 说明](https://support.apple.com/zh-cn/102445)。
 
-这一批文件名含 `-unsigned` 的安装包使用 **ad-hoc 本地代码签名**，没有 Apple Developer ID 签名，也未经过 Apple 公证。包内签名完整性校验通过不代表 Apple 已验证开发者身份，因此不能保证首次启动没有系统提示。若提示应用已损坏或包含恶意软件，应重新核对附件与校验值，不要将其当作普通开发者验证提示处理。
+这一批文件名含 `-unsigned` 的安装包使用 **ad-hoc 本地代码签名**，没有 Apple Developer ID 签名，也未经过 Apple 公证。Tauri 更新签名或包内签名完整性不代表 Apple 已验证开发者身份，因此不能保证首次启动没有系统提示。若提示应用已损坏或包含恶意软件，应重新核对附件与校验值，不要将其当作普通开发者验证提示处理。
 
 ## 连接服务器、共享与预约
 
 - **直接连接服务器**：在「添加服务器」填写 SSH 主机、端口和用户名，选择本机 SSH Agent、私钥或密码，并核对服务器 Host Key 指纹。已有私钥可通过「密钥管理」导入引用；Mac 需要能访问所选文件。保存密码使用本机系统钥匙串。
 - **通过邀请码访问共享资源**：在共享访客入口连接网关并输入资源所有者提供的邀请码，使用获准的监控、终端和文件能力。2.2.0 允许同一码在到期前依次绑定多台独立授权设备，撤销成员时轮换邀请码；分享者仅在访客在线时看到公网出口 IP，并会提示 NAT、VPN 或代理可能让多人显示同一地址。共享依赖资源所有者的 RackTop 和电脑持续在线；Mac 客户端不需要复制所有者的私钥。
-- **团队预约**：连接同一个在线预约服务，用成员名称和密码注册或登录；普通成员需由超级管理员分配公司后使用。无需安装 RackTop 也可以在浏览器查看排期和预约；管理员可在桌面端将选中的服务器 GPU 清单同步到中央目录。同步不上传 SSH 地址或私钥。预约属于排期协调，不会自动授予 SSH 权限，也不会强制占用 GPU。详细流程见 [团队预约使用说明](../team-web/README.md)。
+- **团队预约**：连接同一个在线预约服务，用成员名称和密码注册或登录；普通成员需由超级管理员分配一个或多个组织后使用，并选择当前组织。无需安装 RackTop 也可以在浏览器查看排期和预约；管理员可在桌面端将选中的个人服务器 GPU 清单同步到预约资源；组织服务器目录独立管理。个人资源上传不包含 SSH 地址或私钥。预约属于排期协调，不会自动授予 SSH 权限，也不会强制占用 GPU。详细流程见 [团队预约使用说明](../team-web/README.md)。
 
 ## 更新
 
-首次从旧维护版迁入当前新仓库分发，请退出 RackTop 后用对应架构的 DMG 替换应用。旧仓库与旧更新清单不变；新分发使用专用更新签名与 [RackTop-Workspace Releases](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases)，保留原应用标识和用户数据兼容。当前 2.2.0 通过新仓库 `updater/macos.json` 的 `darwin-aarch64` / `darwin-x86_64` 选择包并验证签名，两种公开更新归档已用新仓库公钥复验签名。真实 Mac 用户的首次迁移与后续自动更新替换仍需在用户设备上验证。
+首次从旧维护版迁入 2.5.0，请退出 RackTop 后，用对应架构的 DMG 替换应用。旧仓库与旧更新清单不变；新分发使用专用更新签名与 [RackTop-Workspace Releases](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases)，保留原应用标识及用户资料。不要先删除应用数据或系统钥匙串。
+
+应用内更新通过新仓库 `updater/macos.json` 的 `darwin-aarch64` / `darwin-x86_64` 选择对应架构归档并验证签名。平台运行及实际升级验收以本版[版本信息](VERSION_INFOS.md)记录为准，不能用文末旧版结果替代。
 
 Tauri 更新签名与 Apple Developer ID / 公证是两套机制。更新包具备 Tauri 签名，不代表其通过 Apple 公证。自动更新不可用时，退出应用后手动下载并安装本机架构对应的 DMG。应用数据与安装包分开存放，替换前可先在设置中导出配置备份。
 
@@ -63,15 +67,19 @@ RACKTOP_MACOS_TARGET=x86_64-apple-darwin RACKTOP_REQUIRE_UPDATER=0 npm run bundl
 
 ## 团队工作台
 
-「密钥管理」与「日志」之间的 **团队工作台** 可以悬停、键盘焦点或点击展开，包含设备管理、周报与绩效、算力预约和设备申请与领取，主按钮打开在线首页。原「团队预约」桌面页面继续同步本机资源。网页用一个名称和密码注册，普通成员由超管分配公司后使用本公司业务；超管自身没有公司归属，可跨公司管理。设备照片缩略图、资产标签和账号头像都在网页中管理。详见[工作台指南](WORKSPACE.md)、[账号管理](TEAM_ACCOUNTS.md)和[设备管理](EQUIPMENT.md)。
+「密钥管理」与「日志」之间的 **团队工作台** 可以悬停、键盘焦点或点击展开，包含服务器目录、设备管理、周报与绩效、算力预约和设备申请与领取，主按钮打开在线首页。原「团队预约」桌面页面继续同步本机资源。网页用一个名称和密码注册，超管可为成员勾选多个组织；成员在网页或桌面选择当前组织，各项业务仍按当前组织隔离。超管保持跨组织管理。2.5.0 桌面同步获授权的组织服务器连接元数据，密码或私钥由用户在本机配置。设备照片缩略图、资产标签和账号头像都在网页中管理。详见[工作台指南](WORKSPACE.md)、[账号管理](TEAM_ACCOUNTS.md)和[设备管理](EQUIPMENT.md)。
 
 SSH 导入与导出合并到 **SSH 配置**，导出可勾选特定连接，不包含密码、私钥或本机私钥路径。GPU 通知选择关闭后立即抑制后续派发，设置保存到本机；通知与团队业务数据的具体边界见 [Linux 指南](LINUX.md#团队工作台与通知)。
 
 ## 验证范围
 
+2.5.0 的实际检查范围以[版本信息](VERSION_INFOS.md)对应条目及本版 Release 为准；以下旧版记录只证明各版本当时的结果。
+
+### 历史 2.2.0 验证记录
+
 2.2.0 的[标签工作流](https://github.com/AIsMovDataInfra/RackTop-Workspace/actions/runs/34340934877) 已在 Apple Silicon 和 Intel 原生 macOS runner 构建并验证两种 DMG 与更新归档：应用架构、DMG 挂载、代码签名、DMG 与更新归档内容一致性及 Tauri 更新签名均通过。两种架构都在隔离资料目录中原生启动至少 8 秒并创建数据库，截图与报告已绑定到通过公开摘要校验的安装包。Linux 与两种 Mac 架构的 9 个公开附件和更新签名已统一核验，完整记录见[2.2.0 验证文档](VERIFICATION_2_2.md)。
 
-本轮 Mac 包采用 ad-hoc 签名，未通过 Apple 公证。上述证据是 CI 原生构建、包完整性、启动与截图检查，没有在实体 Mac 上执行真人完整交互。Gatekeeper 首次放行、钥匙串权限、真实 SSH/共享流程及自动更新替换仍需在用户设备验证。
+2.2.0 Mac 包采用 ad-hoc 签名，未通过 Apple 公证。上述证据是 CI 原生构建、包完整性、启动与截图检查，没有在实体 Mac 上执行真人完整交互。Gatekeeper 首次放行、钥匙串权限、真实 SSH/共享流程及自动更新替换仍需在用户设备验证。
 
 ### 上一版 2.1.1 验证记录
 

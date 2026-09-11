@@ -1,0 +1,42 @@
+RackTop 2.5.0 测试版（Pre-release）— Ubuntu 20.04 安装
+适用：Intel / AMD 64 位（x86_64）Ubuntu 20.04 图形桌面。
+
+推荐：统一一键安装
+1. 打开终端。缺少 curl 或 python3 时先运行：
+   sudo apt install curl python3
+2. 用普通用户运行下面整行，整条命令前不要加 sudo：
+   curl --proto '=https' --proto-redir '=https' -fL https://136.0.110.161/downloads/install-racktop.sh -o install-racktop.sh && bash install-racktop.sh
+3. 按提示完成安装。脚本会校验下载包；补齐系统组件时才提示管理员认证。
+   已有 Flatpak 沿用原来的用户级或系统级安装，复用已有运行时。
+
+手动下载：用户级离线套件
+云端：https://136.0.110.161/downloads/RackTop_2.5.0_linux-amd64-flatpak-offline.tar.gz
+GitHub 备用：https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.5.0/RackTop_2.5.0_linux-amd64-flatpak-offline.tar.gz
+1. 若没有 Flatpak，先联网运行：sudo apt install flatpak
+2. 右键提取压缩包，进入 RackTop_2.5.0_flatpak_offline 文件夹。
+3. 在文件夹空白处右键选择“在终端打开”，运行：
+   bash install.sh
+4. 从应用菜单打开 RackTop，或运行：
+   flatpak run com.racktop.desktop
+此套件的 install.sh 只进行用户级安装。已有系统级 RackTop 请使用统一一键安装入口，以保留原安装范围。
+套件包含应用与图形运行时；安装脚本核验内置 SHA256SUMS 后使用本地包。首次补齐系统 Flatpak 组件仍需联网。
+
+旧版升级与资料
+旧 2.2.2 Flatpak 需先通过统一安装器升级一次，随后可使用新版应用内签名更新。不要先卸载、删除服务器或清理资料目录。
+新 2.5.0 离线套件运行 bash install.sh；旧 2.2.2 简易套件才运行 bash install-racktop.sh；在线统一入口也叫 install-racktop.sh，两者不要混用。
+已有较新版本或同版本不同构建时，统一安装器会停止。不要为了升级而手动覆盖较新安装。
+Flatpak 默认资料：~/.var/app/com.racktop.desktop/data/com.racktop.desktop
+DEB 默认资料：~/.local/share/com.racktop.desktop
+两种格式不自动迁移资料；切换前先备份。不要让两个客户端同时读写同一数据库。SSH 密钥和系统钥匙串也需保留。
+不需要源码、Rust、Cargo 或 WebKit 开发包。
+
+摘要、源码与许可证
+云端文件校验：https://136.0.110.161/downloads/SHA256SUMS
+GitHub 文件校验：https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.5.0/SHA256SUMS
+源码：https://136.0.110.161/downloads/RackTop_2.5.0_source.tar.gz
+GitHub 源码：https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.5.0/RackTop_2.5.0_source.tar.gz
+GPL-3.0：https://136.0.110.161/downloads/LICENSE
+来源与署名：https://136.0.110.161/downloads/NOTICE.md
+
+详细说明：https://github.com/AIsMovDataInfra/RackTop-Workspace/blob/main/docs/DOWNLOADS.md
+统一下载页：https://136.0.110.161/downloads/

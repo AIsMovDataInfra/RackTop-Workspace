@@ -1,43 +1,53 @@
 # Linux 客户端（实验版）
 
-RackTop 2.2.0 是 [AIsMovDataInfra/RackTop-Workspace](https://github.com/AIsMovDataInfra/RackTop-Workspace) 已发布的统一测试版，面向 Ubuntu 22.04 x86_64 / amd64 图形桌面，并与 Mac Apple Silicon 和 Intel 共用版本、标签和 Release。Linux 与两种 Mac 架构已完成原生构建和发布验证，生产共享中继 `0.3.0` 已部署，本机已完成 Linux 2.2.0 用户级安装。下载见 [v2.2.0 测试版 Release](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/tag/v2.2.0)，完整证据见[2.2.0 验证记录](VERIFICATION_2_2.md)。项目源自上游及旧 AIsMov 维护版，保留 Tongzh-SEU 原作者署名、完整历史及 GPL-3.0。
+RackTop 当前分发为 **2.5.0 测试版（Pre-release）**，面向 Ubuntu 20.04 / 22.04 的 Intel / AMD 64 位图形桌面。推荐从[统一下载页](https://136.0.110.161/downloads/)安装，也可使用 [v2.5.0 GitHub Release](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/tag/v2.5.0)。Linux 与 Mac Apple Silicon、Intel 共用版本、标签和 Release；项目保留 Tongzh-SEU 原作者署名、完整历史及 GPL-3.0。
 
 ## 安装与启动
 
-从 [v2.2.0 Release](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/tag/v2.2.0) 下载 Linux amd64 `.deb` 后，在其所在目录执行：
+Ubuntu 20.04 / 22.04 推荐用普通用户在终端运行统一安装器；不要在整条命令前加 `sudo`：
 
 ```bash
-sudo apt install ./RackTop_2.2.0_linux-amd64.deb
+curl --proto '=https' --proto-redir '=https' -fL https://136.0.110.161/downloads/install-racktop.sh -o install-racktop.sh && bash install-racktop.sh
+```
+
+缺少 `curl` 或 `python3` 时，先运行 `sudo apt install curl python3`。安装器核验下载包；Ubuntu 20.04 初装选择含运行时的 Flatpak 套件，22.04 初装选择 DEB；已有 Flatpak 沿用原用户级或系统级范围。补齐系统组件时才提示管理员认证，无需源码、Cargo 或 WebKit 开发包。
+
+Ubuntu 22.04 手动安装可下载 [2.5.0 DEB 云端包](https://136.0.110.161/downloads/RackTop_2.5.0_linux-amd64.deb)或 [GitHub 备用包](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.5.0/RackTop_2.5.0_linux-amd64.deb)，退出旧程序，在下载目录执行：
+
+```bash
+sudo apt install ./RackTop_2.5.0_linux-amd64.deb
 racktop
 ```
 
-也可从桌面应用菜单启动 RackTop。安装需要图形桌面以及 WebKitGTK 4.1；Linux 服务器端仍通过原有 OpenSSH 工作流管理。此包仅面向 amd64，不适用于 ARM。
+也可从应用菜单启动。DEB 需要图形桌面及 WebKitGTK 4.1 运行组件，APT 会补齐依赖；只面向 amd64，不适用于 ARM。已有 Flatpak 请使用统一入口继续原格式。源码、许可证、NOTICE 和 SHA256SUMS 链接见[下载说明](DOWNLOADS.md)。
 
-## Ubuntu 20.04 兼容包（2.2.2 开发版）
+## Ubuntu 20.04 兼容包
 
-Ubuntu 20.04 桌面不能直接安装当前 `.deb`：Tauri 2 使用 WebKitGTK 4.1，而 20.04 标准软件源提供的是 WebKitGTK 4.0；22.04 构建的 RackTop 还要求 `GLIBC_2.34`，高于 20.04 的 glibc 2.31。不能通过强制安装、改包依赖、为 4.0 建立 4.1 软链接或混入 22.04 软件源解决。这里说的是运行客户端的桌面系统；被 SSH 管理的服务器不需要安装 WebKitGTK。
+Ubuntu 20.04 桌面请使用 Flatpak，不能直接安装面向 22.04 的 `.deb`：Tauri 2 使用 WebKitGTK 4.1，而 20.04 标准软件源提供的是 WebKitGTK 4.0；此前 2.2.2 兼容诊断还确认，22.04 构建的 RackTop 要求 `GLIBC_2.34`，高于 20.04 的 glibc 2.31。不能通过强制安装、改包依赖、为 4.0 建立 4.1 软链接或混入 22.04 软件源解决。这里说的是运行客户端的桌面系统；被 SSH 管理的服务器不需要安装 WebKitGTK。
 
-2.2.2 增加独立的 `RackTop_2.2.2_linux-amd64.flatpak` 构建，使用 GNOME 50 运行时提供 glibc、GTK 和 WebKitGTK 4.1。源码仍为 Tauri 2，Ubuntu 22.04 的 `.deb` 通道继续保留。兼容包与运行时均为 x86_64；需要图形桌面、Flatpak，以及预先下载的完整离线套件。
+2.5.0 的 Flatpak 包沿用 GNOME 50 运行时提供 glibc、GTK 和 WebKitGTK 4.1，源码仍为 Tauri 2；Ubuntu 22.04 的 DEB 通道继续保留。兼容包与运行时均为 x86_64，需要图形桌面和 Flatpak。首次安装使用包含运行时的完整套件。
 
-本节描述开发中的兼容包；本轮实测结果及尚未覆盖的场景见 [2.2.2 验证记录](VERIFICATION_2_2_2.md)，未发布的包不能从历史 Release 获取。
+兼容方案首次在 2.2.2 开发版中实现；技术诊断、当时的真实实测与限制保留在 [2.2.2 历史验证记录](VERIFICATION_2_2_2.md)。该记录只证明旧版当时的结果，不代表 2.5.0 的平台或升级验收。
 
-Ubuntu 20.04 标准仓库的 Flatpak 1.6.5 能运行 GNOME 50，但读取当前 Flathub 索引时会超过 10 MiB 大小上限。首次安装请下载含运行时的 `RackTop_2.2.2_linux-amd64-flatpak-offline.tar.gz`，不要直接依赖在线解析运行时：
+此前在 Ubuntu 20.04 的 Flatpak 1.6.5 上实测可运行 GNOME 50，但在线读取 Flathub 索引遇到 10 MiB 大小上限。因此首次安装使用含运行时的 [2.5.0 离线套件](https://136.0.110.161/downloads/RackTop_2.5.0_linux-amd64-flatpak-offline.tar.gz)（[GitHub 备用](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.5.0/RackTop_2.5.0_linux-amd64-flatpak-offline.tar.gz)），不依赖在线解析运行时。以下手动步骤进行用户级安装；已有系统级 RackTop 应使用上方统一安装器：
 
 ```bash
 sudo apt update
 sudo apt install flatpak xdg-desktop-portal xdg-desktop-portal-gtk
-tar -xzf RackTop_2.2.2_linux-amd64-flatpak-offline.tar.gz
-cd RackTop_2.2.2_flatpak_offline
+tar -xzf RackTop_2.5.0_linux-amd64-flatpak-offline.tar.gz
+cd RackTop_2.5.0_flatpak_offline
 bash install.sh
 flatpak run com.racktop.desktop
 ```
 
+新套件进入 `RackTop_2.5.0_flatpak_offline` 后运行 `bash install.sh`；旧 2.2.2 简易套件内才使用 `install-racktop.sh`。运行套件内脚本时不要加 `sudo`。
+
 套件包含 RackTop、GNOME 50 和 Mesa 图形运行时，体积较大。安装脚本先验证套件中的 SHA-256，再以用户级方式仅安装本地文件，不查询在线仓库。已有对应运行时会保留，避免用套件降级更新过的运行时。闭源 NVIDIA 硬件加速需要另外安装与驱动匹配的 Flatpak 扩展；扩展不可用时可尝试 `flatpak run --env=LIBGL_ALWAYS_SOFTWARE=1 com.racktop.desktop`。
 
-已安装运行时后，可用较小的应用包更新：
+已有 Flatpak 推荐使用统一安装器升级；旧 2.2.2 先完成一次引导，2.5.0 起可在应用内下载签名更新。维护者若已核验包的版本与摘要，也可在确认原安装为用户级后手动安装较小的应用包：
 
 ```bash
-flatpak install --user --bundle --no-deps --no-related --or-update ./RackTop_2.2.2_linux-amd64.flatpak
+flatpak install --user --bundle --no-deps --no-related --or-update ./RackTop_2.5.0_linux-amd64.flatpak
 ```
 
 Ubuntu 20.04 的 Flatpak 1.6 对重复安装完全相同的小应用包会提示“already installed”，表示无需更新；离线套件安装器会按提交编号自动跳过这个情况。安装不同提交的新版包会原位更新并保留 Flatpak 应用资料。
@@ -51,7 +61,7 @@ flatpak install --user --bundle --no-deps --no-related --or-update org.freedeskt
 flatpak install --user --bundle --no-deps --no-related --or-update org.freedesktop.Platform.GL.default_25.08-extra_x86_64.flatpak
 ```
 
-当前没有 RackTop Flathub 应用仓库。应用内 Debian 更新器会提示使用 Flatpak 包，且不会下载或安装 `.deb`。
+RackTop 不通过 Flathub 应用仓库发布。2.5.0 的 Flatpak 应用内更新会核验签名与部署 commit，只下载 `.flatpak` 应用包并复用运行时，保留原安装范围；不会使用 DEB 更新。旧 2.2.2 只提示改用 Flatpak 包，因此需要先手动引导升级一次。
 
 兼容包包含 `ssh`、`ssh-keygen`、`ssh-keyscan`，支持应用内终端、SSH Agent、密码助手及 ProxyJump；宿主机独有的 ProxyCommand 程序不会自动进入沙箱，使用这类配置时需检查该程序是否在沙箱中可用。SSH 快速配置窗口通过宿主机 `x-terminal-emulator` 打开，宿主机需安装 OpenSSH 客户端和图形终端。
 
@@ -63,8 +73,8 @@ Flatpak 的应用数据默认位于 `~/.var/app/com.racktop.desktop/data/com.rac
 
 ```bash
 flatpak install --user flathub org.gnome.Platform//50 org.gnome.Sdk//50
-bash scripts/package-flatpak.sh /absolute/path/RackTop_2.2.2_linux-amd64.deb /absolute/path/output
-bash scripts/package-flatpak-runtime.sh /absolute/path/output/RackTop_2.2.2_linux-amd64.flatpak /absolute/path/output
+bash scripts/package-flatpak.sh /absolute/path/RackTop_2.5.0_linux-amd64.deb /absolute/path/output
+bash scripts/package-flatpak-runtime.sh /absolute/path/output/RackTop_2.5.0_linux-amd64.flatpak /absolute/path/output
 ```
 
 参考：[Tauri 的 Linux 运行环境限制](https://v2.tauri.app/distribute/appimage/)、[Tauri Flatpak 分发](https://v2.tauri.app/distribute/flatpak/)、[Flatpak 运行时与沙箱](https://docs.flatpak.org/en/latest/basic-concepts.html)。
@@ -75,12 +85,14 @@ bash scripts/package-flatpak-runtime.sh /absolute/path/output/RackTop_2.2.2_linu
 - 服务器密码通过 Secret Service 存入系统钥匙串。Ubuntu GNOME 通常由 GNOME Keyring 提供此服务；其他桌面需配置兼容服务。服务不可用或钥匙串未解锁时，保存密码可能报错；可使用 SSH Agent/密钥或仅会话密码。
 - 外部 SSH 快速配置终端沿用 `x-terminal-emulator`。Ubuntu 上需安装一个提供此命令的终端程序；应用内 SSH 终端由原有 PTY 实现提供。
 - 托盘可见性取决于桌面的 AppIndicator 支持。窗口内仍可使用主要功能。
-- 当前新分发支持专用密钥签名的 Debian 包一键更新。点击左上角 RackTop → 检查更新 → 更新到指定版本，下载和校验后由系统请求管理员授权，完成后重新启动。原作者主页和官方仓库入口继续保留。
+- DEB 安装支持专用密钥签名的 Debian 包一键更新；2.5.0 Flatpak 使用其独立应用包更新路径。点击左上角 RackTop → 检查更新 → 更新到指定版本，下载和校验后由系统请求管理员授权，完成后重新启动。原作者主页和官方仓库入口继续保留。
 - 应用数据通常位于 `${XDG_DATA_HOME:-$HOME/.local/share}/com.racktop.desktop`。卸载软件包不会自动删除用户数据。
 
 ## 一键更新与首次升级
 
-从旧 `1.30.0-linux.12` 或其他旧维护版迁入当前已发布的 **2.2.0**，必须先下载新仓库 Deb 并手动安装一次。此后使用新仓库更新通道；2.2.0 的 `linux-amd64.json` 与 `macos.json` 已发布，三个平台更新签名均通过复验。旧仓库及旧更新清单保持原状，不会自动将旧客户端引导到新仓库。新版本保留 `com.racktop.desktop` 标识与数据目录，服务器、项目、密钥引用和本机历史继续使用原资料；更换安装前可先备份应用数据。
+从旧 `1.30.0-linux.12` 或其他旧维护版迁入 **2.5.0**，需要先从新仓库手动安装一次对应格式：Ubuntu 22.04 使用新 DEB；Ubuntu 20.04 使用 Flatpak。旧仓库及旧更新清单保持原状，不会自动将旧客户端引导到新仓库。旧 2.2.2 Flatpak 使用统一安装器进行一次引导升级，随后可用新版应用内更新；无需先卸载。
+
+新版本保留 `com.racktop.desktop` 标识；同格式升级继续使用原服务器、项目、密钥引用和本机历史。DEB 与 Flatpak 的资料目录不同，不自动迁移，切换格式前应退出客户端并备份。
 
 安装新分发后，启动和每 24 小时检查新仓库更新，也可点击左上角手动检查。选择“更新到 v…”后先下载、验证新仓库的专用签名、包名、版本和架构，再通过系统授权窗口安装；拒绝降级。安装取消、网络或授权失败可重试或手动下载。系统安装需要 `pkexec`、APT 和可用的桌面授权代理，系统管理员密码与服务器 SSH 密码无关。
 
@@ -90,9 +102,9 @@ bash scripts/package-flatpak-runtime.sh /absolute/path/output/RackTop_2.2.2_linu
 
 ```bash
 # TAURI_SIGNING_PRIVATE_KEY_PATH 指向受保护的私钥文件；不要将内容写进命令或日志。
-python3 scripts/sign-linux-update.py src-tauri/target/release/bundle/deb/RackTop_2.2.0_linux-amd64.deb
+python3 scripts/sign-linux-update.py src-tauri/target/release/bundle/deb/RackTop_2.5.0_linux-amd64.deb
 cargo build --release --locked --features integration-probe --bin racktop-probe --manifest-path src-tauri/Cargo.toml
-python3 scripts/test-linux-update.py src-tauri/target/release/racktop-probe src-tauri/target/release/bundle/deb/RackTop_2.2.0_linux-amd64.deb
+python3 scripts/test-linux-update.py src-tauri/target/release/racktop-probe src-tauri/target/release/bundle/deb/RackTop_2.5.0_linux-amd64.deb
 ```
 
 ## 分享 SSH 连接与失败重试
@@ -156,13 +168,17 @@ npm run bundle:linux -- --locked
 
 ## 团队工作台与通知
 
-桌面侧栏的 **团队工作台** 位于「密钥管理」与「日志」之间，悬停或键盘焦点即可展开设备管理、周报与绩效、算力预约、设备申请与领取；点击主按钮打开网页首页。原「团队预约」页面继续提供本机资源同步，说明与打开网页按钮放在同一组。普通成员的账号公司由服务端返回并只读显示；超级管理员显示跨公司管理，不分配公司。
+桌面侧栏的 **团队工作台** 位于「密钥管理」与「日志」之间，悬停或键盘焦点即可展开服务器目录、设备管理、周报与绩效、算力预约、设备申请与领取；点击主按钮打开网页首页。原「团队预约」页面继续提供本机资源同步，说明与打开网页按钮放在同一组。成员可属于多个组织，并在网页或桌面切换当前组织；超级管理员保持跨组织管理。服务器目录由管理员维护，本机个人连接的 GPU 上传与组织目录分别管理。
 
 单台服务器「配置 → 服务器通知」可选打开、部分或关闭。部分模式取消最后一类后自动关闭，每次选择立即保存；关闭后，采集中或等待系统通知授权的提醒也会再次核对开关。预约条件仍会正常更新，但该服务器不再弹出相应提醒。保存失败会回到最后成功保存的设置并提示，不把尚未保存的开关状态当作永久生效。
 
-网页使用方法见[工作台指南](WORKSPACE.md)与[设备管理](EQUIPMENT.md)。本轮没有 SSH 云同步，线上只保存团队业务资料。
+网页使用方法见[工作台指南](WORKSPACE.md)与[设备管理](EQUIPMENT.md)。2.5.0 桌面同步当前身份获准的组织服务器连接元数据；密码与私钥仍在本机配置，不上传到目录。
 
 ## 验证范围
+
+2.5.0 的实际检查范围以[版本信息](VERSION_INFOS.md)对应条目及本版 Release 为准；以下保留的旧版结果不能代替本版验证。
+
+### 历史 2.2.0 验证记录
 
 2.2.0 已作为测试版发布。[标签工作流](https://github.com/AIsMovDataInfra/RackTop-Workspace/actions/runs/34340934877) 完成 Linux amd64、Mac Apple Silicon、Mac Intel 三平台原生构建与统一发布。Linux 通过桌面 325 项、Rust 172 项、中继 30 项、签名下载器 9 项检查，以及真实中继 TLS 帧重连和至少 15 秒的隔离资料原生启动。9 个公开附件均匹配 GitHub digest，`SHA256SUMS` 覆盖并匹配其余 8 个附件；标签源码对应关系与三个平台更新签名也已通过，详见[2.2.0 验证记录](VERIFICATION_2_2.md)。
 

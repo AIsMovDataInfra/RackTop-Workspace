@@ -163,7 +163,7 @@ def main():
     bullets = [line for line in section.splitlines() if line.startswith('- ')]
     if not bullets:
         raise ValueError('Release notes must contain the current version changes')
-    body = '## 主要更新\n\n' + '\n'.join(bullets) + '\n\n## 下载\n\n'
+    body = '## 主要更新\n\n' + '\n'.join(bullets) + '\n\n## 下载\n\n推荐从[统一下载页](https://136.0.110.161/downloads/)安装 RackTop；Ubuntu 使用一键安装，Mac 按芯片选择 DMG。\n\n'
     for path in packages:
         if path.suffix in ('.dmg', '.deb', '.flatpak'):
             if path.suffix == '.flatpak':
@@ -181,7 +181,7 @@ def main():
     body += f'- [对应源码（GPL-3.0）](https://github.com/{REPO}/releases/download/{tag}/{source.name})\n'
     for name, label in [('LICENSE', 'GPL-3.0 许可证'), ('NOTICE.md', '项目来源与署名'), ('SHA256SUMS', '文件校验清单')]:
         body += f'- [{label}](https://github.com/{REPO}/releases/download/{tag}/{name})\n'
-    body += '\nLinux：Ubuntu 20.04 首次安装请选择含运行时的 Flatpak 离线安装包；已有运行时可用较小的 `.flatpak` 应用包。Ubuntu 22.04 也可用系统软件安装器打开 DEB。安装与更新步骤见 [Linux 安装说明](https://github.com/' + REPO + '/blob/' + tag + '/docs/LINUX.md)。Mac：打开对应芯片的 DMG，将 RackTop 拖入「应用程序」。\n'
+    body += '\nLinux：Ubuntu 20.04 首次安装请选择含运行时的 Flatpak 离线安装包；已有运行时可用较小的 `.flatpak` 应用包。Ubuntu 22.04 也可用系统软件安装器打开 DEB。安装与更新步骤见 [Linux 安装说明](https://github.com/' + REPO + '/blob/main/docs/DOWNLOADS.md)。Mac：打开对应芯片的 DMG，将 RackTop 拖入「应用程序」。\n'
     body += '\n旧仓库的 1.x 客户端首次迁移需下载安装此版本；DEB 和 Mac 安装保留原应用数据，后续使用独立仓库更新。Flatpak 使用独立配置目录；旧 2.2.2 首次需运行安装器升级，新版随后可在应用内下载签名更新，保留原安装范围与数据。\n'
     if signing:
         body += '\n本次 Mac 测试包未通过 Apple 公证；首次启动被阻止时，请在「系统设置 → 隐私与安全性」允许打开。\n'
