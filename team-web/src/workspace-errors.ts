@@ -19,6 +19,7 @@ export function workspaceErrorText(error: unknown, t: Translate) {
     DATABASE_BUSY: ['工作台繁忙，请稍后重试。', 'The workspace is busy. Please try again shortly.'],
   }
   if (messages[error.code]) return t(...messages[error.code])
+  if (error.code === 'COMPANY_CHANGED') return errorText(error, t)
   if (error.code === 'INVALID_INPUT') return t(error.message, 'Check the entered values. Reports need a Monday date; submitting requires a todo, reasons for unfinished work and a next-week plan. Requests need a category, a positive whole quantity and a purpose.')
   if (error.status === 409) return t(error.message, 'The report, request or linked equipment has changed. Read the latest record and review your input before retrying.')
   return errorText(error, t)

@@ -4,6 +4,8 @@ use std::collections::HashMap;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Server {
+    #[serde(default)]
+    pub managed: Option<ManagedServer>,
     pub id: String,
     pub name: String,
     pub location: Option<String>,
@@ -30,6 +32,17 @@ pub struct Server {
     pub status: String,
     pub last_error: Option<String>,
     pub last_seen_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ManagedServer {
+    pub account_id: String,
+    pub company: String,
+    pub remote_id: String,
+    pub available: bool,
+    pub reason: Option<String>,
+    pub version: u64,
 }
 
 #[derive(Clone, Serialize, Deserialize)]

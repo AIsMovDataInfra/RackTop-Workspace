@@ -130,7 +130,12 @@ test('revoking company access during photo normalization denies the pending writ
     const upload = begin(`/api/equipment/${equipment.id}/photo`, { version: 1, dataUrl }, session);
     await decoder.entered;
     const db = new DatabaseSync(dbPath);
-    try { db.prepare("UPDATE account_users SET company = NULL, version = version + 1 WHERE username = 'lifecycle'").run(); }
+    try {
+      db.exec('BEGIN IMMEDIATE');
+      db.prepare("DELETE FROM account_user_companies WHERE user_id IN (SELECT id FROM account_users WHERE username = 'lifecycle')").run();
+      db.prepare("UPDATE account_users SET company = NULL, version = version + 1 WHERE username = 'lifecycle'").run();
+      db.exec('COMMIT');
+    }
     finally { db.close(); }
     decoder.release();
     const result = await upload.promise;

@@ -60,7 +60,7 @@ test('registration yields a stable member UUID, normalized unique identity and n
   const { payload, res } = await client.register({ username: ' Member ', name: '  小林  ' });
   assert.equal(res.statusCode, 201);
   assert.match(payload.user.id, /^[0-9a-f-]{36}$/);
-  assert.deepEqual({ ...payload.user, id: undefined }, { id: undefined, name: '小林', username: 'member', role: 'member', isSuperAdmin: false, company: null, version: 1, avatar: 'user' });
+  assert.deepEqual({ ...payload.user, id: undefined }, { id: undefined, name: '小林', username: 'member', role: 'member', isSuperAdmin: false, company: null, companies: [], version: 1, avatar: 'user' });
   assert.equal(payload.authMode, 'account');
   assert.equal(Object.hasOwn(payload.user, 'email'), false);
   assert.equal(payload.accountRegistration, true);
@@ -413,7 +413,7 @@ test('a member can change only their own allowlisted avatar with CAS, including 
   const nativeUpdated = await nativeClient.call('/api/auth/profile', { method: 'POST', body: { version: 2, avatar: 'star' } });
   assert.equal(nativeUpdated.payload.user.avatar, 'star'); assert.equal(nativeUpdated.payload.csrfToken, null);
   const safe = auth.getMemberIdentity(payload.user.id);
-  assert.deepEqual(Object.keys(safe).sort(), ['id', 'name', 'role', 'username', 'isSuperAdmin', 'company', 'version', 'avatar'].sort());
+  assert.deepEqual(Object.keys(safe).sort(), ['id', 'name', 'role', 'username', 'isSuperAdmin', 'company', 'companies', 'version', 'avatar'].sort());
   assert.equal(auth.resolve(client.request()).user.avatar, 'star');
 });
 

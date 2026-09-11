@@ -90,3 +90,26 @@ describe('independent jump password', () => {
     expect(input('跳板机密码').value).toBe('')
   })
 })
+
+describe('centrally managed server authentication', () => {
+  it('keeps central connection fields read-only while explicitly saving local authentication', async () => {
+    const onSave = vi.fn(async () => {})
+    container = document.createElement('div'); document.body.append(container); root = createRoot(container)
+    act(() => root?.render(<ServerForm initial={{ id: 'managed-local', name: 'Training', host: 'gpu.example.test', port: 2222, username: 'researcher', authMethod: 'sshAgent', proxyJump: 'jump@bridge.example.test:22', samplingIntervalSeconds: 10, historyRetentionDays: 30 }} managed={{ accountId: 'member', company: 'A公司', remoteId: 'cloud', available: false, reason: '请先配置本机 SSH 认证', version: 1 }} showGuide={false} onClose={vi.fn()} onSave={onSave} />))
+    for (const text of ['显示名称', '服务器位置', '主机地址', '端口', '用户名', '跳板机 ProxyJump']) {
+      const label = [...document.querySelectorAll('label')].find(label => label.textContent === text)
+      expect(label?.querySelector('input')?.readOnly, text).toBe(true)
+    }
+    expect(document.querySelector<HTMLInputElement>('[aria-label="添加服务器标签"]')?.disabled).toBe(true)
+    expect(container.textContent).not.toContain('SSH Config')
+    expect(container.textContent).not.toContain('打开终端并粘贴')
+    expect(container.textContent).toContain('本机使用的密码或密钥')
+    const privateKey = [...document.querySelectorAll('button')].find(button => button.textContent === '私钥')!
+    act(() => privateKey.click())
+    const keyInput = [...document.querySelectorAll('label')].find(label => label.textContent === '私钥路径')!.querySelector('input')!
+    expect(keyInput.readOnly).toBe(false)
+    enter(keyInput, '~/.ssh/team-key')
+    await act(async () => { document.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })) })
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ id: 'managed-local', host: 'gpu.example.test', port: 2222, username: 'researcher', proxyJump: 'jump@bridge.example.test:22', authMethod: 'privateKey', identityFile: '~/.ssh/team-key', samplingIntervalSeconds: 10, historyRetentionDays: 30 }))
+  })
+})

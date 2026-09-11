@@ -79,7 +79,7 @@ test('super administrators create reports for any assigned company and drafts va
   assert.equal(next.version, 2);
   assert.equal(store.reviewReport(report.id, { version: 2, score: 88, comment: '跨公司超管评审' }, admin).score, 88);
   for (const bad of ['2026-02-30', 'bad']) assert.throws(() => store.createReport({ ...reportInput(), weekStart: bad }, author), { status: 422 });
-  assert.throws(() => store.createReport({ ...reportInput(), company: 'B公司' }, author), { status: 422 });
+  assert.throws(() => store.createReport({ ...reportInput(), company: 'B公司' }, author), { status: 403, code: 'COMPANY_NOT_ALLOWED' });
 });
 
 test('any valid calendar date selects its Monday week, including month, year and leap-day boundaries', t => {
@@ -192,6 +192,63 @@ test('a failed statistics read rolls back its transaction and accepts the next r
   assert.throws(() => store.reportStatistics({}, users.super), /no such table/);
   db.exec('ALTER TABLE temporarily_unavailable RENAME TO account_users');
   assert.equal(store.reportStatistics({}, users.super).summary.expectedCount, 4);
+});
+
+test('weekly report uniqueness migration preserves every field, audit entry, index and trigger while allowing a second organization', t => {
+  const { store, dbPath, members } = fixture(t);
+  let report = store.createReport({ ...reportInput(), status: 'submitted' }, author);
+  report = store.assignReviewer(report.id, { version: 1, reviewerId: reviewer.id }, admin);
+  store.reviewReport(report.id, { version: 2, score: 91, comment: '保留历史评审' }, reviewer);
+  const db = new DatabaseSync(dbPath); t.after(() => db.close());
+  const before = db.prepare('SELECT * FROM weekly_reports').all();
+  const auditBefore = db.prepare('SELECT * FROM workspace_audit ORDER BY id').all();
+  const currentDefinition = db.prepare("SELECT sql FROM sqlite_master WHERE name='weekly_reports'").get().sql;
+  db.exec('BEGIN IMMEDIATE');
+  db.exec(currentDefinition.replace('weekly_reports', 'weekly_reports_legacy').replace('UNIQUE(author_id,company,week_start)', 'UNIQUE(author_id,week_start)'));
+  db.exec(`INSERT INTO weekly_reports_legacy SELECT * FROM weekly_reports;
+    DROP TABLE weekly_reports; ALTER TABLE weekly_reports_legacy RENAME TO weekly_reports;
+    CREATE INDEX weekly_reports_visible ON weekly_reports(company,author_id,reviewer_id,week_start DESC);
+    CREATE INDEX retained_report_status ON weekly_reports(status);
+    CREATE TABLE retained_report_events(report_id TEXT);
+    CREATE TRIGGER retained_report_trigger AFTER INSERT ON weekly_reports BEGIN INSERT INTO retained_report_events VALUES(NEW.id); END;
+    COMMIT;`);
+  members.set(author.id, { ...author, companies: ['A公司', 'B公司'] });
+  const reopened = createWorkspaceStore({ dbPath, resolveMember: id => members.get(id) }); t.after(() => reopened.close());
+  assert.deepEqual(db.prepare('SELECT * FROM weekly_reports').all(), before);
+  assert.deepEqual(db.prepare('SELECT * FROM workspace_audit ORDER BY id').all(), auditBefore);
+  assert.equal(reopened.getReport(report.id, author).history.length, 3);
+  const second = reopened.createReport(reportInput(), { ...author, company: 'B公司' });
+  assert.equal(second.company, 'B公司');
+  assert.throws(() => reopened.createReport(reportInput(), { ...author, company: 'B公司' }), { code: 'REPORT_EXISTS' });
+  assert.deepEqual(db.prepare('SELECT report_id FROM retained_report_events').all().map(row => row.report_id), [second.id]);
+  assert.ok(db.prepare("SELECT 1 FROM sqlite_master WHERE name='retained_report_status'").get());
+  assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(), []);
+  assert.equal(db.prepare('PRAGMA integrity_check').get().integrity_check, 'ok');
+});
+
+test('membership-aware reports use the active organization, retain both report rows in statistics, and reject revoked scope', t => {
+  const { store, users, members, db } = statisticsFixture(t);
+  db.exec('CREATE TABLE account_user_companies(user_id TEXT NOT NULL,company TEXT NOT NULL,PRIMARY KEY(user_id,company))');
+  for (const member of members.values()) {
+    member.companies = member.isSuperAdmin ? [] : [member.company];
+    for (const company of member.companies) db.prepare('INSERT INTO account_user_companies VALUES(?,?)').run(member.id, company);
+  }
+  members.get(users.author.id).companies.push('B公司');
+  db.prepare('INSERT INTO account_user_companies VALUES(?,?)').run(users.author.id, 'B公司');
+  const a = store.createReport({ ...reportInput(), status: 'submitted' }, users.author);
+  const bClaim = { ...users.author, company: 'B公司' };
+  const b = store.createReport(reportInput(), bClaim);
+  assert.deepEqual(store.listReports(users.author).map(row => row.id), [a.id]);
+  assert.deepEqual(store.listReports(bClaim).map(row => row.id), [b.id]);
+  assert.throws(() => store.getReport(a.id, bClaim), { status: 404 });
+  assert.throws(() => store.createRequest(requestInput(), { ...users.author, company: 'C公司' }), { code: 'COMPANY_CHANGED' });
+  const both = store.reportStatistics({ memberId: users.author.id }, users.super);
+  assert.equal(both.summary.expectedCount, 2); assert.equal(both.summary.submittedCount, 1);
+  assert.deepEqual(both.rows.map(row => [row.company, row.reportId]), [['A公司', a.id], ['B公司', b.id]]);
+  members.get(users.author.id).companies = ['A公司'];
+  db.prepare('DELETE FROM account_user_companies WHERE user_id=? AND company=?').run(users.author.id, 'B公司');
+  assert.throws(() => store.updateReport(b.id, { version: 1, nextPlan: '撤销后的写入' }, bClaim), { code: 'COMPANY_CHANGED' });
+  assert.equal(store.reportStatistics({ memberId: users.author.id }, users.super).rows.find(row => row.company === 'B公司').reportId, b.id, 'historical reports remain after membership removal');
 });
 
 test('requests reveal only submission acknowledgement to ordinary employees and preserve immutable original contents', t => {

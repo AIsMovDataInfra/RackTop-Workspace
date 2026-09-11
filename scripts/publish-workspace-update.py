@@ -66,8 +66,20 @@ def collect_packages(assets, version):
     signature = (assets / (package.name + '.sig')).read_text().strip()
     if entry.get('signature') != signature or not base64.b64decode(signature, validate=True).startswith(b'untrusted comment:'):
         raise ValueError('Linux manifest signature mismatch')
-    # Flatpak manages its own deployments; never offer its bundle to the DEB updater.
-    return packages + [package, flatpak, offline], platforms, manifest['platforms'], signing
+    flatpak_manifest = json.loads((assets / 'flatpak-amd64.json').read_text())
+    if flatpak_manifest.get('version') != version or set(flatpak_manifest.get('platforms', {})) != {'linux-x86_64-flatpak'}:
+        raise ValueError('Flatpak manifest version or platforms mismatch')
+    flatpak_entry = flatpak_manifest['platforms']['linux-x86_64-flatpak']
+    if flatpak_entry.get('url') != f'https://github.com/{REPO}/releases/download/v{version}/{flatpak.name}':
+        raise ValueError('Flatpak package URL does not match the Workspace release')
+    flatpak_signature = Path(str(flatpak) + '.sig').read_text().strip()
+    if flatpak_entry.get('signature') != flatpak_signature or not base64.b64decode(flatpak_signature, validate=True).startswith(b'untrusted comment:'):
+        raise ValueError('Flatpak manifest signature mismatch')
+    commit = Path(str(flatpak) + '.commit').read_text().strip()
+    if not re.fullmatch(r'[0-9a-f]{64}', commit) or flatpak_entry.get('commit') != commit:
+        raise ValueError('Flatpak manifest commit mismatch')
+    # Different targets share a version/feed, never their installation format.
+    return packages + [package, flatpak, offline], platforms, manifest['platforms'] | flatpak_manifest['platforms'], signing
 
 
 def verify_release_assets(release, files):
@@ -170,7 +182,7 @@ def main():
     for name, label in [('LICENSE', 'GPL-3.0 许可证'), ('NOTICE.md', '项目来源与署名'), ('SHA256SUMS', '文件校验清单')]:
         body += f'- [{label}](https://github.com/{REPO}/releases/download/{tag}/{name})\n'
     body += '\nLinux：Ubuntu 20.04 首次安装请选择含运行时的 Flatpak 离线安装包；已有运行时可用较小的 `.flatpak` 应用包。Ubuntu 22.04 也可用系统软件安装器打开 DEB。安装与更新步骤见 [Linux 安装说明](https://github.com/' + REPO + '/blob/' + tag + '/docs/LINUX.md)。Mac：打开对应芯片的 DMG，将 RackTop 拖入「应用程序」。\n'
-    body += '\n旧仓库的 1.x 客户端首次迁移需下载安装此版本；DEB 和 Mac 安装保留原应用数据，后续使用独立仓库更新。Flatpak 使用独立配置目录，通过重新安装新版 `.flatpak` 更新。\n'
+    body += '\n旧仓库的 1.x 客户端首次迁移需下载安装此版本；DEB 和 Mac 安装保留原应用数据，后续使用独立仓库更新。Flatpak 使用独立配置目录；旧 2.2.2 首次需运行安装器升级，新版随后可在应用内下载签名更新，保留原安装范围与数据。\n'
     if signing:
         body += '\n本次 Mac 测试包未通过 Apple 公证；首次启动被阻止时，请在「系统设置 → 隐私与安全性」允许打开。\n'
     body += '\n`.app.tar.gz` 是 Mac 自动更新附件，手动安装请选择 DMG。所有安装包均可用 `SHA256SUMS` 校验。\n'

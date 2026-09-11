@@ -8,6 +8,7 @@ import { ACCOUNT_COMPANIES, createAccountAuth } from './account-auth.mjs';
 import { createNotifier } from './notifier.mjs';
 import { createEquipmentStore } from './equipment-store.mjs';
 import { createWorkspaceStore } from './workspace-store.mjs';
+import { createManagedServerStore } from './managed-server-store.mjs';
 import { validateEquipmentTarget, collectRequestedEquipment } from './equipment-workflow.mjs';
 import { compressEquipmentPhoto, validatePhotoBody } from './equipment-photo.mjs';
 
@@ -94,6 +95,7 @@ export function createTeamServer(overrides = {}) {
   const equipmentStore = createEquipmentStore({ dbPath: config.dbPath, now: config.now, enforceCompanies: config.mode === 'account' });
   const workspaceStore = createWorkspaceStore({ dbPath: config.dbPath, now: config.now, resolveMember: id => auth.getMemberIdentity?.(id),
     validateEquipmentTarget, onCollectEquipment: value => collectRequestedEquipment({ ...value, resolveMember: id => auth.getMemberIdentity?.(id) }) });
+  const managedServerStore = config.mode === 'account' ? createManagedServerStore({ dbPath: config.dbPath, now: config.now }) : null;
   if (config.mode === 'demo' && config.seedDemo !== false) store.seedDemo();
   let timer, closing = false, notificationRun = null, closeRun = null;
   const handlers = new Set();
@@ -171,6 +173,27 @@ export function createTeamServer(overrides = {}) {
       // Every business route, including equipment and photos, requires membership.
       const user = requireBusinessMember(session);
       if (['POST', 'PATCH', 'PUT', 'DELETE'].includes(req.method)) auth.verifyWrite(req, session);
+      if (url.pathname === '/api/servers' || url.pathname.startsWith('/api/servers/')) {
+        if (!managedServerStore) throw new ApiError(403, 'ACCOUNT_REQUIRED', '请使用团队账号登录服务器目录');
+        const canFilter = req.method === 'GET' && ['/api/servers', '/api/servers/members'].includes(url.pathname);
+        if ((url.search && !canFilter) || [...url.searchParams.keys()].some(key => key !== 'company') || url.searchParams.getAll('company').length > 1 || (url.searchParams.has('company') && !ACCOUNT_COMPANIES.includes(url.searchParams.get('company')))) throw new ApiError(422, 'INVALID_INPUT', '服务器查询参数无效');
+        const company = url.searchParams.get('company') ?? undefined;
+        if (url.pathname === '/api/servers') {
+          if (req.method === 'GET') { json(res, 200, managedServerStore.list(user, company)); return; }
+          if (req.method === 'POST') { json(res, 201, { server: managedServerStore.create(body, user) }); return; }
+        }
+        if (url.pathname === '/api/servers/members' && req.method === 'GET') {
+          json(res, 200, { members: managedServerStore.members(user, company) }); return;
+        }
+        const serverMatch = /^\/api\/servers\/([a-f0-9-]{36})(?:\/(grants))?$/.exec(url.pathname);
+        if (serverMatch) {
+          const [, id, action] = serverMatch;
+          if (!action && req.method === 'GET') { json(res, 200, { server: managedServerStore.get(id, user) }); return; }
+          if (!action && req.method === 'PATCH') { json(res, 200, { server: managedServerStore.update(id, body, user) }); return; }
+          if (action === 'grants' && req.method === 'PUT') { json(res, 200, { server: managedServerStore.grant(id, body, user) }); return; }
+        }
+        throw new ApiError(405, 'METHOD_NOT_ALLOWED', '服务器目录不支持此操作');
+      }
       const reportMatch = /^\/api\/workspace\/reports\/([^/]+)(?:\/(reviewer|review))?$/.exec(url.pathname);
       const requestMatch = /^\/api\/workspace\/requests\/([^/]+)$/.exec(url.pathname);
       if (url.pathname.startsWith('/api/workspace/')) {
@@ -341,7 +364,7 @@ export function createTeamServer(overrides = {}) {
       // disconnected. Keep auth and SQLite alive until those handlers settle.
       while (handlers.size) await Promise.allSettled([...handlers]);
       if (notificationRun) await notificationRun.catch(() => {});
-      workspaceStore.close(); auth.close(); equipmentStore.close(); store.close();
+      managedServerStore?.close(); workspaceStore.close(); auth.close(); equipmentStore.close(); store.close();
     })();
     return closeRun;
   }

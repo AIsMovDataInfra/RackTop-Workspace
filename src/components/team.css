@@ -10,3 +10,6 @@
 .team-account-company > div { display: flex; align-items: baseline; gap: 9px; }
 .team-account-company dt { color: var(--text-secondary); }
 .team-account-company dd { margin: 0; font-weight: 600; }
+.team-account .team-actions { flex-wrap: wrap; }
+.team-company-switch { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: calc(12px + var(--font-adjust, 0px)); color: var(--text-secondary); }
+.team-company-switch select { min-height: 36px; max-width: 100%; padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-solid); color: var(--text); font: inherit; }

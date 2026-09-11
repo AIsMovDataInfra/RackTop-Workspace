@@ -16,7 +16,7 @@ function browser(auth) {
     request(method = 'GET', headers = {}) { return { method, socket: { remoteAddress: '127.0.0.1' },
       headers: { host: 'team.example.test', cookie, ...(method === 'GET' ? {} : { origin: BASE.publicUrl, 'x-csrf-token': csrfToken }), ...headers } }; },
     async call(path, method = 'GET', body, headers = {}) {
-      const responseHeaders = new Map(), req = this.request(method, headers);
+      const responseHeaders = new Map(), req = { ...this.request(method, headers), url: path };
       const res = { statusCode: 200, getHeader(key) { return responseHeaders.get(key.toLowerCase()); },
         setHeader(key, value) { responseHeaders.set(key.toLowerCase(), value); }, end(value) { this.text = value; } };
       assert.equal(await auth.handle(req, res, new URL(path, BASE.publicUrl), body), true);
@@ -71,7 +71,7 @@ test('only the single super administrator sees member profiles; ordinary admin c
   assert.equal(listed.length, 3); assert.equal(listed.filter(row => row.isSuperAdmin).length, 1);
   assert.equal(listed.find(row => row.id === seeded.id).isSuperAdmin, true);
   assert.equal(listed.find(row => row.username === '员工').company, null);
-  const keys = ['id', 'username', 'name', 'role', 'isSuperAdmin', 'company', 'version', 'createdAt', 'recoveryRequestedAt','avatar'].sort();
+  const keys = ['id', 'username', 'name', 'role', 'isSuperAdmin', 'company', 'companies', 'version', 'createdAt', 'recoveryRequestedAt','avatar'].sort();
   for (const row of listed) assert.deepEqual(Object.keys(row).sort(), keys);
   await assert.rejects(admin.call('/api/admin/members?all=true'), { status: 422 });
   await assert.rejects(admin.call('/api/admin/members', 'POST', { username: '伪造', name: '伪造', password: '密', company: '西浦', role: 'admin' }), { status: 422 });
@@ -242,4 +242,79 @@ test('super administrator creates employees from one fixed name and preserves ca
   assert.equal(auth.getMemberIdentity(row.id), null);
   const replacement = (await admin.call('/api/admin/members', 'POST', { name: 'Alex 实验员', password: '新', company: '西浦' })).payload.member;
   assert.notEqual(replacement.id, row.id);
+});
+
+test('multiple memberships use one CAS update, preserve the primary, and keep old company writes compatible', async t => {
+  const { auth, admin, seeded } = await setup(t);
+  const row = (await admin.call('/api/admin/members', 'POST', { name: '多组织成员', password: '密', companies: ['西浦', 'A公司'] })).payload.member;
+  assert.deepEqual(row.companies, ['A公司', '西浦']); assert.equal(row.company, 'A公司');
+  assert.equal(auth.hasCompanyMembership(row.id, '西浦'), true);
+  assert.equal(auth.hasCompanyMembership(row.id, 'B公司'), false);
+  assert.equal(auth.hasCompanyMembership(seeded.id, '西浦'), false, 'superadmin cross-company authority is explicit, not a membership');
+  const changed = (await admin.call(`/api/admin/members/${row.id}`, 'PATCH', { version: row.version, companies: ['A公司', 'B公司', '西浦'] })).payload.member;
+  assert.equal(changed.version, row.version + 1); assert.equal(changed.company, 'A公司');
+  await assert.rejects(admin.call(`/api/admin/members/${row.id}`, 'PATCH', { version: row.version, companies: [] }), { code: 'VERSION_CONFLICT' });
+  const noOp = (await admin.call(`/api/admin/members/${row.id}`, 'PATCH', { version: changed.version, companies: ['西浦', 'B公司', 'A公司'] })).payload.member;
+  assert.equal(noOp.version, changed.version);
+  const legacy = (await admin.call(`/api/admin/members/${row.id}`, 'PATCH', { version: changed.version, company: '西浦' })).payload.member;
+  assert.deepEqual(legacy.companies, ['西浦']); assert.equal(legacy.company, '西浦');
+  for (const invalid of [{ companies: ['A公司', 'A公司'] }, { companies: ['bad'] }, { companies: null }, { company: 'A公司', companies: ['A公司'] }]) {
+    await assert.rejects(admin.call(`/api/admin/members/${row.id}`, 'PATCH', { version: legacy.version, ...invalid }), { code: 'INVALID_COMPANY' });
+  }
+  const pending = (await admin.call(`/api/admin/members/${row.id}`, 'PATCH', { version: legacy.version, companies: [] })).payload.member;
+  assert.equal(pending.company, null); assert.deepEqual(pending.companies, []); assert.equal(auth.hasCompanyMembership(row.id, '西浦'), false);
+  assert.deepEqual(auth.getMemberIdentity(row.id).companies, []);
+  await admin.call(`/api/admin/members/${row.id}`, 'DELETE', { version: pending.version });
+  assert.equal(auth.hasCompanyMembership(row.id, '西浦'), false);
+});
+
+test('legacy company and existing browser/device grants migrate once without restoring revoked memberships', async t => {
+  const dbPath = temporary(t), browserToken = randomBytes(32).toString('base64url'), deviceToken = randomBytes(32).toString('base64url');
+  const db = new DatabaseSync(dbPath);
+  db.exec(`CREATE TABLE account_users(id TEXT PRIMARY KEY,username TEXT NOT NULL UNIQUE,name TEXT NOT NULL,name_key TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,role TEXT NOT NULL,created_at INTEGER NOT NULL,company TEXT);
+    CREATE TABLE account_sessions(token_hash TEXT PRIMARY KEY,user_id TEXT,kind TEXT NOT NULL,device_name TEXT,remember_me INTEGER NOT NULL DEFAULT 0,expires_at INTEGER NOT NULL,created_at INTEGER NOT NULL);`);
+  db.prepare('INSERT INTO account_users VALUES(?,?,?,?,?,?,?,?)').run('legacy-member', 'legacy', '原成员', '原成员', 'unchanged-hash', 'member', 1000, '西浦');
+  for (const [token, kind] of [[browserToken, 'browser'], [deviceToken, 'device']]) db.prepare('INSERT INTO account_sessions VALUES(?,?,?,NULL,0,?,?)')
+    .run(createHash('sha256').update(token).digest('base64url'), 'legacy-member', kind, Date.now() + 60_000, 1000);
+  let auth = createAccountAuth({ ...BASE, dbPath });
+  const request = (kind, header = {}) => ({ method: 'GET', url: '/api/equipment', headers: { host: 'team.example.test',
+    ...(kind === 'browser' ? { cookie: `__Host-racktop_team_account_session=${browserToken}` } : { authorization: `Bearer ${deviceToken}` }), ...header } });
+  for (const kind of ['browser', 'device']) {
+    assert.equal(auth.resolve(request(kind)).user.company, '西浦'); assert.deepEqual(auth.resolve(request(kind)).user.companies, ['西浦']);
+  }
+  assert.equal(db.prepare('SELECT password_hash FROM account_users').get().password_hash, 'unchanged-hash');
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM account_sessions').get().n, 2);
+  auth.close();
+  db.prepare('DELETE FROM account_user_companies WHERE user_id=?').run('legacy-member');
+  // Deliberately retain the legacy column to prove startup is not an ongoing grant source.
+  auth = createAccountAuth({ ...BASE, dbPath }); t.after(() => auth.close()); t.after(() => db.close());
+  assert.equal(auth.hasCompanyMembership('legacy-member', '西浦'), false);
+  for (const kind of ['browser', 'device']) {
+    assert.equal(auth.resolve(request(kind)).user.company, null);
+    assert.throws(() => auth.resolve(request(kind, { 'x-racktop-company': encodeURIComponent('西浦') })), { code: 'COMPANY_CHANGED' });
+  }
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM account_auth_meta WHERE key='company_memberships_v1'").get().n, 1);
+});
+
+test('membership removal and deletion revoke matching server grants atomically and rejoining does not restore them', async t => {
+  const dbPath = temporary(t), { auth, admin } = await setup(t, { dbPath });
+  const db = new DatabaseSync(dbPath); t.after(() => db.close());
+  db.exec(`CREATE TABLE managed_servers(id TEXT PRIMARY KEY,company TEXT NOT NULL);
+    CREATE TABLE managed_server_grants(server_id TEXT NOT NULL,user_id TEXT NOT NULL,PRIMARY KEY(server_id,user_id));
+    INSERT INTO managed_servers VALUES('server-a','A公司'),('server-x','西浦');`);
+  let member = (await admin.call('/api/admin/members', 'POST', { name: '共享授权成员', password: '密', companies: ['A公司', '西浦'] })).payload.member;
+  for (const id of ['server-a', 'server-x']) db.prepare('INSERT INTO managed_server_grants VALUES(?,?)').run(id, member.id);
+  db.exec("CREATE TRIGGER failed_grant_revoke BEFORE DELETE ON managed_server_grants BEGIN SELECT RAISE(ABORT,'fixture grant failure'); END");
+  await assert.rejects(admin.call(`/api/admin/members/${member.id}`, 'PATCH', { version: member.version, companies: ['A公司'] }), /fixture grant failure/);
+  assert.deepEqual(auth.getMemberIdentity(member.id).companies, ['A公司', '西浦']);
+  assert.equal(auth.getMemberIdentity(member.id).version, member.version);
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM managed_server_grants').get().n, 2);
+  db.exec('DROP TRIGGER failed_grant_revoke');
+  member = (await admin.call(`/api/admin/members/${member.id}`, 'PATCH', { version: member.version, companies: ['A公司'] })).payload.member;
+  assert.deepEqual(db.prepare('SELECT server_id FROM managed_server_grants').all().map(row => row.server_id), ['server-a']);
+  member = (await admin.call(`/api/admin/members/${member.id}`, 'PATCH', { version: member.version, companies: ['A公司', '西浦'] })).payload.member;
+  assert.deepEqual(db.prepare('SELECT server_id FROM managed_server_grants').all().map(row => row.server_id), ['server-a']);
+  await admin.call(`/api/admin/members/${member.id}`, 'DELETE', { version: member.version });
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM managed_server_grants').get().n, 0);
 });

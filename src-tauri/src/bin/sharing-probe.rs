@@ -132,7 +132,7 @@ fn server_context(database: &Path, id: &str) -> Result<ServerContext, String> {
         "SELECT id,name,location,host,port,username,ssh_alias,identity_file,proxy_jump,tags_json,sampling_interval_seconds,history_retention_days,remote_history_enabled,remote_history_last_sync_at,auth_method,status,last_error,last_seen_at,sort_order,proxy_use_password,credential_storage_state FROM servers WHERE id=?1",
         [id], |row| {
             let tags: String = row.get(9)?;
-            Ok((Server {
+            Ok((Server { managed: None,
                 id: row.get(0)?, name: row.get(1)?, location: row.get(2)?, host: row.get(3)?, port: row.get(4)?, username: row.get(5)?,
                 ssh_alias: row.get(6)?, identity_file: row.get(7)?, proxy_jump: row.get(8)?, tags: serde_json::from_str(&tags).unwrap_or_default(),
                 sampling_interval_seconds: row.get(10)?, history_retention_days: row.get(11)?, remote_history_enabled: row.get(12)?,

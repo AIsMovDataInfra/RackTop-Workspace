@@ -13,12 +13,12 @@ async function mount() {
   return {container,open}
 }
 describe('team workspace sidebar',()=>{
-  it('opens by mouse hover, exposes the four exact destinations, and closes outside',async()=>{
+  it('opens by mouse hover, exposes the five exact destinations, and closes outside',async()=>{
     const {container,open}=await mount()
     const group=container.firstElementChild!
     await act(async()=>group.dispatchEvent(new MouseEvent('mouseover',{bubbles:true})))
-    expect(container.querySelector('nav')?.textContent).toBe('设备管理周报与绩效算力预约设备申请与领取')
-    for (const [label,path] of [['设备管理','/equipment'],['周报与绩效','/reports'],['算力预约','/'],['设备申请与领取','/requests']]) {
+    expect(container.querySelector('nav')?.textContent).toBe('设备管理服务器目录周报与绩效算力预约设备申请与领取')
+    for (const [label,path] of [['设备管理','/equipment'],['服务器目录','/servers'],['周报与绩效','/reports'],['算力预约','/'],['设备申请与领取','/requests']]) {
       await act(async()=>container.querySelector<HTMLButtonElement>('[aria-label="展开团队工作台"]')!.click())
       const item=[...container.querySelectorAll<HTMLButtonElement>('nav button')].find(button=>button.textContent===label)!
       await act(async()=>item.click())

@@ -1,16 +1,18 @@
-import { act } from 'react'
+import { act, useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import App from './App'
 import { api, ACCOUNT_CHANGED_EVENT, SESSION_EXPIRED_EVENT } from './api'
 import { EquipmentWorkspace } from './EquipmentWorkspace'
 import { MembersWorkspace } from './MembersWorkspace'
+import { ServersWorkspace } from './ServersWorkspace'
 import { Workspace } from './Workspace'
 import type { Session } from './types'
 
 vi.mock('./Workspace', () => ({ Workspace: vi.fn(() => <div>预约工作台</div>) }))
 vi.mock('./EquipmentWorkspace', () => ({ EquipmentWorkspace: vi.fn(() => <div>设备工作台</div>) }))
 vi.mock('./MembersWorkspace', () => ({ MembersWorkspace: vi.fn(() => <div>成员管理工作台</div>) }))
+vi.mock('./ServersWorkspace', () => ({ ServersWorkspace: vi.fn(() => <div>服务器目录工作台</div>) }))
 ;(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 const anonymous: Session = { user: null, csrfToken: 'test-csrf', authMode: 'account', feishuConfigured: false, notifications: { configured: false }, timezone: 'Asia/Shanghai' }
 const pending: Session = { ...anonymous, user: { id: 'test-member', name: '待分配员工', username: '中', role: 'member', isSuperAdmin: false, company: null } }
@@ -23,10 +25,39 @@ beforeEach(() => {
   vi.mocked(Workspace).mockImplementation(() => <div>预约工作台</div>)
   vi.mocked(EquipmentWorkspace).mockImplementation(() => <div>设备工作台</div>)
   vi.mocked(MembersWorkspace).mockImplementation(() => <div>成员管理工作台</div>)
+  vi.mocked(ServersWorkspace).mockImplementation(() => <div>服务器目录工作台</div>)
 })
 afterEach(() => { act(() => root.unmount()); container.remove(); vi.useRealTimers(); vi.restoreAllMocks() })
 async function mount() { await act(async () => root.render(<App/>)) }
 async function click(text: string) { const button = [...container.querySelectorAll('button')].find((item) => item.textContent === text)!; expect(button, text).toBeDefined(); await act(async () => button.click()) }
+
+it('opens the authorized server directory with the shared workspace props', async () => {
+  window.history.replaceState({}, '', '/servers')
+  vi.spyOn(api, 'session').mockResolvedValue(assigned)
+  await mount()
+  expect(container.textContent).toBe('服务器目录工作台')
+  expect(ServersWorkspace).toHaveBeenCalledWith(expect.objectContaining({ session: assigned, navigate: expect.any(Function), onSessionChanged: expect.any(Function) }), undefined)
+})
+
+it('remounts business content on organization switch and ignores delayed data from the previous organization', async () => {
+  let finish!: () => void
+  const cleanup = vi.fn()
+  vi.spyOn(api, 'session').mockResolvedValue({ ...assigned, user: { ...assigned.user!, company: 'A公司', companies: ['A公司', '西浦'] } })
+  vi.mocked(Workspace).mockImplementation(function Fixture({ session, onSessionChanged }) {
+    const [data, setData] = useState('loading')
+    useEffect(() => {
+      let alive = true
+      if (session.user!.company === 'A公司') finish = () => { if (alive) setData('PRIVATE_A_DATA') }
+      else setData('B_DATA')
+      return () => { alive = false; cleanup() }
+    }, [])
+    return <><p>{data}</p><button onClick={() => onSessionChanged!({ ...session, user: { ...session.user!, company: '西浦' } })}>切换组织</button></>
+  })
+  await mount(); await click('切换组织')
+  expect(cleanup).toHaveBeenCalledOnce(); expect(container.textContent).toContain('B_DATA')
+  await act(async () => finish())
+  expect(container.textContent).not.toContain('PRIVATE_A_DATA')
+})
 
 it('does not mount any business workspace before a company is assigned, while settings and password change remain available', async () => {
   vi.spyOn(api, 'session').mockResolvedValue(pending)

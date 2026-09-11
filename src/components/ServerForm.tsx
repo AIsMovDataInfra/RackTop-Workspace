@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { AlertTriangle, ArrowRight, Check, ChevronRight, Copy, Database, KeyRound, Terminal, X } from 'lucide-react'
-import type { ServerDraft } from '../types/models'
+import type { Server, ServerDraft } from '../types/models'
 import { api } from '../services/api'
 import { sshKeyManagerApi, type SshKeyInfo } from '../services/sshKeyManager'
 import { RACKTOP_MANAGED_IDENTITY_PATH, sshSetupTargetValidationMessage, unixSshSetupScript, windowsSshSetupScript } from '../utils/sshSetup'
@@ -22,6 +22,7 @@ export function splitServerTagInput(value: string) {
 
 interface ServerFormProps {
   initial?: Partial<ServerDraft>
+  managed?: Server['managed']
   defaultRemoteHistoryEnabled?: boolean
   showGuide?: boolean
   onGuideDismiss?: () => void
@@ -29,7 +30,7 @@ interface ServerFormProps {
   onSave: (draft: ServerDraft) => Promise<void>
 }
 
-export function ServerForm({ initial, defaultRemoteHistoryEnabled = true, showGuide = true, onGuideDismiss, onClose, onSave }: ServerFormProps) {
+export function ServerForm({ initial, managed, defaultRemoteHistoryEnabled = true, showGuide = true, onGuideDismiss, onClose, onSave }: ServerFormProps) {
   const [draft, setDraft] = useState<ServerDraft>({
     id: initial?.id,
     name: initial?.name ?? '',
@@ -44,8 +45,8 @@ export function ServerForm({ initial, defaultRemoteHistoryEnabled = true, showGu
     proxyPassword: '',
     saveProxyPassword: initial?.saveProxyPassword ?? false,
     tags: initial?.tags ?? [],
-    samplingIntervalSeconds: 2,
-    historyRetentionDays: 90,
+    samplingIntervalSeconds: initial?.samplingIntervalSeconds ?? 2,
+    historyRetentionDays: initial?.historyRetentionDays ?? 90,
     remoteHistoryEnabled: initial?.remoteHistoryEnabled ?? defaultRemoteHistoryEnabled,
     authMethod: initial?.authMethod ?? 'sshAgent',
     savePassword: initial?.savePassword ?? true,
@@ -186,7 +187,7 @@ export function ServerForm({ initial, defaultRemoteHistoryEnabled = true, showGu
     try {
       await navigator.clipboard.writeText(setupScript)
       if ('__TAURI_INTERNALS__' in window) {
-        await invoke('open_setup_terminal', { script: setupScript })
+        await invoke('open_setup_terminal', { script: setupScript, draft })
       } else {
         setError('网页预览已复制命令；请在本机打开 Terminal 或 PowerShell 后粘贴。')
       }
@@ -267,14 +268,15 @@ export function ServerForm({ initial, defaultRemoteHistoryEnabled = true, showGu
         </header>
         <form onSubmit={submit} className="server-form">
           <div className="server-form__body">
+            {managed && <p className="proxy-auth-hint" role="status">此服务器由{managed.company}统一维护。连接地址自动同步；在这里配置你本机使用的密码或密钥。</p>}
             <div className="form-grid form-grid--2">
-              <label className={!draft.name.trim() && error ? 'field-error' : undefined}>显示名称<input aria-invalid={!draft.name.trim() && Boolean(error)} value={draft.name} maxLength={MAX_SERVER_NAME_LENGTH} onChange={(event) => { set('name', event.target.value); if (error) setError(null) }} placeholder="训练服务器 A" />{!draft.name.trim() && error && <small className="field-error__message">服务器名称不能为空</small>}</label>
-              <label>服务器位置<input value={draft.location ?? ''} onChange={(event) => set('location', event.target.value)} placeholder="例如：实验室 301 / R2 机架 / U18" /></label>
+              <label className={!draft.name.trim() && error ? 'field-error' : undefined}>显示名称<input aria-invalid={!draft.name.trim() && Boolean(error)} value={draft.name} readOnly={!!managed} maxLength={MAX_SERVER_NAME_LENGTH} onChange={(event) => { set('name', event.target.value); if (error) setError(null) }} placeholder="训练服务器 A" />{!draft.name.trim() && error && <small className="field-error__message">服务器名称不能为空</small>}</label>
+              <label>服务器位置<input value={draft.location ?? ''} readOnly={!!managed} onChange={(event) => set('location', event.target.value)} placeholder="例如：实验室 301 / R2 机架 / U18" /></label>
             </div>
             <div className="form-grid form-grid--host">
-              <label>主机地址<input required aria-invalid={setupCopyAttempted && !draft.host.trim()} value={draft.host} onChange={(event) => set('host', event.target.value)} placeholder="10.0.0.10" /></label>
-              <label>端口<input required type="number" min="1" max="65535" value={draft.port} onChange={(event) => set('port', Number(event.target.value))} /></label>
-              <label>用户名<input required aria-invalid={setupCopyAttempted && !draft.username.trim()} value={draft.username} onChange={(event) => set('username', event.target.value)} placeholder="researcher" /></label>
+              <label>主机地址<input required aria-invalid={setupCopyAttempted && !draft.host.trim()} value={draft.host} readOnly={!!managed} onChange={(event) => set('host', event.target.value)} placeholder="10.0.0.10" /></label>
+              <label>端口<input required type="number" min="1" max="65535" value={draft.port} readOnly={!!managed} onChange={(event) => set('port', Number(event.target.value))} /></label>
+              <label>用户名<input required aria-invalid={setupCopyAttempted && !draft.username.trim()} value={draft.username} readOnly={!!managed} onChange={(event) => set('username', event.target.value)} placeholder="researcher" /></label>
             </div>
               <fieldset className={!initial?.id && draft.authMethod === 'sshAgent' && error && !sshSetupConfirmed ? 'field-error' : undefined}>
               <legend>认证方式</legend>
@@ -284,7 +286,7 @@ export function ServerForm({ initial, defaultRemoteHistoryEnabled = true, showGu
                   ['privateKey', '私钥'],
                   ['sshConfig', 'SSH Config'],
                   ['password', '密码'],
-                ] as const).map(([value, label]) => (
+                ] as const).filter(([value]) => !managed || value !== 'sshConfig').map(([value, label]) => (
                   <button key={value} type="button" className={draft.authMethod === value ? 'is-selected' : ''} onClick={() => selectAuthMethod(value)}>{label}</button>
                 ))}
               </div>
@@ -320,7 +322,7 @@ export function ServerForm({ initial, defaultRemoteHistoryEnabled = true, showGu
                 <label className="checkbox-card"><input type="checkbox" checked={draft.savePassword ?? true} onChange={(event) => set('savePassword', event.target.checked)} /><span>保存到系统钥匙串</span></label>
               </div>
             )}
-            {draft.authMethod === 'sshAgent' && (
+            {draft.authMethod === 'sshAgent' && !managed && (
               <details className="key-guide">
                 <summary>
                   <span className="key-guide__summary-icon"><KeyRound size={17} /></span>
@@ -337,8 +339,8 @@ export function ServerForm({ initial, defaultRemoteHistoryEnabled = true, showGu
               </details>
             )}
             <div className="form-grid form-grid--2">
-              <label>跳板机 ProxyJump<input value={draft.proxyJump ?? ''} onChange={(event) => setDraft((current) => ({ ...current, proxyJump: event.target.value, proxyPassword: '', proxyUsePassword: event.target.value.trim() ? current.proxyUsePassword : false }))} placeholder="user@jump.example.com:22（可选）" /></label>
-              <label>标签<div className="server-tag-input" onClick={(event) => event.currentTarget.querySelector('input')?.focus()}>{draft.tags.map((tag, index) => <span className="server-tag-input__token" key={`${tag}-${index}`}>{tag}</span>)}<input aria-label="添加服务器标签" value={tagText} onChange={(event) => updateTagText(event.target.value)} onBlur={commitTagText} onKeyDown={(event) => { if ((event.key === 'Backspace' || event.key === 'Delete') && editLastTag()) event.preventDefault() }} placeholder={draft.tags.length === 0 ? 'lab, h100' : ''} /></div></label>
+              <label>跳板机 ProxyJump<input value={draft.proxyJump ?? ''} readOnly={!!managed} onChange={(event) => setDraft((current) => ({ ...current, proxyJump: event.target.value, proxyPassword: '', proxyUsePassword: event.target.value.trim() ? current.proxyUsePassword : false }))} placeholder="user@jump.example.com:22（可选）" /></label>
+              <label>标签<div className="server-tag-input" onClick={(event) => event.currentTarget.querySelector('input')?.focus()}>{draft.tags.map((tag, index) => <span className="server-tag-input__token" key={`${tag}-${index}`}>{tag}</span>)}<input aria-label="添加服务器标签" disabled={!!managed} value={tagText} onChange={(event) => updateTagText(event.target.value)} onBlur={commitTagText} onKeyDown={(event) => { if ((event.key === 'Backspace' || event.key === 'Delete') && editLastTag()) event.preventDefault() }} placeholder={draft.tags.length === 0 ? 'lab, h100' : ''} /></div></label>
             </div>
             {draft.proxyJump?.trim() && !/Windows|Macintosh/i.test(navigator.userAgent) && (
               <fieldset className="proxy-auth-fields">

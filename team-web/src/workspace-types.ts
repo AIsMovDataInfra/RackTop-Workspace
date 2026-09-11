@@ -9,7 +9,7 @@ export interface WeeklyReport {
   reviewedBy: string | null; reviewedName: string | null; reviewedAt: string | null; submittedAt: string | null
   version: number; createdAt: string; updatedAt: string
 }
-export interface ReportInput { authorId?: string; weekStart: string; todos: WorkTodo[]; nextPlan: string; status: 'draft' | 'submitted' }
+export interface ReportInput { authorId?: string; company?: Company; weekStart: string; todos: WorkTodo[]; nextPlan: string; status: 'draft' | 'submitted' }
 export interface WeeklyStatisticsRow {
   authorId: string; name: string; company: Company | null; weekStart: string; weekEnd: string
   status: 'missing' | 'draft' | 'submitted' | 'reviewed'; reportId: string | null

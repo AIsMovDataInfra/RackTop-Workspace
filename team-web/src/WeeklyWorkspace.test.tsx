@@ -40,6 +40,33 @@ async function submit(selector: string) { await act(async () => container.queryS
 beforeEach(() => { container = document.createElement('div'); document.body.append(container); root = createRoot(container); vi.spyOn(workspaceApi, 'reports').mockResolvedValue({ reports: [report] }); vi.spyOn(workspaceApi, 'report').mockResolvedValue({ report, history: [] }); vi.spyOn(workspaceApi, 'reportStatistics').mockImplementation(async filters => statistics(filters.weekStart)); vi.spyOn(api, 'members').mockResolvedValue({ members: [author, reviewer, admin, outsider, pending] }); expired.mockClear() })
 afterEach(() => { act(() => root.unmount()); container.remove(); vi.restoreAllMocks() })
 
+it('creates reports in the selected author membership and accepts reviewers with a matching secondary membership', async () => {
+  const multiAuthor = { ...author, companies: ['A公司', '西浦'] as ('A公司' | '西浦')[] }
+  const multiReviewer = { ...reviewer, company: 'B公司' as const, companies: ['A公司', 'B公司'] as ('A公司' | 'B公司')[] }
+  vi.mocked(api.members).mockResolvedValue({ members: [multiAuthor, multiReviewer, admin] })
+  const create = vi.spyOn(workspaceApi, 'createReport').mockResolvedValue({ report: { ...report, company: '西浦' } })
+  await mount(admin); await click('打开周报')
+  expect([...container.querySelectorAll<HTMLOptionElement>('[name="reviewerId"] option')].map(option => option.value)).toContain(reviewer.id)
+  await click('关闭'); await click('代写成员周报')
+  expect([...container.querySelectorAll<HTMLOptionElement>('[name="reportCompany"] option')].map(option => option.value)).toEqual(['A公司', '西浦'])
+  select('reportCompany', '西浦'); enter('weekStart', '2030-01-07'); await click('保存草稿')
+  expect(create).toHaveBeenCalledWith(expect.objectContaining({ authorId: author.id, company: '西浦', weekStart: '2030-01-07' }))
+})
+
+it('keeps two statistics rows for the same member in different organizations and filters secondary memberships', async () => {
+  vi.mocked(api.members).mockResolvedValue({ members: [{ ...author, companies: ['A公司', '西浦'] }, admin] })
+  vi.mocked(workspaceApi.reportStatistics).mockImplementation(async filters => {
+    const result = statistics(filters.weekStart)
+    return { ...result, rows: [result.rows[0], { ...result.rows[0], company: '西浦', reportId: null, status: 'missing' }], summary: { ...result.summary, expectedCount: 2, submittedCount: 1, unsubmittedCount: 1 } }
+  })
+  const warn = vi.spyOn(console, 'error')
+  await mount(admin); await click('周报统计')
+  expect(container.querySelectorAll('.weekly-statistics-table tbody tr')).toHaveLength(2)
+  select('statisticsCompany', '西浦'); await act(async () => {})
+  expect([...container.querySelectorAll<HTMLOptionElement>('[name="statisticsMember"] option')].map(option => option.value)).toContain(author.id)
+  expect(warn.mock.calls.flat().join(' ')).not.toContain('same key')
+})
+
 it('saves an author draft and submits explicit todo completion, reason, outcome and next plan without fetching the member directory', async () => {
   const create = vi.spyOn(workspaceApi, 'createReport').mockResolvedValue({ report })
   await mount(); expect(api.members).not.toHaveBeenCalled(); await click('写周报')

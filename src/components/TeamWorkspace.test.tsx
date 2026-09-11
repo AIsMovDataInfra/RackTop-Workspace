@@ -27,6 +27,41 @@ beforeEach(()=>{
 })
 afterEach(()=>{act(()=>root.unmount());container.remove();vi.restoreAllMocks();vi.useRealTimers()})
 describe('team workspace',()=>{
+  it('does not expose managed connections in personal inventory uploads or send old managed selections', async()=>{
+    const managed: Server = { ...server, id: 'managed-old', name: '另一组织目录项', managed: { accountId: 'admin', company: '西浦', remoteId: 'remote-old', available: false, reason: '当前组织不可访问', version: 2 } }
+    const status = { ...admin, bindings: { 'local-a': { resourceId: 'personal', lastSyncedAt: null, error: null }, 'managed-old': { resourceId: 'old', lastSyncedAt: null, error: null } } }
+    vi.mocked(teamApi.status).mockResolvedValue(status)
+    const select = vi.spyOn(teamApi, 'select').mockResolvedValue(status)
+    await act(async()=>root.render(<TeamWorkspace servers={[server, managed]} snapshots={{}}/>))
+    expect(container.querySelectorAll('.team-local-row')).toHaveLength(1)
+    expect(container.textContent).not.toContain('另一组织目录项')
+    await click('立即同步')
+    expect(select).toHaveBeenCalledWith(['local-a'])
+  })
+  it('switches an organization without displaying the previous data or carrying its selected servers', async()=>{
+    const accountA: TeamStatus = {...admin, user:{...admin.user!,company:'A公司',companies:['A公司','西浦']}, bindings:{'local-a':{resourceId:'resource-123',lastSyncedAt:null,error:null}}}
+    const accountB: TeamStatus = {...accountA,user:{...accountA.user!,company:'西浦'},bindings:{}}
+    vi.mocked(teamApi.status).mockResolvedValue(accountA)
+    vi.mocked(teamApi.data).mockResolvedValue(privateData)
+    let finish!: (value: TeamStatus) => void
+    const switchCompany = vi.spyOn(teamApi,'switchCompany').mockImplementation(()=>new Promise(resolve=>{finish=resolve}))
+    await mount()
+    expect(container.textContent).toContain('成员专用资源')
+    const selector = container.querySelector<HTMLSelectElement>('select[aria-label="切换当前组织"]')!
+    expect([...selector.options].map(option=>option.value)).toEqual(['A公司','西浦'])
+    await act(async()=>{selector.value='西浦';selector.dispatchEvent(new Event('change',{bubbles:true}))})
+    expect(switchCompany).toHaveBeenCalledWith('西浦')
+    expect(container.textContent).not.toContain('成员专用资源')
+    expect(selector.disabled).toBe(true)
+    vi.mocked(teamApi.status).mockResolvedValue(accountB)
+    vi.mocked(teamApi.data).mockResolvedValue({resources:[{...privateData.resources[0],id:'resource-b',name:'西浦服务器'}],reservations:[]})
+    await act(async()=>finish(accountB))
+    expect(selector.value).toBe('西浦')
+    expect(selector.disabled).toBe(false)
+    expect(container.textContent).toContain('西浦服务器')
+    expect(container.textContent).not.toContain('成员预约记录')
+    expect(container.querySelector<HTMLInputElement>('.team-local-row input')!.checked).toBe(false)
+  })
   it('requires login before requesting or displaying any team data and keeps the registration link reachable',async()=>{
     vi.mocked(teamApi.data).mockResolvedValue(privateData)
     await mount()

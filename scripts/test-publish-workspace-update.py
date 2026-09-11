@@ -38,23 +38,46 @@ class WorkspaceRelease(unittest.TestCase):
         self.manifest = {'version': self.version, 'platforms': {'linux-x86_64-deb': {
             'signature': self.signature,
             'url': f'https://github.com/{publisher.REPO}/releases/download/v{self.version}/{self.package.name}'}}}
+        Path(str(self.flatpak) + '.sig').write_text(self.signature)
+        Path(str(self.flatpak) + '.commit').write_text('a' * 64 + '\n')
+        self.flatpak_manifest = {'version': self.version, 'platforms': {'linux-x86_64-flatpak': {
+            'signature': self.signature, 'commit': 'a' * 64,
+            'url': f'https://github.com/{publisher.REPO}/releases/download/v{self.version}/{self.flatpak.name}'}}}
         self.write_manifest()
 
     def write_manifest(self):
         (self.assets / 'linux-amd64.json').write_text(json.dumps(self.manifest))
+        (self.assets / 'flatpak-amd64.json').write_text(json.dumps(self.flatpak_manifest))
 
-    def test_packages_have_seven_downloads_and_flatpak_stays_out_of_updater(self):
+    def test_packages_have_seven_downloads_and_format_specific_updaters(self):
         packages, mac, linux, signing = publisher.collect_packages(self.assets, self.version)
         self.assertEqual(len(packages), 7)
         self.assertIn(self.flatpak, packages)
         self.assertIn(self.offline, packages)
         self.assertEqual(set(mac), {'darwin-aarch64', 'darwin-x86_64'})
-        self.assertEqual(set(linux), {'linux-x86_64-deb'})
+        self.assertEqual(set(linux), {'linux-x86_64-deb', 'linux-x86_64-flatpak'})
+        self.assertTrue(linux['linux-x86_64-deb']['url'].endswith('.deb'))
+        self.assertTrue(linux['linux-x86_64-flatpak']['url'].endswith('.flatpak'))
+        self.assertEqual(linux['linux-x86_64-flatpak']['commit'], 'a' * 64)
         self.assertEqual(signing, '-unsigned')
         for entry in (mac | linux).values():
             self.assertIn('/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.0.0/', entry['url'])
-            self.assertFalse(entry['url'].endswith('.flatpak'))
             self.assertFalse(entry['url'].endswith('-flatpak-offline.tar.gz'))
+
+    def test_flatpak_feed_rejects_wrong_identity_signature_and_commit(self):
+        original = copy.deepcopy(self.flatpak_manifest)
+        for key, value in [('url', self.manifest['platforms']['linux-x86_64-deb']['url']),
+                           ('signature', 'invalid'), ('commit', 'b' * 64), ('commit', 'bad')]:
+            self.flatpak_manifest = copy.deepcopy(original)
+            self.flatpak_manifest['platforms']['linux-x86_64-flatpak'][key] = value
+            self.write_manifest()
+            with self.assertRaises(ValueError):
+                publisher.collect_packages(self.assets, self.version)
+        self.flatpak_manifest = copy.deepcopy(original)
+        self.flatpak_manifest['version'] = '1.0.0'
+        self.write_manifest()
+        with self.assertRaisesRegex(ValueError, 'version'):
+            publisher.collect_packages(self.assets, self.version)
 
     def test_missing_linux_or_either_mac_cannot_publish(self):
         for path in [self.package, self.flatpak, self.offline, *self.assets.glob('*.dmg')]:
@@ -138,7 +161,7 @@ class WorkspaceRelease(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'asset set'):
             publisher.verify_release_assets(missing, files)
 
-    def test_publication_checksums_include_flatpak_but_feed_remains_debian(self):
+    def test_publication_checksums_and_atomic_feeds_cover_both_linux_formats(self):
         (self.assets / 'docs').mkdir()
         (self.assets / 'docs/Version_overview.md').write_text('## 2.0.0\n\n- 支持 Ubuntu 20.04 安装。\n')
         for name in ['LICENSE', 'NOTICE.md']:
@@ -189,7 +212,7 @@ class WorkspaceRelease(unittest.TestCase):
         self.assertIn('Flatpak 使用独立配置目录', body)
         feeds = publish_feeds.call_args.args[0]
         self.assertEqual(set(feeds), {'linux-amd64.json', 'macos.json'})
-        self.assertEqual(set(feeds['linux-amd64.json']['platforms']), {'linux-x86_64-deb'})
+        self.assertEqual(set(feeds['linux-amd64.json']['platforms']), {'linux-x86_64-deb', 'linux-x86_64-flatpak'})
 
     def test_both_feeds_share_one_commit_and_fast_forward_update(self):
         manifests = {'linux-amd64.json': self.manifest, 'macos.json': {'version': '2.0.0', 'platforms': {}}}

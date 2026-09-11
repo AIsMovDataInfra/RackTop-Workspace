@@ -1,6 +1,6 @@
 [package]
 name = "racktop"
-version = "2.4.0"
+version = "2.5.0"
 description = "Live GPU & CPU monitoring for every server"
 # Original author: Tongzh-SEU and upstream contributors; see ../NOTICE.md.
 # Linux bundle.publisher supplies the Debian maintainer separately.
@@ -68,4 +68,5 @@ tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
 
 [target.'cfg(target_os = "linux")'.dependencies]
+glib = "0.18"
 keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }

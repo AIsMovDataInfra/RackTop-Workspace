@@ -33,6 +33,7 @@ jobs:
       - uses: actions/checkout@v4
       - run: python3 scripts/check-release-version.py
       - run: python3 scripts/test-flatpak-package.py
+      - run: python3 scripts/test-install-racktop.py
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -92,6 +93,16 @@ jobs:
         run: scripts/package-flatpak.sh "$PWD/src-tauri/target/release/bundle/deb/RackTop_${RACKTOP_VERSION}_linux-amd64.deb" "$PWD/src-tauri/target/release/bundle/flatpak"
       - name: Verify installed Flatpak native startup and WebKit
         run: scripts/test-flatpak.sh "$PWD/src-tauri/target/release/bundle/flatpak/RackTop_${RACKTOP_VERSION}_linux-amd64.flatpak" "$RUNNER_TEMP/flatpak-verification"
+      - name: Sign and verify Flatpak application updates
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.LINUX_UPDATER_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+        run: |
+          python3 scripts/sign-flatpak-update.py "src-tauri/target/release/bundle/flatpak/RackTop_${RACKTOP_VERSION}_linux-amd64.flatpak" src-tauri/target/release/racktop-probe
+      - name: Test Flatpak signed update downloads
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: python3 scripts/test-flatpak-update.py src-tauri/target/release/racktop-probe "src-tauri/target/release/bundle/flatpak/RackTop_${RACKTOP_VERSION}_linux-amd64.flatpak"
       - name: Build Ubuntu 20.04 offline Flatpak runtime kit
         run: scripts/package-flatpak-runtime.sh "$PWD/src-tauri/target/release/bundle/flatpak/RackTop_${RACKTOP_VERSION}_linux-amd64.flatpak" "$PWD/src-tauri/target/release/bundle/flatpak"
       - name: Verify offline kit installation without cached runtimes or network
@@ -137,6 +148,8 @@ jobs:
             src-tauri/target/release/bundle/flatpak/*.flatpak
             src-tauri/target/release/bundle/flatpak/*.flatpak.sha256
             src-tauri/target/release/bundle/flatpak/*.flatpak.commit
+            src-tauri/target/release/bundle/flatpak/*.flatpak.sig
+            src-tauri/target/release/bundle/flatpak/flatpak-amd64.json
       - name: Upload verified Ubuntu 20.04 offline Flatpak kit
         uses: actions/upload-artifact@v4
         with:

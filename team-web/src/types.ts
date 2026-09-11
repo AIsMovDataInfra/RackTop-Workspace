@@ -2,7 +2,7 @@ export type Locale = 'zh-CN' | 'en'
 export type Translate = (zh: string, en: string) => string
 export const COMPANY_OPTIONS = ['A公司', 'B公司', 'C公司', '西浦'] as const
 export type Company = typeof COMPANY_OPTIONS[number]
-export interface User { avatar?: string; id: string; name: string; role: 'admin' | 'member'; username?: string; isSuperAdmin?: boolean; company?: Company | null; version?: number }
+export interface User { avatar?: string; id: string; name: string; role: 'admin' | 'member'; username?: string; isSuperAdmin?: boolean; company?: Company | null; companies?: Company[]; version?: number }
 export interface Member extends User { username: string; isSuperAdmin: boolean; company: Company | null; version: number; createdAt: string; recoveryRequestedAt: string | null }
 export interface Gpu { id: string; uuid: string; index: number; model: string; memoryTotalMb: number }
 export interface Resource { id: string; company?: Company | ''; companyVersion?: number; cluster: string; name: string; gpuModel: string; gpuCount: number; notes: string; enabled: boolean; gpus?: Gpu[]; pendingGpus?: Omit<Gpu, 'id'>[] | null; inventoryVersion?: number; inventoryState?: 'manual' | 'synced' | 'conflict'; lastSeenAt?: string | null; observedAt?: string | null; status?: 'online' | 'offline' | 'unknown' }
@@ -34,4 +34,18 @@ export interface Equipment extends EquipmentDraft { id: string; code: string; se
 export interface EquipmentHistory {
   actorName: string; action: 'created' | 'updated'; at: string
   changes: { field: string; oldValue: string | null; newValue: string | null }[]
+}
+
+export function memberCompanies(user: Pick<User, 'company' | 'companies' | 'isSuperAdmin'>): Company[] {
+  if (user.isSuperAdmin) return []
+  return COMPANY_OPTIONS.filter(company => (user.companies ?? (user.company ? [user.company] : [])).includes(company))
+}
+export interface ManagedServer {
+  id: string; company: Company; name: string; host: string; port: number; username: string
+  jump: { host: string; port: number; username: string } | null
+  enabled: boolean; version: number; updatedAt: string; memberIds?: string[]
+}
+export interface ManagedServerDraft {
+  company?: Company; name: string; host: string; port: number; username: string
+  jump?: ManagedServer['jump']; enabled?: boolean; memberIds?: string[]
 }

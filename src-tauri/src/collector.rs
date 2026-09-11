@@ -986,7 +986,7 @@ mod tests {
 
     #[test]
     fn ssh_agent_ignores_stale_identity_file() {
-        let server = Server {
+        let server = Server { managed: None,
             id: "server-1".into(), name: "GPU".into(), location: None, host: "example.com".into(), port: 22,
             username: "user".into(), ssh_alias: None, identity_file: Some("~/.ssh/stale_key".into()), proxy_jump: None, proxy_use_password: false, save_proxy_password: false,
             tags: Vec::new(), sampling_interval_seconds: 2, history_retention_days: 90, remote_history_enabled: false,
@@ -1000,7 +1000,7 @@ mod tests {
 
     #[test]
     fn explicit_private_key_is_restricted_to_that_identity() {
-        let server = Server {
+        let server = Server { managed: None,
             id: "server-1".into(), name: "GPU".into(), location: None, host: "example.com".into(), port: 22,
             username: "user".into(), ssh_alias: None, identity_file: Some("~/.ssh/id_ed25519".into()), proxy_jump: None, proxy_use_password: false, save_proxy_password: false,
             tags: Vec::new(), sampling_interval_seconds: 2, history_retention_days: 90, remote_history_enabled: false,

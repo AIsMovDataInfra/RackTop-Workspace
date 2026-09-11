@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { CalendarDays, Check, ExternalLink, LogIn, LogOut, RefreshCw, Server as ServerIcon, X } from 'lucide-react'
 import { openExternalUrl } from '../services/external'
 import type { Server, Snapshot } from '../types/models'
-import { teamApi, TEAM_URL, type TeamData, type TeamStatus } from '../services/team'
+import { teamApi, TEAM_URL, type TeamCompany, type TeamData, type TeamStatus } from '../services/team'
 
 const emptyStatus: TeamStatus = { url: TEAM_URL, authenticated: false, user: null, bindings: {} }
 const emptyData: TeamData = { resources: [], reservations: [] }
@@ -32,6 +32,7 @@ export function TeamWorkspace({ servers, snapshots }: { servers: Server[]; snaps
   const waitingForCompany = needsCompany(status)
   const allowed = canUseTeam(status)
   const admin = allowed && status.user?.role === 'admin'
+  const personalServers = servers.filter(server => !server.managed)
 
   function clearPrivateData() {
     accountId.current = null
@@ -101,11 +102,19 @@ export function TeamWorkspace({ servers, snapshots }: { servers: Server[]; snaps
   }
   async function synchronize() {
     const attempt = ++generation.current
-    const current = await teamApi.select(selected)
+    const current = await teamApi.select(selected.filter(id => personalServers.some(server => server.id === id)))
     if (attempt !== generation.current) return
     setDirty(false)
     await loadMemberData(current, attempt, () => true, true)
     if (attempt === generation.current && !needsCompany(current)) setNotice(!isMember(current) ? '已停止本机资源同步。' : Object.values(current.bindings).some(b => b.error) ? '已保存选择；部分资源需要处理下方提示。' : '资源已同步，网页与桌面使用同一份资源目录。')
+  }
+  async function switchCompany(company: TeamCompany) {
+    const attempt = ++generation.current
+    setData(emptyData); setSelected([]); setDirty(false)
+    const current = await teamApi.switchCompany(company)
+    if (attempt !== generation.current) return
+    await loadMemberData(current, attempt, () => true, true)
+    if (attempt === generation.current) setNotice(`已切换至${company}，同步选择按组织分别保存。`)
   }
   async function connect() {
     const attempt = ++generation.current
@@ -126,18 +135,20 @@ export function TeamWorkspace({ servers, snapshots }: { servers: Server[]; snaps
   const bookings = data.reservations.filter(r => r.status === 'confirmed' && Date.parse(r.endAt) > Date.now()).sort((a,b) => Date.parse(a.startAt) - Date.parse(b.startAt))
   return <div className="team-workspace">
     <div className="team-toolbar">
-      <p>同事可直接在浏览器预约。这里查看同一份排期，并同步你选定的服务器。</p>
+      <p>管理员在线维护服务器和授权，成员登录后自动接收连接配置，也可查看同一份预约排期。</p>
       <div className="team-actions"><button className="button button--secondary" disabled={!!busy} onClick={() => void run('刷新中', refresh)}><RefreshCw size={15}/>刷新</button><button className="button button--primary" onClick={() => void openWeb()}><ExternalLink size={15}/>打开预约网页</button></div>
     </div>
     {loading && <p className="team-footnote" role="status">正在检查团队登录状态…</p>}
     {error && <div className="team-error" role="alert">{error}</div>}
     {notice && <div className="team-notice" role="status"><Check size={16}/>{notice}</div>}
     <div className="team-account"><div><strong>{authenticated ? status.user?.name : '尚未连接团队账号'}</strong><p>{authenticated ? `${status.user?.username} · ${status.user?.isSuperAdmin ? '超级管理员' : status.user?.role === 'admin' ? '管理员' : '团队成员'}` : '登录团队账号后查看资源与排期；管理员可以同步本机资源。首次使用请在网页注册，注册后即成为成员，由超级管理员分配公司。'}</p>{authenticated && <dl className="team-account-company"><div><dt>所属公司</dt><dd>{status.user?.isSuperAdmin ? '跨公司管理' : status.user?.company || '等待分配'}</dd></div></dl>}</div>
-      {authenticated ? <button className="button button--secondary" disabled={loggingOut} onClick={() => void signOut()}><LogOut size={15}/>退出账号</button> : <button ref={loginButton} className="button button--secondary" onClick={() => setLogin(true)}><LogIn size={15}/>账号登录</button>}
+      <div className="team-actions">{authenticated && !status.user?.isSuperAdmin && (status.user?.companies?.length ?? 0) > 1 && <label className="team-company-switch">当前组织<select aria-label="切换当前组织" value={status.user?.company ?? ''} disabled={!!busy || loggingOut} onChange={event => { const company = event.target.value as TeamCompany; void run('切换组织中', () => switchCompany(company)) }}>{status.user?.companies?.map(company => <option key={company} value={company}>{company}</option>)}</select></label>}
+      {authenticated ? <button className="button button--secondary" disabled={loggingOut} onClick={() => void signOut()}><LogOut size={15}/>退出账号</button> : <button ref={loginButton} className="button button--secondary" onClick={() => setLogin(true)}><LogIn size={15}/>账号登录</button>}</div>
     </div>
     {waitingForCompany && <section className="team-panel" role="status"><div className="team-section-title"><h2>等待分配公司</h2></div><p className="team-footnote">请联系超级管理员为你分配 A公司、B公司、C公司或西浦。分配后点击“刷新”，即可查看团队资源和预约。你也可以打开网页或退出账号。</p></section>}
-    {admin && <section className="team-panel"><div className="team-section-title"><div><h2>同步本机资源</h2><p>每 30 秒同步已选资源。取消勾选会停止上报，已有在线资源及预约不会被删除。</p></div><button className="button button--primary" disabled={!!busy} onClick={() => void run('同步中', synchronize)}>{busy === '同步中' ? busy : dirty ? '保存并同步' : '立即同步'}</button></div>
-      <div className="team-local-list">{servers.map(server => { const binding = status.bindings[server.id]; const snapshot = snapshots[server.id]; return <label key={server.id} className="team-local-row"><input type="checkbox" checked={selected.includes(server.id)} disabled={!!busy} onChange={e => { setDirty(true); setSelected(s => e.target.checked ? [...s,server.id] : s.filter(id => id !== server.id)) }}/><ServerIcon size={17}/><div><strong>{server.name}</strong><small>{snapshot ? `${snapshot.gpus.length} 张 GPU · ${snapshot.gpus[0]?.name ?? 'CPU 服务器'}` : '尚无硬件采样'}</small>{binding?.error && <span className="team-inline-error">{binding.error}</span>}</div><span>{binding ? formatTime(binding.lastSyncedAt) : '未加入'}</span></label>})}{!servers.length && <p className="team-empty">先在 RackTop 添加并连接服务器，再加入团队预约。</p>}</div>
+    {allowed && <section className="team-panel"><div className="team-section-title"><div><h2>团队服务器</h2><p>获授权的服务器每 30 秒自动同步到左侧列表。首次使用或连接地址变化后，请打开“编辑配置”确认本机认证；密码和私钥保留在本机。</p></div><button className="button button--secondary" onClick={() => void openExternalUrl(`${TEAM_URL}/servers`).catch(() => setError(`请在浏览器访问 ${TEAM_URL}/servers`))}><ExternalLink size={15}/>{admin ? '管理服务器与授权' : '查看服务器目录'}</button></div></section>}
+    {admin && <section className="team-panel"><div className="team-section-title"><div><h2>同步本机资源</h2><p>每 30 秒同步已选个人服务器的硬件资源。团队服务器目录单独管理；取消勾选会停止上报，已有在线资源及预约不会被删除。</p></div><button className="button button--primary" disabled={!!busy} onClick={() => void run('同步中', synchronize)}>{busy === '同步中' ? busy : dirty ? '保存并同步' : '立即同步'}</button></div>
+      <div className="team-local-list">{personalServers.map(server => { const binding = status.bindings[server.id]; const snapshot = snapshots[server.id]; return <label key={server.id} className="team-local-row"><input type="checkbox" checked={selected.includes(server.id)} disabled={!!busy} onChange={e => { setDirty(true); setSelected(s => e.target.checked ? [...s,server.id] : s.filter(id => id !== server.id)) }}/><ServerIcon size={17}/><div><strong>{server.name}</strong><small>{snapshot ? `${snapshot.gpus.length} 张 GPU · ${snapshot.gpus[0]?.name ?? 'CPU 服务器'}` : '尚无硬件采样'}</small>{binding?.error && <span className="team-inline-error">{binding.error}</span>}</div><span>{binding ? formatTime(binding.lastSyncedAt) : '未加入'}</span></label>})}{!personalServers.length && <p className="team-empty">可先添加个人服务器并连接后同步，或在网页手动登记预约资源。</p>}</div>
     </section>}
     {allowed && <><section className="team-panel"><div className="team-section-title"><h2>团队资源 <span>{data.resources.filter(r => r.enabled).length}</span></h2></div><div className="team-resource-grid">{data.resources.filter(r => r.enabled).map(resource => <article className="team-resource" key={resource.id}><div><strong>{resource.name}</strong><span className={`team-status ${resource.status === 'online' ? 'is-online' : ''}`}>{resource.inventoryState === 'conflict' ? '硬件变化待核验' : resource.status === 'online' ? '采集在线' : '状态未知'}</span></div><p>{resource.cluster} · {resource.gpuCount} 张 GPU</p><small>{resource.gpuModel || 'CPU 服务器'}</small><small>最近上报：{formatTime(resource.lastSeenAt)}</small><button className="button button--secondary" onClick={() => void openWeb(resource.id)}><CalendarDays size={15}/>查看与预约</button></article>)}</div>{!loading && !data.resources.length && <p className="team-empty">还没有团队资源。管理员同步服务器后，大家即可在这里和网页预约。</p>}</section>
     <section className="team-panel"><div className="team-section-title"><h2>当前与即将开始的预约</h2><span>北京时间</span></div>{bookings.length ? <div className="team-booking-list">{bookings.slice(0,50).map(r => <div className="team-booking" key={r.id}><div><strong>{r.resourceName}</strong><small>{r.scope === 'machine' ? '整机' : `GPU ${r.gpuIndices.join('、')}`}</small></div><span>{r.ownerName}</span><span>{formatTime(r.startAt)} — {formatTime(r.endAt)}</span><button className="button button--secondary" onClick={() => void openWeb(r.resourceId)}>查看</button></div>)}</div> : <p className="team-empty">{loading ? '正在读取预约…' : '当前没有预约。点击“打开预约网页”选择机器和时间。'}</p>}<p className="team-footnote">预约是团队排期，不代表实时 GPU 空闲，也不会终止服务器上的任务。</p></section></>}

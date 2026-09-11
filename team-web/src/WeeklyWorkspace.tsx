@@ -8,7 +8,7 @@ import { WorkModuleFrame } from './WorkModuleFrame'
 import { WeeklyStatisticsView } from './WeeklyStatisticsView'
 import { addCalendarDays, currentReportWeek, normalizeReportWeek, reportWeekRange } from './weekly-dates'
 import { workspaceApi } from './workspace-api'
-import type { Member } from './types'
+import { memberCompanies, type Company, type Member } from './types'
 import type { WeeklyReport, WorkAudit, WorkModuleProps, WorkTodo } from './workspace-types'
 
 const emptyTodo = (): WorkTodo => ({ text: '', completion: 0, unfinishedReason: '', effect: '' })
@@ -32,14 +32,16 @@ export function WeeklyWorkspace(props: WorkModuleProps) {
   const [history, setHistory] = useState<WorkAudit[]>([])
   const [weekStart, setWeekStart] = useState(currentReportWeek)
   const [authorId, setAuthorId] = useState(user?.id || '')
+  const [reportCompany, setReportCompany] = useState<Company | ''>(user?.company || '')
   const [todos, setTodos] = useState<WorkTodo[]>([emptyTodo()])
   const [nextPlan, setNextPlan] = useState('')
   const [reviewerId, setReviewerId] = useState('')
   const [score, setScore] = useState('')
   const [reviewComment, setReviewComment] = useState('')
   const generation = useRef(0)
-  const eligibleAuthors = members.filter(member => !member.isSuperAdmin && member.company)
-  const authorUnavailable = Boolean(!report && user?.isSuperAdmin && !eligibleAuthors.some(member => member.id === authorId))
+  const eligibleAuthors = members.filter(member => !member.isSuperAdmin && memberCompanies(member).length)
+  const authorCompanies = memberCompanies(eligibleAuthors.find(member => member.id === authorId) || {})
+  const authorUnavailable = Boolean(!report && user?.isSuperAdmin && (!reportCompany || !authorCompanies.includes(reportCompany)))
   const editable = !report || (report.status === 'draft' && Boolean(user?.isSuperAdmin || report.authorId === user?.id))
   const canReview = report?.status === 'submitted' && Boolean(user?.isSuperAdmin || (report.reviewerId === user?.id && report.company === user?.company))
   const conflict = formError instanceof ApiError && formError.code === 'VERSION_CONFLICT'
@@ -68,12 +70,12 @@ export function WeeklyWorkspace(props: WorkModuleProps) {
     return () => { window.clearInterval(timer); window.removeEventListener('focus', refresh) }
   }, [open, busy, user?.id, user?.company, user?.isSuperAdmin])
   function setRecord(value: WeeklyReport, entries: WorkAudit[] = []) {
-    setReport(value); setWeekStart(value.weekStart); setAuthorId(value.authorId); setTodos(value.todos.map(todo => ({ ...todo }))); setNextPlan(value.nextPlan)
+    setReport(value); setWeekStart(value.weekStart); setAuthorId(value.authorId); setReportCompany(value.company); setTodos(value.todos.map(todo => ({ ...todo }))); setNextPlan(value.nextPlan)
     setReviewerId(value.reviewerId || ''); setScore(value.score == null ? '' : String(value.score)); setReviewComment(value.reviewComment); setHistory(entries)
   }
   function create() {
     if (!user || (user.isSuperAdmin && !eligibleAuthors.length)) return
-    setReport(null); setHistory([]); setWeekStart(currentReportWeek()); setAuthorId(user.isSuperAdmin ? eligibleAuthors[0].id : user.id)
+    setReport(null); setHistory([]); setWeekStart(currentReportWeek()); setAuthorId(user.isSuperAdmin ? eligibleAuthors[0].id : user.id); setReportCompany(user.isSuperAdmin ? memberCompanies(eligibleAuthors[0])[0] : user.company || '')
     setTodos([emptyTodo()]); setNextPlan(''); setReviewerId(''); setScore(''); setReviewComment(''); setFormError(null); setNotice(''); setOpen(true)
   }
   async function openReport(id: string) {
@@ -88,7 +90,7 @@ export function WeeklyWorkspace(props: WorkModuleProps) {
     const request = generation.current
     setBusy(true); setFormError(null)
     try {
-      const value = report ? await workspaceApi.updateReport(report.id, { version: report.version, todos, nextPlan, status }) : await workspaceApi.createReport({ authorId: user.isSuperAdmin ? authorId : user.id, weekStart, todos, nextPlan, status })
+      const value = report ? await workspaceApi.updateReport(report.id, { version: report.version, todos, nextPlan, status }) : await workspaceApi.createReport({ authorId: user.isSuperAdmin ? authorId : user.id, ...(user.isSuperAdmin && reportCompany ? { company: reportCompany } : {}), weekStart, todos, nextPlan, status })
       if (request !== generation.current) return
       setOpen(false); setReport(null); setNotice(status === 'draft' ? t('草稿已保存。', 'Draft saved.') : t('周报已提交，正文已锁定，等待人工评审。', 'Report submitted. Its contents are locked for manual review.')); setStatisticsRefresh(value => value + 1); await load()
       void value
@@ -115,7 +117,7 @@ export function WeeklyWorkspace(props: WorkModuleProps) {
   const currentRange = reportWeekRange(weekStart) || t('请选择报告周', 'Choose a report week')
   const nextRange = reportWeekRange(addCalendarDays(weekStart, 7)) || t('请选择报告周', 'Choose a report week')
   const shown = reports.filter(item => !filter || [item.authorName, item.company, item.weekStart].some(value => value.toLocaleLowerCase().includes(filter.trim().toLocaleLowerCase())))
-  const eligibleReviewers = report ? members.filter(member => member.id !== report.authorId && (member.isSuperAdmin || member.company === report.company)) : []
+  const eligibleReviewers = report ? members.filter(member => member.id !== report.authorId && (member.isSuperAdmin || memberCompanies(member).includes(report.company))) : []
   const historyAction = (action: string) => ({ 'report-created': t('建立草稿', 'Draft created'), 'report-edited': t('修改草稿', 'Draft edited'), 'report-submitted': t('提交周报', 'Report submitted'), 'reviewer-assigned': t('调整评审人', 'Reviewer changed'), 'report-reviewed': t('人工评分', 'Manual review') } as Record<string, string>)[action] || action
   return <>
     <WorkModuleFrame {...props} section="reports" title={t('周报与绩效', 'Reports and reviews')} subtitle={t('回顾工作、安排计划，并查看人工评审结果。', 'Review your work, plan ahead and read manual feedback.')} modal={open} actions={<><button disabled={loading || busy} onClick={() => { setStatisticsRefresh(value => value + 1); void load() }}><RefreshCw size={16}/>{t('刷新', 'Refresh')}</button><button className="primary" disabled={busy || loading || noEligibleAuthors} aria-describedby={noEligibleAuthors && !loading && !error ? 'weekly-author-unavailable' : undefined} onClick={create}><Plus size={17}/>{createLabel}</button></>}>
@@ -130,7 +132,8 @@ export function WeeklyWorkspace(props: WorkModuleProps) {
     {open && <Dialog title={report ? `${report.authorName} · ${reportWeekRange(report.weekStart)}` : createLabel} subtitle={report?.status === 'submitted' ? t('正文已提交，仅可由授权评审人填写评分。', 'Submitted contents are locked. Authorized reviewers can enter feedback.') : editable ? t('先保存草稿，核对后提交。提交后正文不可修改。', 'Save a draft, then submit when ready. Submitted contents cannot be edited.') : t('作者尚未提交，可查看当前草稿；提交后再填写评分。', 'The author has not submitted yet. You can read the draft and review it after submission.')} t={t} busy={busy} onClose={() => { setOpen(false); setFormError(null) }}>
       <div className="dialog-body">
         <form className="work-report-form" onSubmit={event => { event.preventDefault(); void save('draft') }}>
-          {!report && <div className="field-pair"><label>{t('报告周（任选一天）', 'Report week (choose any day)')}<input name="weekStart" type="date" required value={weekStart} disabled={busy} onChange={event => setWeekStart(normalizeReportWeek(event.target.value))}/></label>{user.isSuperAdmin ? <label>{t('周报作者', 'Report author')}<select name="authorId" required value={authorId} disabled={busy} onChange={event => setAuthorId(event.target.value)}><option value="">{t('选择成员', 'Choose a member')}</option>{eligibleAuthors.map(member => <option key={member.id} value={member.id}>{member.name} · {member.company}</option>)}</select></label> : <p>{user.name} · {user.company}</p>}</div>}
+          {!report && <div className="field-pair"><label>{t('报告周（任选一天）', 'Report week (choose any day)')}<input name="weekStart" type="date" required value={weekStart} disabled={busy} onChange={event => setWeekStart(normalizeReportWeek(event.target.value))}/></label>{user.isSuperAdmin ? <label>{t('周报作者', 'Report author')}<select name="authorId" required value={authorId} disabled={busy} onChange={event => { const id = event.target.value; setAuthorId(id); setReportCompany(memberCompanies(eligibleAuthors.find(member => member.id === id) || {})[0] || '') }}><option value="">{t('选择成员', 'Choose a member')}</option>{eligibleAuthors.map(member => <option key={member.id} value={member.id}>{member.name} · {memberCompanies(member).join('、')}</option>)}</select></label> : <p>{user.name} · {user.company}</p>}</div>}
+          {!report && user.isSuperAdmin && <label>{t('周报所属组织', 'Report organization')}<select name="reportCompany" value={reportCompany} disabled={busy || !authorCompanies.length} required onChange={event => setReportCompany(event.target.value as Company)}>{!authorCompanies.length && <option value="">{t('先选择成员', 'Choose a member first')}</option>}{authorCompanies.map(company => <option key={company}>{company}</option>)}</select></label>}
           {!report && <p className="field-help">{t('选择任意日期，自动归属该周周一至周日。', 'Choose any day to use its Monday–Sunday report week.')}</p>}
           <h3 className="weekly-period-title">{t('本周工作', 'This week’s work')}<span>（{currentRange}）</span></h3>
           {todos.map((todo, index) => <fieldset className="work-todo" key={index} disabled={busy}><legend>{t('工作', 'Task')} {index + 1}</legend><label>{t('Todo 工作项', 'Todo item')}<textarea name={`todo-${index}`} readOnly={!editable} value={todo.text} maxLength={400} onChange={event => setTodos(old => old.map((item, position) => position === index ? { ...item, text: event.target.value } : item))}/></label><label>{t('完成度（%）', 'Completion (%)')}<input name={`completion-${index}`} readOnly={!editable} type="number" min={0} max={100} step="any" value={todo.completion} onChange={event => setTodos(old => old.map((item, position) => position === index ? { ...item, completion: Number(event.target.value) } : item))}/></label>{todo.completion < 100 && <label>{t('未完成原因', 'Reason for unfinished work')}<textarea name={`reason-${index}`} readOnly={!editable} maxLength={1000} value={todo.unfinishedReason} onChange={event => setTodos(old => old.map((item, position) => position === index ? { ...item, unfinishedReason: event.target.value } : item))}/></label>}<label>{t('工作效果', 'Outcome and impact')}<textarea name={`effect-${index}`} readOnly={!editable} maxLength={1000} value={todo.effect} onChange={event => setTodos(old => old.map((item, position) => position === index ? { ...item, effect: event.target.value } : item))}/></label>{editable && <div className="work-todo-actions"><button type="button" aria-label={`${t('移除工作', 'Remove task')} ${index + 1}`} onClick={() => setTodos(old => old.filter((_item, position) => position !== index))}><Trash2 size={15}/>{t('移除此项', 'Remove item')}</button></div>}</fieldset>)}

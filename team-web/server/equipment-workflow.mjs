@@ -12,7 +12,7 @@ export function validateEquipmentTarget({ db, equipmentId, company, category }) 
 // Device use, request status and both audit trails either all commit or all roll back.
 export function collectRequestedEquipment({ db, request, user, at, resolveMember }) {
   const member = resolveMember(request.applicantId);
-  if (!member || member.company !== request.company) throw new ApiError(409, 'APPLICANT_CHANGED', '申请人的账号或公司已变更，请先核实申请');
+  if (!member || !(member.companies ?? [member.company]).includes(request.company)) throw new ApiError(409, 'APPLICANT_CHANGED', '申请人的账号或公司已变更，请先核实申请');
   const item = db.prepare('SELECT * FROM equipment WHERE id=?').get(request.equipmentId);
   if (!item || item.company !== request.company) throw new ApiError(409, 'EQUIPMENT_CHANGED', '设备所属公司已变更，请先核实申请');
   if (item.category !== request.category || item.status !== 'available' || item.current_user) throw new ApiError(409, 'EQUIPMENT_UNAVAILABLE', '设备已被领用或状态发生变化，请刷新后处理');

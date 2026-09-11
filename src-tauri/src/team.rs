@@ -8,7 +8,7 @@ use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::Path,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, OnceLock},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tauri::{Manager, State};
@@ -28,6 +28,12 @@ struct Binding {
     last_synced_at: Option<i64>,
     error: Option<String>,
 }
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ScopedBindings {
+    source_id: String,
+    bindings: BTreeMap<String, Binding>,
+}
 // Credentials, account identity and selections remain in the OS keyring, never in a WebView DTO.
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -41,10 +47,16 @@ struct Stored {
     user: Option<Value>,
     expires_at: Option<Value>,
     bindings: BTreeMap<String, Binding>,
+    #[serde(default)]
+    binding_scope: Option<String>,
+    #[serde(default)]
+    scope_bindings: BTreeMap<String, ScopedBindings>,
     #[serde(skip)]
     generation: u64,
     #[serde(skip)]
     login_pending: bool,
+    #[serde(skip)]
+    scope_pending: bool,
 }
 impl Default for Stored {
     fn default() -> Self {
@@ -56,8 +68,11 @@ impl Default for Stored {
             user: None,
             expires_at: None,
             bindings: BTreeMap::new(),
+            binding_scope: None,
+            scope_bindings: BTreeMap::new(),
             generation: 0,
             login_pending: false,
+            scope_pending: false,
         }
     }
 }
@@ -71,6 +86,11 @@ impl Stored {
                 .and_then(Value::as_str)
                 .map(str::to_owned);
         }
+        if self.binding_scope.is_none() {
+            if let Some(user) = self.user.clone() {
+                self.enter_scope(&user);
+            }
+        }
     }
     fn advance(&mut self) {
         self.generation = self.generation.wrapping_add(1);
@@ -78,7 +98,30 @@ impl Stored {
     fn begin_login(&mut self) -> u64 {
         self.advance();
         self.login_pending = true;
+        self.scope_pending = false;
         self.generation
+    }
+    fn enter_scope(&mut self, user: &Value) {
+        let next = user_scope(user);
+        if let Some(previous) = &self.binding_scope {
+            if previous != &next {
+                self.scope_bindings.insert(previous.clone(), ScopedBindings {
+                    source_id: self.source_id.clone(),
+                    bindings: std::mem::take(&mut self.bindings),
+                });
+                if let Some(saved) = self.scope_bindings.remove(&next) {
+                    self.source_id = saved.source_id;
+                    self.bindings = saved.bindings;
+                } else {
+                    self.source_id = uuid::Uuid::new_v4().to_string();
+                }
+            }
+        }
+        self.binding_scope = Some(next);
+    }
+    fn matches_session(&self, expected: &Stored) -> bool {
+        !self.login_pending && !self.scope_pending && self.token.is_some()
+            && self.generation == expected.generation && self.token == expected.token
     }
     fn finish_login(
         &mut self,
@@ -100,14 +143,18 @@ impl Stored {
             && user.get("role").and_then(Value::as_str) == Some("admin");
         if self.account_id.as_deref() != Some(id) && !adopt_preset {
             self.bindings.clear();
+            self.scope_bindings.clear();
+            self.binding_scope = None;
             self.source_id = uuid::Uuid::new_v4().to_string();
         }
+        self.enter_scope(&user);
         self.preset = false;
         self.account_id = Some(id.to_owned());
         self.token = Some(token);
         self.user = Some(user);
         self.expires_at = expires_at;
         self.login_pending = false;
+        self.scope_pending = false;
         self.advance();
         Ok(())
     }
@@ -115,12 +162,13 @@ impl Stored {
         self.migrate_account();
         self.advance();
         self.login_pending = false;
+        self.scope_pending = false;
         self.user = None;
         self.expires_at = None;
         self.token.take()
     }
     fn is_admin(&self) -> bool {
-        !self.login_pending
+        !self.login_pending && !self.scope_pending
             && self.token.is_some()
             && self
                 .user
@@ -132,13 +180,14 @@ impl Stored {
     }
     fn refresh_user(&mut self, generation: u64, token: &str, user: Value) -> Result<(), String> {
         // Status requests can finish after logout, another login, or a newer identity refresh.
-        if self.generation != generation || self.token.as_deref() != Some(token) || self.login_pending {
+        if self.generation != generation || self.token.as_deref() != Some(token) || self.login_pending || self.scope_pending {
             return Ok(());
         }
         if self.user.as_ref().and_then(|value| value.get("id")) != user.get("id") {
             return Err("团队账号状态已变化，请重新登录".into());
         }
         if self.user.as_ref() != Some(&user) {
+            self.enter_scope(&user);
             self.user = Some(user);
             self.advance();
         }
@@ -233,6 +282,8 @@ pub struct TeamManager {
     sync_lock: tokio::sync::Mutex<()>,
     changes: tokio::sync::watch::Sender<u64>,
     client: reqwest::Client,
+    app: OnceLock<tauri::AppHandle>,
+    directory_lock: tokio::sync::Mutex<()>,
 }
 impl TeamManager {
     pub fn new(profile: &Path) -> Result<Self, String> {
@@ -245,6 +296,8 @@ impl TeamManager {
             entry: keyring::Entry::new("com.racktop.team.v1", &account)
                 .map_err(|_| "无法打开团队凭据存储")?,
             value: Mutex::new(None),
+            app: OnceLock::new(),
+            directory_lock: tokio::sync::Mutex::new(()),
             sync_lock: tokio::sync::Mutex::new(()),
             changes,
             client: reqwest::Client::builder()
@@ -289,15 +342,12 @@ impl TeamManager {
         let mut guard = self.value.lock().map_err(|_| "团队设置暂时不可用")?;
         let mut value = guard.as_ref().unwrap().clone();
         let result = edit(&mut value)?;
-        if persist {
-            self.persist(&value)?;
-        }
         let changed = guard.as_ref().unwrap().generation != value.generation;
+        if changed { self.invalidate_directory("团队账号或组织已变化，请重新验证权限")?; }
+        if persist { self.persist(&value)?; }
         let generation = value.generation;
         *guard = Some(value);
-        if changed {
-            self.changes.send_replace(generation);
-        }
+        if changed { self.changes.send_replace(generation); }
         Ok(result)
     }
     // Clearing the memory session is unconditional, even if a newly locked keyring prevents persistence.
@@ -313,6 +363,7 @@ impl TeamManager {
             return Ok((None, None));
         }
         let token = value.clear_login();
+        self.invalidate_directory("已退出团队账号，请重新登录")?;
         self.changes.send_replace(value.generation);
         let error = self.persist(value).err();
         Ok((token, error))
@@ -322,12 +373,21 @@ impl TeamManager {
     }
     async fn refresh_status(&self) -> Result<Value, String> {
         let state = self.read()?;
-        let Some(token) = state.token.as_deref().filter(|_| !state.login_pending) else {
+        let Some(token) = state.token.as_deref().filter(|_| !state.login_pending && !state.scope_pending) else {
             return self.status();
         };
-        let session = self.request(reqwest::Method::GET, "/api/session", Some(token), None).await?;
-        let user = login_user(session.get("user"))?;
-        self.update(false, |value| value.refresh_user(state.generation, token, user))?;
+        let session = match self.request(reqwest::Method::GET, "/api/session", Some(token), None).await {
+            Ok(value) => value,
+            Err(error) => { self.invalidate_directory_for(&state, "无法验证团队权限，请联网后重试")?; return Err(error); }
+        };
+        let refreshed = login_user(session.get("user")).and_then(|user|
+            self.update(state.user.as_ref() != Some(&user), |value| value.refresh_user(state.generation, token, user)));
+        if let Err(error) = refreshed {
+            // A locked keyring must not retain a lease after the server reports
+            // a changed identity, nor after an invalid identity response.
+            self.invalidate_directory_for(&state, "团队身份验证未完成，请重新登录或解锁钥匙串")?;
+            return Err(error);
+        }
         self.status()
     }
     async fn request(
@@ -337,6 +397,16 @@ impl TeamManager {
         token: Option<&str>,
         body: Option<Value>,
     ) -> Result<Value, String> {
+        self.request_with_scope(method, path, token, body, None).await
+    }
+    async fn request_with_scope(
+        &self,
+        method: reqwest::Method,
+        path: &str,
+        token: Option<&str>,
+        body: Option<Value>,
+        scope: Option<&Stored>,
+    ) -> Result<Value, String> {
         // All routes are built here, not supplied by a remote resource or arbitrary WebView URL.
         let mut request = self
             .client
@@ -344,6 +414,12 @@ impl TeamManager {
             .header("Origin", TEAM_URL);
         if let Some(token) = token {
             request = request.bearer_auth(token);
+        }
+        if let Some(scope) = scope {
+            if !self.read()?.matches_session(scope) {
+                return Err("团队账号或组织已变化，请刷新后重试".into());
+            }
+            request = request.header("X-RackTop-Company", company_header(scope.user.as_ref()));
         }
         if let Some(body) = body {
             request = request.json(&body);
@@ -359,15 +435,14 @@ impl TeamManager {
             }
             return Err("团队登录已失效，请重新登录".into());
         }
-        if response
-            .content_length()
-            .is_some_and(|n| n > 2 * 1024 * 1024)
+        let response_limit = if path == "/api/servers" { 16 * 1024 * 1024 } else { 2 * 1024 * 1024 };
+        if response.content_length().is_some_and(|n| n > response_limit)
         {
             return Err("预约中心响应过大".into());
         }
         let mut bytes = Vec::new();
         while let Some(chunk) = response.chunk().await.map_err(|_| "预约中心响应中断")? {
-            if bytes.len() + chunk.len() > 2 * 1024 * 1024 {
+            if bytes.len() + chunk.len() > response_limit as usize {
                 return Err("预约中心响应过大".into());
             }
             bytes.extend_from_slice(&chunk);
@@ -375,6 +450,9 @@ impl TeamManager {
         let value: Value =
             serde_json::from_slice(&bytes).map_err(|_| "预约中心返回了无法识别的数据")?;
         if !status.is_success() {
+            if status.as_u16() == 409 && value.pointer("/error/code").and_then(Value::as_str) == Some("COMPANY_CHANGED") {
+                return Err("COMPANY_CHANGED: 当前组织已变化，请刷新后重试".into());
+            }
             if status.as_u16() == 403 && value.pointer("/error/code").and_then(Value::as_str) == Some("COMPANY_REQUIRED") {
                 if let Some(token) = token {
                     // Keep the login session, but stop repeated background inventory requests.
@@ -489,6 +567,53 @@ impl TeamManager {
             "已退出本机账号并停止同步；暂时无法确认远端会话撤销，请联网后在网页撤销此设备".into()
         })
     }
+    async fn switch_company(&self, company: String) -> Result<Value, String> {
+        if !is_team_company(&company) {
+            return Err("请选择有效组织".into());
+        }
+        let (generation, token) = self.update(true, |value| {
+            if value.login_pending || value.scope_pending {
+                return Err("账号操作进行中，请稍后重试".into());
+            }
+            let token = value.token.clone().ok_or("请先登录团队账号")?;
+            let companies = value.user.as_ref().and_then(|user| user.get("companies")).and_then(Value::as_array);
+            if !companies.is_some_and(|items| items.iter().any(|item| item.as_str() == Some(company.as_str()))) {
+                return Err("此账号未加入该组织，请刷新后重试".into());
+            }
+            value.advance();
+            value.scope_pending = true;
+            Ok((value.generation, token))
+        })?;
+        // The server may complete a switch after a transport failure. Scoped business requests
+        // cannot then run against the wrong company; the next status refresh reconciles it.
+        let response = self.request(reqwest::Method::POST, "/api/auth/company", Some(&token), Some(json!({"company":company}))).await;
+        let result = response.and_then(|session| login_user(session.get("user")));
+        match result {
+            Ok(user) => {
+                self.update(false, |value| {
+                    if value.generation != generation || value.token.as_deref() != Some(&token) || !value.scope_pending {
+                        return Err("组织切换已取消，请刷新后重试".into());
+                    }
+                    value.scope_pending = false;
+                    value.refresh_user(generation, &token, user)?;
+                    value.advance();
+                    Ok(())
+                })?;
+                self.update(true, |_| Ok(()))?;
+            }
+            Err(error) => {
+                let _ = self.update(false, |value| {
+                    if value.generation == generation && value.token.as_deref() == Some(&token) {
+                        value.scope_pending = false;
+                        value.advance();
+                    }
+                    Ok(())
+                });
+                return Err(error);
+            }
+        }
+        self.status()
+    }
     async fn sync(&self, servers: Vec<Server>, snapshots: Vec<Snapshot>) -> Result<Value, String> {
         let Ok(_lock) = self.sync_lock.try_lock() else {
             return self.status();
@@ -516,11 +641,12 @@ impl TeamManager {
                             now_ms(),
                         )?;
                         let value = self
-                            .request(
+                            .request_with_scope(
                                 reqwest::Method::POST,
                                 "/api/resources/sync",
                                 Some(token),
                                 Some(body),
+                                Some(&state),
                             )
                             .await?;
                         let resource_id = value
@@ -553,20 +679,86 @@ impl TeamManager {
         }
         self.status()
     }
+    fn invalidate_directory(&self, reason: &str) -> Result<(), String> {
+        if let Some(app) = self.app.get() {
+            let ids = app.state::<Database>().invalidate_managed(reason)?;
+            crate::managed_servers::changed(app, &ids);
+        }
+        Ok(())
+    }
+    fn invalidate_directory_for(&self, expected: &Stored, reason: &str) -> Result<(), String> {
+        let guard = self.value.lock().map_err(|_| "团队设置暂时不可用")?;
+        if guard.as_ref().is_some_and(|value| value.matches_session(expected)) { self.invalidate_directory(reason)?; }
+        Ok(())
+    }
+    async fn pull_directory(&self) -> Result<(), String> {
+        let Ok(_round) = self.directory_lock.try_lock() else { return Ok(()); };
+        let Some(app) = self.app.get() else { return Ok(()); };
+        let expected = self.read()?;
+        if expected.login_pending || expected.scope_pending || expected.token.is_none() { return Ok(()); }
+        let scope = expected.user.as_ref().map(user_scope).unwrap_or_default();
+        if scope != "*" && !is_team_company(&scope) {
+            return self.invalidate_directory_for(&expected, "请先选择已分配的组织");
+        }
+        let result = async {
+            let value = self.request_with_scope(reqwest::Method::GET, "/api/servers", expected.token.as_deref(), None, Some(&expected)).await?;
+            crate::managed_servers::Directory::parse(value, &scope)
+        }.await;
+        let directory = match result {
+            Ok(directory) => directory,
+            Err(error) => {
+                self.invalidate_directory_for(&expected, "无法验证组织服务器权限，请联网刷新")?;
+                return Err(error);
+            }
+        };
+        let ids = match self.apply_directory_if_current(&expected, &directory, &app.state::<Database>()) {
+            Ok(ids) => ids,
+            Err(error) => { self.invalidate_directory_for(&expected, "组织服务器目录校验失败，请重新刷新")?; return Err(error); }
+        };
+        crate::managed_servers::directory_changed(app, &ids);
+        Ok(())
+    }
+    fn apply_directory_if_current(&self, expected: &Stored, directory: &crate::managed_servers::Directory, database: &Database) -> Result<Vec<String>, String> {
+        let account = expected.account_id.as_deref().ok_or("缺少团队账号标识")?;
+        {
+            let guard = self.value.lock().map_err(|_| "团队设置暂时不可用")?;
+            if !guard.as_ref().is_some_and(|value| value.matches_session(expected)) { return Ok(Vec::new()); }
+            // Quarantine before a credential prompt can delay the metadata write.
+            let ids = database.quarantine_directory(account, directory)?;
+            if let Some(app) = self.app.get() { crate::managed_servers::changed(app, &ids); }
+        }
+        // Never hold the team lock while waiting for a keyring operation.
+        // Logout/expiry can invalidate leases without acquiring this gate.
+        let _gate = database.managed_gate.lock().map_err(|e| e.to_string())?;
+        let guard = self.value.lock().map_err(|_| "团队设置暂时不可用")?;
+        if !guard.as_ref().is_some_and(|value| value.matches_session(expected)) { return Ok(Vec::new()); }
+        database.apply_directory_locked(account, directory, now_ms())
+    }
     pub fn start(self: Arc<Self>, app: tauri::AppHandle) {
+        let _ = self.app.set(app.clone());
+        let lease_app = app.clone();
+        tauri::async_runtime::spawn(async move {
+            let mut expiry = tokio::time::interval(Duration::from_secs(1));
+            loop {
+                expiry.tick().await;
+                if let Ok(ids) = lease_app.state::<Database>().expire_managed() { crate::managed_servers::changed(&lease_app, &ids); }
+            }
+        });
         tauri::async_runtime::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_secs(30));
             interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            let mut changes = self.changes.subscribe();
             loop {
-                interval.tick().await;
+                tokio::select! { _ = interval.tick() => (), _ = changes.changed() => () }
+                if self.refresh_status().await.is_err() { continue; }
+                // An older team service may not expose the directory; that does
+                // not prevent login, reservations, or personal inventory sync.
+                let _ = self.pull_directory().await;
                 let data = {
                     let db = app.state::<Database>();
-                    db.list_servers()
-                        .and_then(|s| db.list_latest_snapshots().map(|v| (s, v)))
+                    db.list_servers().and_then(|s| db.list_latest_snapshots().map(|v| (s, v)))
                 };
-                if let Ok((servers, snapshots)) = data {
-                    let _ = self.sync(servers, snapshots).await;
-                }
+                if let Ok((servers, snapshots)) = data { let _ = self.sync(servers, snapshots).await; }
             }
         });
     }
@@ -634,6 +826,17 @@ fn login_user(value: Option<&Value>) -> Result<Value, String> {
         }
         projected["company"] = company.clone();
     }
+    if let Some(companies) = value.get("companies") {
+        let items = companies.as_array().ok_or("账号组织列表无效")?;
+        let mut seen = BTreeSet::new();
+        if items.len() > 4 || items.iter().any(|item| !item.as_str().is_some_and(|company| is_team_company(company) && seen.insert(company))) {
+            return Err("账号组织列表无效".into());
+        }
+        if let Some(company) = value.get("company").and_then(Value::as_str) {
+            if !seen.contains(company) { return Err("账号当前组织不在归属列表中".into()); }
+        }
+        projected["companies"] = companies.clone();
+    }
     if let Some(is_super_admin) = value.get("isSuperAdmin") {
         if !is_super_admin.is_boolean() { return Err("账号权限无效".into()); }
         projected["isSuperAdmin"] = is_super_admin.clone();
@@ -646,6 +849,32 @@ fn login_user(value: Option<&Value>) -> Result<Value, String> {
         projected["avatar"] = json!(avatar);
     }
     Ok(projected)
+}
+
+fn user_scope(user: &Value) -> String {
+    if user.get("isSuperAdmin") == Some(&Value::Bool(true)) {
+        "*".into()
+    } else {
+        match user.get("company") {
+            None => "legacy".into(),
+            Some(Value::String(company)) => company.clone(),
+            _ => "unassigned".into(),
+        }
+    }
+}
+
+fn company_header(user: Option<&Value>) -> String {
+    let company = user.and_then(|user| user.get("company")).and_then(Value::as_str).unwrap_or("");
+    let mut encoded = String::new();
+    for byte in company.bytes() {
+        if byte.is_ascii_alphanumeric() || b"-_.~".contains(&byte) {
+            encoded.push(char::from(byte));
+        } else {
+            use std::fmt::Write;
+            let _ = write!(encoded, "%{byte:02X}");
+        }
+    }
+    encoded
 }
 
 fn is_team_company(company: &str) -> bool {
@@ -667,6 +896,7 @@ pub fn inventory_payload(
     resource_id: Option<&str>,
     now: i64,
 ) -> Result<Value, String> {
+    if server.managed.is_some() { return Err("组织服务器不能作为个人连接上传，请由管理员维护团队目录".into()); }
     let snapshot = snapshot.ok_or("尚无硬件采样，请先连接此服务器")?;
     if snapshot.server_id != server.id {
         return Err("硬件采样与服务器不匹配，请重新采集".into());
@@ -752,26 +982,36 @@ pub async fn team_logout(state: State<'_, TeamState>) -> Result<(), String> {
     state.0.logout().await
 }
 #[tauri::command]
+pub async fn team_switch_company(state: State<'_, TeamState>, company: String) -> Result<Value, String> {
+    state.0.switch_company(company).await
+}
+#[tauri::command]
 pub async fn team_data(state: State<'_, TeamState>) -> Result<Value, String> {
-    let token = state.0.read()?.token;
+    let session = state.0.read()?;
+    let token = session.token.as_deref().ok_or("请先登录团队账号")?;
     let resources = state
         .0
-        .request(
+        .request_with_scope(
             reqwest::Method::GET,
             "/api/resources",
-            token.as_deref(),
+            Some(token),
             None,
+            Some(&session),
         )
         .await?;
     let reservations = state
         .0
-        .request(
+        .request_with_scope(
             reqwest::Method::GET,
             "/api/reservations",
-            token.as_deref(),
+            Some(token),
             None,
+            Some(&session),
         )
         .await?;
+    if !state.0.read()?.matches_session(&session) {
+        return Err("团队账号或组织已变化，请刷新后重试".into());
+    }
     Ok(json!({"resources":resources["resources"],"reservations":reservations["reservations"]}))
 }
 #[tauri::command]
@@ -785,7 +1025,7 @@ pub async fn team_select(
     }
     let generation = state.0.read()?.generation;
     for id in &server_ids {
-        database.get_server(id)?;
+        if database.get_server(id)?.managed.is_some() { return Err("组织服务器不能作为个人连接上传".into()); }
     }
     state.0.update(true, |v| v.select(generation, server_ids))?;
     state
@@ -1007,6 +1247,86 @@ mod tests {
     }
 
     #[test]
+    fn team_organization_switch_preserves_each_selection_without_publishing_to_another_company() {
+        let mut value = signed_in();
+        let mut account_a = user("member-1");
+        account_a["company"] = json!("A公司");
+        account_a["companies"] = json!(["A公司", "西浦"]);
+        value.user = Some(account_a.clone());
+        // An upgraded profile has no bindingScope; adopt its existing organization once.
+        value.binding_scope = None;
+        value.migrate_account();
+        let source_a = value.source_id.clone();
+        let snapshot_a = value.clone();
+        let mut account_b = account_a.clone();
+        account_b["company"] = json!("西浦");
+        value.refresh_user(value.generation, "test-session-token", account_b.clone()).unwrap();
+        assert!(!value.matches_session(&snapshot_a));
+        assert!(value.bindings.is_empty());
+        assert_ne!(source_a, value.source_id);
+        value.select(value.generation, vec!["connection-c".into()]).unwrap();
+        let source_b = value.source_id.clone();
+        let mut value: Stored = serde_json::from_str(&serde_json::to_string(&value).unwrap()).unwrap();
+        value.refresh_user(value.generation, "test-session-token", account_a).unwrap();
+        assert_eq!(value.source_id, source_a);
+        assert_eq!(value.bindings["connection-a"].resource_id.as_deref(), Some("cloud-resource"));
+        assert!(!value.bindings.contains_key("connection-c"));
+        value.refresh_user(value.generation, "test-session-token", account_b).unwrap();
+        assert_eq!(value.source_id, source_b);
+        assert_eq!(value.bindings.keys().map(String::as_str).collect::<Vec<_>>(), ["connection-c"]);
+        let generation = value.begin_login();
+        value.finish_login(generation, "another-token".into(), user("member-2"), None).unwrap();
+        assert!(value.scope_bindings.is_empty());
+        assert!(value.bindings.is_empty());
+    }
+
+    #[test]
+    fn team_company_context_header_is_ascii_and_memberships_are_validated() {
+        let account = json!({"id":"member-1","name":"成员","username":"member","role":"member", "company":"西浦", "companies":["A公司","西浦"]});
+        assert_eq!(company_header(Some(&account)), "%E8%A5%BF%E6%B5%A6");
+        assert_eq!(company_header(None), "");
+        assert_eq!(login_user(Some(&account)).unwrap()["companies"], account["companies"]);
+        for companies in [json!(["A公司"]), json!(["西浦","西浦"]), json!(["未知公司"]), json!("西浦")] {
+            let mut invalid = account.clone();
+            invalid["companies"] = companies;
+            assert!(login_user(Some(&invalid)).is_err());
+        }
+        let mut value = signed_in();
+        let previous = value.clone();
+        value.scope_pending = true;
+        assert!(!value.matches_session(&previous));
+        assert!(!value.is_admin());
+        value.clear_login();
+        assert!(!value.scope_pending);
+        assert!(!value.matches_session(&previous));
+    }
+
+    #[test]
+    fn managed_directory_cannot_commit_after_logout_or_organization_switch() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::open(&dir.path().join("directory.sqlite")).unwrap();
+        let manager = TeamManager::new(dir.path()).unwrap();
+        let mut stored = Stored::default();
+        let generation = stored.begin_login();
+        let mut account = user("member-1"); account["company"] = json!("A公司");
+        stored.finish_login(generation, "fixture-session".into(), account, None).unwrap();
+        let expected = stored.clone();
+        *manager.value.lock().unwrap() = Some(stored);
+        let directory = crate::managed_servers::Directory::parse(json!({"schemaVersion":1,"revision":"a".repeat(64),"servers":[{
+            "id":"00000000-0000-4000-8000-000000000001","company":"A公司","name":"GPU 1","host":"node.example","port":22,"username":"worker","jump":null,"enabled":true,"version":1,"updatedAt":"2026-09-11T12:00:00.000Z"
+        }]}), "A公司").unwrap();
+        manager.value.lock().unwrap().as_mut().unwrap().clear_login();
+        assert!(manager.apply_directory_if_current(&expected, &directory, &db).unwrap().is_empty());
+        assert!(db.list_servers().unwrap().is_empty());
+        let mut switched = expected.clone(); switched.user.as_mut().unwrap()["company"] = json!("B公司"); switched.advance();
+        *manager.value.lock().unwrap() = Some(switched);
+        assert!(manager.apply_directory_if_current(&expected, &directory, &db).unwrap().is_empty());
+        assert!(db.list_servers().unwrap().is_empty());
+        *manager.value.lock().unwrap() = Some(expected.clone());
+        assert_eq!(manager.apply_directory_if_current(&expected, &directory, &db).unwrap().len(),1);
+    }
+
+    #[test]
     fn team_company_assignment_refreshes_identity_and_rejects_stale_results() {
         let mut value = signed_in();
         value.company_required("test-session-token");
@@ -1071,6 +1391,15 @@ mod tests {
             &json!({"id":"member-1","name":"   ","username":"成员","role":"member"})
         ))
         .is_err());
+    }
+
+    #[test]
+    fn team_inventory_rejects_managed_connections_even_with_cached_hardware_and_an_old_binding() {
+        let (mut server,snapshot)=fixture();
+        for available in [true,false] {
+            server.managed=Some(crate::models::ManagedServer { account_id:"member-1".into(),company:"A公司".into(),remote_id:"remote".into(),available,reason:None,version:1 });
+            assert!(inventory_payload(&server,Some(&snapshot),"old-personal-source",Some("old-resource"),1_000_000).unwrap_err().contains("个人连接"));
+        }
     }
 
     #[test]

@@ -38,6 +38,7 @@ function week(value) {
     endExclusive: date.getTime() + 7 * dayMilliseconds - beijingOffset };
 }
 const average = values => values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
+const memberCompanies = member => Array.isArray(member?.companies) ? member.companies : (companies.has(member?.company) ? [member.company] : []);
 function content(value, submitted) {
   if (!Array.isArray(value.todos) || value.todos.length > 20) invalid('周报最多填写 20 项工作');
   const todos = value.todos.map(item => {
@@ -68,7 +69,7 @@ export function createWorkspaceStore({ dbPath = ':memory:', now = Date.now, reso
         reviewer_id TEXT, reviewer_name TEXT, score REAL CHECK(score BETWEEN 0 AND 100), review_comment TEXT NOT NULL DEFAULT '',
         reviewed_by TEXT, reviewed_name TEXT, reviewed_at INTEGER, submitted_at INTEGER,
         version INTEGER NOT NULL CHECK(version > 0), created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
-        UNIQUE(author_id,week_start));
+        UNIQUE(author_id,company,week_start));
       CREATE INDEX IF NOT EXISTS weekly_reports_visible ON weekly_reports(company,author_id,reviewer_id,week_start DESC);
       CREATE TABLE IF NOT EXISTS equipment_requests (
         id TEXT PRIMARY KEY, applicant_id TEXT NOT NULL, applicant_name TEXT NOT NULL, company TEXT NOT NULL,
@@ -80,8 +81,20 @@ export function createWorkspaceStore({ dbPath = ':memory:', now = Date.now, reso
       CREATE TABLE IF NOT EXISTS workspace_audit (
         id INTEGER PRIMARY KEY AUTOINCREMENT, record_kind TEXT NOT NULL, record_id TEXT NOT NULL,
         actor_id TEXT NOT NULL, actor_name TEXT NOT NULL, action TEXT NOT NULL, at INTEGER NOT NULL, details TEXT NOT NULL);
-      CREATE INDEX IF NOT EXISTS workspace_audit_record ON workspace_audit(record_kind,record_id,id);
-      COMMIT;`);
+      CREATE INDEX IF NOT EXISTS workspace_audit_record ON workspace_audit(record_kind,record_id,id);`);
+    const legacyUnique = db.prepare('PRAGMA index_list(weekly_reports)').all().some(index => index.unique
+      && db.prepare(`PRAGMA index_info("${index.name.replaceAll('"', '""')}")`).all().map(column => column.name).join(',') === 'author_id,week_start');
+    if (legacyUnique) {
+      const definition = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='weekly_reports'").get().sql;
+      const dependents = db.prepare("SELECT sql FROM sqlite_master WHERE tbl_name='weekly_reports' AND type IN ('index','trigger') AND sql IS NOT NULL").all();
+      const replacement = definition.replace(/CREATE TABLE\s+(?:IF NOT EXISTS\s+)?["`\[]?weekly_reports["`\]]?/i, 'CREATE TABLE weekly_reports_membership_migration')
+        .replace(/UNIQUE\s*\(\s*author_id\s*,\s*week_start\s*\)/i, 'UNIQUE(author_id,company,week_start)');
+      if (replacement === definition || !replacement.includes('UNIQUE(author_id,company,week_start)')) throw new Error('Cannot safely migrate weekly report uniqueness');
+      db.exec(replacement);
+      db.exec('INSERT INTO weekly_reports_membership_migration SELECT * FROM weekly_reports; DROP TABLE weekly_reports; ALTER TABLE weekly_reports_membership_migration RENAME TO weekly_reports;');
+      for (const item of dependents) db.exec(item.sql);
+    }
+    db.exec('COMMIT');
   } catch (error) { try { db.exec('ROLLBACK'); } catch {} db.close(); throw error; }
   function transaction(operation, write = true) {
     let started = false;
@@ -95,13 +108,19 @@ export function createWorkspaceStore({ dbPath = ':memory:', now = Date.now, reso
   function actor(claim) {
     const user = claim?.id && resolveMember(claim.id);
     if (!user || !['admin', 'member'].includes(user.role)) fail(401, 'UNAUTHENTICATED', '请重新登录');
-    if (!user.isSuperAdmin && !companies.has(user.company)) fail(403, 'COMPANY_REQUIRED', '请联系超级管理员分配公司');
-    return user;
+    if (user.isSuperAdmin) return { ...user, company: null };
+    const granted = memberCompanies(user);
+    if (!granted.length) fail(403, 'COMPANY_REQUIRED', '请联系超级管理员分配公司');
+    // Older identity resolvers are single-company; account sessions explicitly
+    // carry an active company, which must still belong to the fresh identity.
+    const active = Array.isArray(user.companies) ? claim.company : user.company;
+    if (!granted.includes(active)) fail(409, 'COMPANY_CHANGED', '当前组织已变化，请刷新后重试');
+    return { ...user, company: active };
   }
   function superAdmin(user) { if (!user.isSuperAdmin) fail(403, 'SUPERADMIN_REQUIRED', '仅超级管理员可操作'); }
   function target(id, allowUnassignedSuper = false) {
     const member = typeof id === 'string' && resolveMember(id);
-    if (!member || (!companies.has(member.company) && !(allowUnassignedSuper && member.isSuperAdmin))) invalid('请选择已分配公司的有效成员');
+    if (!member || (!memberCompanies(member).length && !(allowUnassignedSuper && member.isSuperAdmin))) invalid('请选择已分配公司的有效成员');
     return member;
   }
   function version(row, expected) {
@@ -132,7 +151,7 @@ export function createWorkspaceStore({ dbPath = ':memory:', now = Date.now, reso
   }
   function readReport(id, user) { const row = reportRow(id); if (!readable(row, user)) fail(404, 'REPORT_NOT_FOUND', '找不到可访问的周报'); return row; }
   function createReport(input, claim) {
-    fields(input, ['authorId', 'weekStart', 'todos', 'nextPlan', 'status']);
+    fields(input, ['authorId', 'company', 'weekStart', 'todos', 'nextPlan', 'status']);
     const status = input.status ?? 'draft';
     if (!['draft', 'submitted'].includes(status)) invalid('周报状态无效');
     const data = content(input, status === 'submitted'), { weekStart } = week(input.weekStart);
@@ -140,10 +159,12 @@ export function createWorkspaceStore({ dbPath = ':memory:', now = Date.now, reso
       const user = actor(claim), author = target(input.authorId ?? user.id, true);
       if (!user.isSuperAdmin && author.id !== user.id) fail(403, 'FORBIDDEN', '只能为自己创建周报');
       if (author.isSuperAdmin) fail(403, 'SUPERADMIN_REPORT_NOT_REQUIRED', '超级管理员无需填写周报，请选择普通成员');
-      if (db.prepare('SELECT 1 FROM weekly_reports WHERE author_id=? AND week_start=?').get(author.id, weekStart)) fail(409, 'REPORT_EXISTS', '该成员本周已有周报，请打开已有记录');
+      const selectedCompany = input.company ?? (user.isSuperAdmin ? author.company : user.company);
+      if (!memberCompanies(author).includes(selectedCompany) || (!user.isSuperAdmin && selectedCompany !== user.company)) fail(403, 'COMPANY_NOT_ALLOWED', '不能为此组织创建周报');
+      if (db.prepare('SELECT 1 FROM weekly_reports WHERE author_id=? AND company=? AND week_start=?').get(author.id, selectedCompany, weekStart)) fail(409, 'REPORT_EXISTS', '该成员在此组织本周已有周报，请打开已有记录');
       const id = randomUUID(), at = now();
       db.prepare(`INSERT INTO weekly_reports(id,author_id,author_name,company,week_start,todos,next_plan,status,submitted_at,version,created_at,updated_at)
-        VALUES(?,?,?,?,?,?,?,?,?,1,?,?)`).run(id, author.id, author.name, author.company, weekStart, JSON.stringify(data.todos), data.nextPlan, status, status === 'submitted' ? at : null, at, at);
+        VALUES(?,?,?,?,?,?,?,?,?,1,?,?)`).run(id, author.id, author.name, selectedCompany, weekStart, JSON.stringify(data.todos), data.nextPlan, status, status === 'submitted' ? at : null, at, at);
       audit('report', id, user, status === 'submitted' ? 'report-submitted' : 'report-created', { authorId: author.id, weekStart, ...data }, at);
       return reportView(reportRow(id));
     });
@@ -156,24 +177,29 @@ export function createWorkspaceStore({ dbPath = ':memory:', now = Date.now, reso
       if (own(query, 'company') && query.company !== 'unassigned' && !companies.has(query.company)) invalid('公司筛选无效');
       const memberId = own(query, 'memberId') ? identifier(query.memberId) : null;
       // Read only profile columns, on this same connection and snapshot as the reports.
-      const members = db.prepare('SELECT id,name,company FROM account_users WHERE is_super_admin=0 AND deleted_at IS NULL AND created_at<?').all(endExclusive);
+      const membershipAware = Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='account_user_companies'").get());
+      const members = db.prepare(membershipAware
+        ? `SELECT a.id,a.name,m.company FROM account_users a LEFT JOIN account_user_companies m ON m.user_id=a.id
+          WHERE a.is_super_admin=0 AND a.deleted_at IS NULL AND a.created_at<?`
+        : 'SELECT id,name,company FROM account_users WHERE is_super_admin=0 AND deleted_at IS NULL AND created_at<?').all(endExclusive);
       const reports = db.prepare(`SELECT r.id,r.author_id,r.author_name,r.company,r.todos,r.status,r.score,r.reviewer_name
         FROM weekly_reports r WHERE r.week_start=? AND NOT EXISTS (
           SELECT 1 FROM account_users a WHERE a.id=r.author_id AND a.is_super_admin=1)`).all(weekStart);
-      const rows = new Map(members.map(member => [member.id, { authorId: member.id, name: member.name, company: member.company,
+      const rowKey = (id, selectedCompany) => membershipAware ? JSON.stringify([id, selectedCompany]) : id;
+      const rows = new Map(members.map(member => [rowKey(member.id, member.company), { authorId: member.id, name: member.name, company: member.company,
         weekStart, weekEnd, status: 'missing', reportId: null, todoCount: 0, completedCount: 0, unfinishedCount: 0,
         averageCompletion: null, score: null, reviewerName: null }]));
       // Actual reports retain their historical identity/company, including deleted and backfilled authors.
       for (const report of reports) {
         const todos = JSON.parse(report.todos), completedCount = todos.filter(todo => todo.completion === 100).length;
-        rows.set(report.author_id, { authorId: report.author_id, name: report.author_name, company: report.company,
+        rows.set(rowKey(report.author_id, report.company), { authorId: report.author_id, name: report.author_name, company: report.company,
           weekStart, weekEnd, status: report.score == null ? report.status : 'reviewed', reportId: report.id,
           todoCount: todos.length, completedCount, unfinishedCount: todos.length - completedCount,
           averageCompletion: average(todos.map(todo => todo.completion)), score: report.score, reviewerName: report.reviewer_name });
       }
       const selected = [...rows.values()].filter(row => (!memberId || row.authorId === memberId)
         && (!own(query, 'company') || row.company === (query.company === 'unassigned' ? null : query.company)))
-        .sort((a, b) => a.name.localeCompare(b.name, 'zh-CN') || a.authorId.localeCompare(b.authorId));
+        .sort((a, b) => a.name.localeCompare(b.name, 'zh-CN') || a.authorId.localeCompare(b.authorId) || (a.company ?? '').localeCompare(b.company ?? '', 'zh-CN'));
       const submitted = selected.filter(row => ['submitted', 'reviewed'].includes(row.status));
       const reviewed = selected.filter(row => row.status === 'reviewed');
       return { weekStart, weekEnd, timezone: 'Asia/Shanghai', rows: selected,
@@ -206,7 +232,7 @@ export function createWorkspaceStore({ dbPath = ':memory:', now = Date.now, reso
       const user = actor(claim); superAdmin(user); const previous = reportRow(id); version(previous, input.version);
       const reviewer = input.reviewerId === null ? null : target(input.reviewerId, true);
       if (reviewer && reviewer.id === previous.author_id) invalid('作者不能担任自己的评审人');
-      if (reviewer && !reviewer.isSuperAdmin && reviewer.company !== previous.company) invalid('评审人必须与周报属于同一公司');
+      if (reviewer && !reviewer.isSuperAdmin && !memberCompanies(reviewer).includes(previous.company)) invalid('评审人必须与周报属于同一公司');
       if ((reviewer?.id ?? null) === previous.reviewer_id) return reportView(previous);
       const at = now();
       db.prepare("UPDATE weekly_reports SET reviewer_id=?,reviewer_name=?,score=NULL,review_comment='',reviewed_by=NULL,reviewed_name=NULL,reviewed_at=NULL,version=version+1,updated_at=? WHERE id=? AND version=?")

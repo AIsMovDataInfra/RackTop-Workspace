@@ -55,6 +55,9 @@ path.write_text(path.read_text().replace('@VERSION@', sys.argv[2]).replace('@DAT
 PY
 
 flatpak-builder --user --force-clean --state-dir="$build_base/state" "$stage/build" "$stage/com.racktop.desktop.json"
+# Retain an explicit version in the signed bundle metadata. The updater reads
+# this before installation and from the installed deployment afterwards.
+printf '\n[X-RackTop Update]\nversion=%s\n' "$version" >> "$stage/build/metadata"
 flatpak build --runtime --readonly "$stage/build" /bin/sh -s < "$root/packaging/flatpak/runtime-smoke.sh"
 flatpak build-export "$stage/repo" "$stage/build" stable
 bundle="$output/RackTop_${version}_linux-amd64.flatpak"

@@ -1,7 +1,7 @@
 import { Brand } from './Brand'
 import { useEffect, useRef, useState } from 'react'
 import { LoaderCircle, RefreshCw, Settings } from 'lucide-react'
-import { api, ACCOUNT_CHANGED_EVENT, SESSION_EXPIRED_EVENT } from './api'
+import { api, acceptSession, ACCOUNT_CHANGED_EVENT, SESSION_EXPIRED_EVENT } from './api'
 import { AuthDialog } from './AuthDialog'
 import { errorText } from './errors'
 import { usePreferences } from './preferences'
@@ -10,6 +10,7 @@ import { Workspace } from './Workspace'
 import { EquipmentWorkspace } from './EquipmentWorkspace'
 import { MembersWorkspace } from './MembersWorkspace'
 import { WeeklyWorkspace } from './WeeklyWorkspace'
+import { ServersWorkspace } from './ServersWorkspace'
 import { RequestWorkspace } from './RequestWorkspace'
 import { PendingMembership } from './PendingMembership'
 import type { Session } from './types'
@@ -30,12 +31,12 @@ export default function App() {
   async function load(gate = false) {
     const request = ++generation.current
     setError(null); setRefreshing(true)
-    try { const value = await api.session(); if (request === generation.current) setSession(gate ? { ...value, user: null } : value) } catch (reason) { if (request === generation.current) setError(reason) }
+    try { const value = await api.session(); if (request === generation.current) { const accepted = gate ? { ...value, user: null } : value; acceptSession(accepted); setSession(accepted) } } catch (reason) { if (request === generation.current) setError(reason) }
     finally { if (request === generation.current) setRefreshing(false) }
   }
   function sessionExpired() { setShowSettings(false); setSession(null); void load(true) }
   function accountChanged() { setShowSettings(false); setSession(null); void load() }
-  function signedIn(value: Session) { generation.current++; setError(null); setRefreshing(false); setSession(value); if (value.user) setBootstrapToken(undefined) }
+  function signedIn(value: Session) { generation.current++; acceptSession(value); setError(null); setRefreshing(false); setSession(value); if (value.user) setBootstrapToken(undefined) }
   async function logout() {
     const previous = session
     generation.current++; setSession(null); setError(null)
@@ -62,6 +63,7 @@ export default function App() {
   }, [Boolean(session?.user)])
   const scopeKey = `${session?.user?.id || ''}:${session?.user?.company || ''}:${Boolean(session?.user?.isSuperAdmin)}`
   if (pendingCompany && session) return <PendingMembership session={session} state={state} error={error} refreshing={refreshing} onRefresh={() => void load()} onLogout={logout} onSessionChanged={signedIn}/>
+  if (session?.user && /^\/servers\/?$/.test(pathname)) return <ServersWorkspace key={scopeKey} session={session} state={state} navigate={navigate} onLogout={logout} onSessionChanged={signedIn} onSessionExpired={sessionExpired}/>
   if (session?.user && /^\/reports\/?$/.test(pathname)) return <WeeklyWorkspace key={scopeKey} session={session} state={state} navigate={navigate} onLogout={logout} onSessionChanged={signedIn} onSessionExpired={sessionExpired}/>
   if (session?.user && /^\/requests\/?$/.test(pathname)) return <RequestWorkspace key={scopeKey} session={session} state={state} navigate={navigate} onLogout={logout} onSessionChanged={signedIn} onSessionExpired={sessionExpired}/>
   if (session?.user?.isSuperAdmin && /^\/members\/?$/.test(pathname)) return <MembersWorkspace key={scopeKey} session={session} state={state} navigate={navigate} onLogout={logout} onSessionChanged={signedIn} onSessionExpired={sessionExpired}/>
@@ -70,6 +72,6 @@ export default function App() {
     try { if (id) id = decodeURIComponent(id) } catch { /* The API reports malformed device links as not found. */ }
     return <EquipmentWorkspace key={scopeKey} id={id} session={session} state={state} navigate={navigate} bootstrapToken={bootstrapToken} onSessionChanged={signedIn} onSessionExpired={sessionExpired} onLogout={logout} />
   }
-  if (session?.user) return <Workspace key={scopeKey} onNavigateEquipment={() => navigate('/equipment')} onNavigateMembers={() => navigate('/members')} session={session} state={state} bootstrapToken={bootstrapToken} onSessionChanged={signedIn} onSessionExpired={sessionExpired} onLogout={logout} />
+  if (session?.user) return <Workspace key={scopeKey} onNavigateEquipment={() => navigate('/equipment')} onNavigateServers={() => navigate('/servers')} onNavigateMembers={() => navigate('/members')} session={session} state={state} bootstrapToken={bootstrapToken} onSessionChanged={signedIn} onSessionExpired={sessionExpired} onLogout={logout} />
   return <><main className="login-shell member-login-shell" inert={showSettings}><button className="login-settings icon-button" aria-label={t('设置', 'Settings')} onClick={() => setShowSettings(true)}><Settings size={19} /></button><div className="member-login"><Brand t={t} />{Boolean(error) && <div className="error" role="alert">{errorText(error, t)}<button onClick={() => void load(true)}><RefreshCw size={15} />{t('重试', 'Retry')}</button></div>}{session ? <AuthDialog embedded session={session} bootstrapToken={bootstrapToken} t={t} onClose={() => {}} onSignedIn={signedIn} /> : !error && <p role="status" className="loading-inline"><LoaderCircle size={18} />{t('正在连接服务…', 'Connecting to the service…')}</p>}</div></main>{showSettings && <SettingsDialog state={state} session={session} onClose={() => setShowSettings(false)} />}</>
 }

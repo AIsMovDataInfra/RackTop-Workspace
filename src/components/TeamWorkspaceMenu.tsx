@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
-import { Building2, CalendarDays, ChevronRight, ClipboardList, FileText, HardDrive } from 'lucide-react'
+import { Building2, CalendarDays, ChevronRight, ClipboardList, FileText, HardDrive, Server } from 'lucide-react'
 
 const links = [
   { path: '/equipment', label: '设备管理', icon: HardDrive },
+  { path: '/servers', label: '服务器目录', icon: Server },
   { path: '/reports', label: '周报与绩效', icon: FileText },
   { path: '/', label: '算力预约', icon: CalendarDays },
   { path: '/requests', label: '设备申请与领取', icon: ClipboardList },

@@ -74,7 +74,7 @@ def verify_signatures(packages, platforms):
     with tempfile.TemporaryDirectory(prefix='racktop-mac-signatures-') as temporary:
         key = Path(temporary) / 'public.key'
         key.write_bytes(public_key)
-        for archive in (path for path in packages if path.name.endswith(('.app.tar.gz', '.deb'))):
+        for archive in (path for path in packages if path.name.endswith(('.app.tar.gz', '.deb', '.flatpak'))):
             signature = Path(temporary) / 'archive.sig'
             entry = next(item for item in platforms.values() if item['url'].endswith('/' + archive.name))
             signature.write_bytes(base64.b64decode(entry['signature'], validate=True))

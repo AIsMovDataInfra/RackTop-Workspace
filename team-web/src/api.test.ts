@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { api, ApiError, ACCOUNT_CHANGED_EVENT, request, SESSION_EXPIRED_EVENT } from './api'
+import { api, acceptSession, ApiError, ACCOUNT_CHANGED_EVENT, request, SESSION_EXPIRED_EVENT } from './api'
 import { errorText } from './errors'
+import type { Session } from './types'
 
-afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })
+const accountSession: Session = { user: { id: 'member', name: '成员', role: 'member', company: 'A公司', companies: ['A公司', '西浦'] }, csrfToken: 'fixture', authMode: 'account', feishuConfigured: false, notifications: { configured: false }, timezone: 'Asia/Shanghai' }
+afterEach(() => { acceptSession({ ...accountSession, user: null, csrfToken: null }); vi.useRealTimers(); vi.unstubAllGlobals() })
 
 function hangingFetch(signals: AbortSignal[]) {
   return vi.fn((_input: RequestInfo | URL, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
@@ -15,6 +17,50 @@ function hangingFetch(signals: AbortSignal[]) {
 }
 
 describe('authenticated reservation API', () => {
+  it('scopes business reads, writes and photos to the active organization and sends no scope on the switch endpoint', async () => {
+    acceptSession(accountSession)
+    const switched = { ...accountSession, user: { ...accountSession.user!, company: '西浦' } }
+    const fetch = vi.fn().mockImplementation(async (path: string) => new Response(JSON.stringify(path === '/api/auth/company' ? switched : {})))
+    vi.stubGlobal('fetch', fetch)
+    await api.resources(); await api.createMember({ name: '成员', password: 'test', companies: ['A公司'] }); await api.equipmentPhoto('photo', 1)
+    for (const [, init] of fetch.mock.calls) expect((init as RequestInit).headers).toMatchObject({ 'X-RackTop-Company': encodeURIComponent('A公司') })
+    await api.switchCompany({ company: '西浦' })
+    expect(fetch.mock.calls[3][1].headers).not.toHaveProperty('X-RackTop-Company')
+    expect(fetch.mock.calls[3][1].headers).toHaveProperty('X-CSRF-Token', 'fixture')
+    await api.servers('西浦')
+    expect(fetch.mock.lastCall![1].headers).toHaveProperty('X-RackTop-Company', encodeURIComponent('西浦'))
+    acceptSession({ ...accountSession, user: { ...accountSession.user!, isSuperAdmin: true, company: null, companies: [] } })
+    await api.members(); expect(fetch.mock.lastCall![1].headers).toHaveProperty('X-RackTop-Company', '')
+  })
+
+  it('does not let an earlier session read overwrite a completed organization switch', async () => {
+    acceptSession(accountSession)
+    let finish!: (value: Response) => void
+    const switched = { ...accountSession, user: { ...accountSession.user!, company: '西浦' } }
+    const fetch = vi.fn().mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(switched))).mockResolvedValueOnce(new Response('{}'))
+    vi.stubGlobal('fetch', fetch)
+    const earlier = api.session(); await api.switchCompany({ company: '西浦' })
+    finish(new Response(JSON.stringify(accountSession))); await earlier; await api.resources()
+    expect(fetch.mock.lastCall![1].headers).toHaveProperty('X-RackTop-Company', encodeURIComponent('西浦'))
+  })
+
+  it('keeps retries in their starting scope and refreshes the session on a stale organization conflict', async () => {
+    acceptSession(accountSession)
+    let reject!: (error: unknown) => void
+    const changed = vi.fn(); window.addEventListener(ACCOUNT_CHANGED_EVENT, changed)
+    const fetch = vi.fn().mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: { code: 'COMPANY_CHANGED' } }), { status: 409 }))
+    vi.stubGlobal('fetch', fetch)
+    try {
+      const outcome = api.resources().catch(error => error)
+      acceptSession({ ...accountSession, user: { ...accountSession.user!, company: '西浦' } })
+      reject(new TypeError('connection reset'))
+      expect(await outcome).toMatchObject({ status: 409, code: 'COMPANY_CHANGED' })
+      for (const [, init] of fetch.mock.calls) expect(init.headers['X-RackTop-Company']).toBe(encodeURIComponent('A公司'))
+      expect(changed).toHaveBeenCalledOnce()
+    } finally { window.removeEventListener(ACCOUNT_CHANGED_EVENT, changed) }
+  })
   it('refreshes account permissions on photo access denial without treating it as a failed login', async () => {
     const changed = vi.fn(), expired = vi.fn()
     window.addEventListener(ACCOUNT_CHANGED_EVENT, changed); window.addEventListener(SESSION_EXPIRED_EVENT, expired)

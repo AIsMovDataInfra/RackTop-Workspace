@@ -303,6 +303,8 @@ function App() {
   const serverRowRefs = useRef(new Map<string, HTMLButtonElement>())
   const [showServerForm, setShowServerForm] = useState(false)
   const [editingServer, setEditingServer] = useState<Server | null>(null)
+  const editingServerIdRef = useRef<string | null>(null)
+  editingServerIdRef.current = editingServer?.id ?? null
   const [showSettings, setShowSettings] = useState(false)
   const [showActivityLog, setShowActivityLog] = useState(false)
   const [showKeyManager, setShowKeyManager] = useState(false)
@@ -377,6 +379,9 @@ function App() {
   const initialLoad = useRef(false)
   const manualRefreshFeedbackTimerRef = useRef<number | null>(null)
   const snapshotsRef = useRef<Record<string, Snapshot>>({})
+  const managedGenerations = useRef(new Map<string, number>())
+  const managedAvailability = useRef(new Map<string, boolean>())
+  const managedDirectoryRevision = useRef(0)
   const sharedGpuWatchesRef = useRef<SharedGpuWatchMap>(new Map())
   const expectedProcessExitsRef = useRef(new Set<string>())
   const ignoredMineProcessWarningsRef = useRef<Set<string>>((() => {
@@ -440,6 +445,12 @@ function App() {
     if (inFlightServers.current.has(serverId)) return
     const nowMs = Date.now()
     const serverConfig = servers.find((server) => server.id === serverId)
+    if ((managedAvailability.current.get(serverId) ?? serverConfig?.managed?.available) === false) {
+      if (!quiet) setToast(serverConfig?.managed?.reason || '请先连接团队账号并配置本机 SSH 认证')
+      return
+    }
+    const managedGeneration = managedGenerations.current.get(serverId) ?? 0
+    const stillCurrent = () => managedGeneration === (managedGenerations.current.get(serverId) ?? 0)
     if (quiet && serverConfig) {
       const fastStatusView = mainView === 'fleet' || (mainView === 'server' && selectedTab === 'overview' && selectedServerId === serverId)
       const refreshIntervalMs = statusRefreshIntervalMs(fastStatusView, document.hidden, serverConfig.samplingIntervalSeconds, settings?.backgroundSamplingIntervalSeconds ?? 15)
@@ -470,7 +481,7 @@ function App() {
       const includeDisks = collectDetailData && (!quiet || nowMs - (lastDiskAttemptAt.current[serverId] ?? 0) >= DISK_STATUS_INTERVAL_MS)
       const recordHistory = !serverConfig || shouldRecordHistory(lastHistoryRecordedAt.current[serverId], nowMs, serverConfig.samplingIntervalSeconds)
       const collected = await api.collectServer(serverId, includeProcesses, includeDisks, recordHistory, !quiet)
-      if (deletedServerIds.current.has(serverId)) return
+      if (deletedServerIds.current.has(serverId) || !stillCurrent()) return
       if (collected.processesSampled) lastProcessAttemptAt.current[serverId] = nowMs
       if (includeDisks) lastDiskAttemptAt.current[serverId] = nowMs
       const snapshot = {
@@ -525,12 +536,13 @@ function App() {
         const from = snapshot.timestamp - (settings?.realtimeWindowMinutes ?? 30) * 60
         try {
           const points = await api.getHistory(serverId, from)
-          if (!deletedServerIds.current.has(serverId)) setHistory((current) => ({ ...current, [serverId]: points }))
+          if (!deletedServerIds.current.has(serverId) && stillCurrent()) setHistory((current) => ({ ...current, [serverId]: points }))
         } catch (historyError) {
           if (!quiet) setToast(`历史数据读取失败：${String(historyError)}`)
         }
       }
     } catch (error) {
+      if (!stillCurrent()) return
       const message = error instanceof Error ? error.message : String(error)
       failureCounts.current[serverId] = (failureCounts.current[serverId] ?? 0) + 1
       const failureCount = failureCounts.current[serverId]
@@ -553,7 +565,8 @@ function App() {
       } : server))
       if (message.includes('主机指纹')) {
         try {
-          setPendingHostKey(await api.scanHostKey(serverId))
+          const hostKey = await api.scanHostKey(serverId)
+          if (stillCurrent()) setPendingHostKey(hostKey)
         } catch (scanError) {
           if (!quiet) setToast(String(scanError))
         }
@@ -620,8 +633,20 @@ function App() {
   }, [refreshServer])
 
   useEffect(() => {
-    void Promise.all([api.listServers(), api.listLatestSnapshots(), api.getSettings(), api.listIdleReservations(), api.listProjects(), api.listServerNotificationSettings()]).then(([loadedServers, loadedSnapshots, loadedSettings, loadedReservations, loadedProjects, loadedNotificationSettings]) => {
-      const restoredSnapshots = Object.fromEntries(loadedSnapshots.map((snapshot) => [snapshot.serverId, snapshot]))
+    let active = true
+    const directoryRevision = managedDirectoryRevision.current
+    void Promise.all([api.listServers(), api.listLatestSnapshots(), api.getSettings(), api.listIdleReservations(), api.listProjects(), api.listServerNotificationSettings()]).then(async ([loadedServers, loadedSnapshots, loadedSettings, loadedReservations, loadedProjects, loadedNotificationSettings]) => {
+      let readRevision = directoryRevision
+      while (active && readRevision !== managedDirectoryRevision.current) {
+        readRevision = managedDirectoryRevision.current
+        loadedServers = await api.listServers()
+      }
+      if (!active) return
+      for (const server of loadedServers) if (server.managed) managedAvailability.current.set(server.id, server.managed.available)
+      const restoredSnapshots = Object.fromEntries(loadedSnapshots.filter(snapshot => {
+        const server = loadedServers.find(item => item.id === snapshot.serverId)
+        return !server?.managed || (server.managed.available && directoryRevision === managedDirectoryRevision.current)
+      }).map((snapshot) => [snapshot.serverId, snapshot]))
       snapshotsRef.current = restoredSnapshots
       setSnapshots(restoredSnapshots)
       setServers(loadedServers)
@@ -634,7 +659,8 @@ function App() {
       savedNotificationSettingsRef.current = restoredNotifications
       setServerNotificationSettings(restoredNotifications)
       setSelectedServerId((current) => current ?? loadedServers[0]?.id ?? null)
-    })
+    }).catch(reason => { if (active) setToast(`读取本机资料失败：${String(reason)}`) })
+    return () => { active = false }
   }, [])
 
   const updateServerNotificationSettings = useCallback(async (next: ServerNotificationSettings) => {
@@ -917,6 +943,40 @@ function App() {
       void unlistenMenu.then((dispose) => dispose())
     }
   }, [runManualRefreshAll])
+
+  useEffect(() => {
+    if (!api.isDesktop) return
+    let active = true
+    const unlisten = listen<{ affectedIds: string[] }>('managed-servers-changed', async ({ payload }) => {
+      if (!active) return
+      const changed = new Set(payload.affectedIds)
+      const revision = ++managedDirectoryRevision.current
+      for (const id of changed) {
+        managedGenerations.current.set(id, (managedGenerations.current.get(id) ?? 0) + 1)
+        managedAvailability.current.set(id, false)
+        delete nextRetryAt.current[id]
+        delete failureCounts.current[id]
+      }
+      snapshotsRef.current = Object.fromEntries(Object.entries(snapshotsRef.current).filter(([id]) => !changed.has(id)))
+      setSnapshots(snapshotsRef.current)
+      setServers(current => current.map(server => changed.has(server.id) && server.managed ? { ...server, status: 'offline', managed: { ...server.managed, available: false } } : server))
+      setQuickTerminal(current => current && changed.has(current.server.id) ? null : current)
+      if (editingServerIdRef.current && changed.has(editingServerIdRef.current)) {
+        setShowServerForm(false)
+        setEditingServer(null)
+        setToast('团队服务器配置已变化，请重新打开本机认证设置。')
+      }
+      try {
+        const latest = await api.listServers()
+        if (!active || revision !== managedDirectoryRevision.current) return
+        for (const server of latest) if (server.managed) managedAvailability.current.set(server.id, server.managed.available)
+        setServers(current => [...current.filter(server => !server.managed), ...latest.filter(server => server.managed)]
+          .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0)))
+        setSelectedServerId(current => current ?? latest[0]?.id ?? null)
+      } catch (reason) { if (active) setToast('服务器目录已变化，读取本机状态失败：' + String(reason)) }
+    })
+    return () => { active = false; void unlisten.then(dispose => dispose()) }
+  }, [])
 
   useEffect(() => {
     const unlisten = api.onNotificationAction((extra) => {
@@ -1225,12 +1285,14 @@ function App() {
     const previous = draft.id ? servers.find((item) => item.id === draft.id) : undefined
     const saved = await api.saveServer(draft)
     const server = saved
+    if (saved.managed) managedAvailability.current.set(saved.id, saved.managed.available)
     deletedServerIds.current.delete(saved.id)
     setServers((current) => previous ? current.map((item) => item.id === saved.id ? server : item) : [...current, server])
     setSelectedServerId(saved.id)
     setShowServerForm(false)
     setEditingServer(null)
-    setToast('服务器已保存，正在连接…')
+    setToast(saved.managed && !saved.managed.available ? saved.managed.reason || '本机认证已保存，等待团队授权' : '服务器已保存，正在连接…')
+    if (saved.managed && !saved.managed.available) return
     void (async () => {
       let sync: RemoteHistorySyncResult | null = null
       if (saved.remoteHistoryEnabled) {
@@ -1389,6 +1451,7 @@ function App() {
   }
 
   async function removeServer(server: Server, revokeSshAccess: boolean) {
+    if (server.managed) { setToast('组织服务器由管理员在团队网页管理，历史记录保留。'); return }
     deletedServerIds.current.add(server.id)
     try {
       const deletion = await api.deleteServer(server.id, revokeSshAccess)
@@ -1620,7 +1683,8 @@ function App() {
         setMainView('server')
         setNotificationEditorServerId(server.id)
       },
-      delete: () => setServerPendingDelete(server),
+      delete: server.managed ? undefined : () => setServerPendingDelete(server),
+      canConnect: !server.managed || server.managed.available,
     }).catch((error) => setToast(`无法打开服务器菜单：${String(error)}`))
   }
 
@@ -1757,7 +1821,7 @@ function App() {
         </div>
       </main>
 
-      {showServerForm && <ServerForm initial={editingServer ? serverToDraft(editingServer) : undefined} defaultRemoteHistoryEnabled showGuide={settings?.showAddServerGuide ?? true} onGuideDismiss={() => { if (settings) void api.saveSettings({ ...settings, showAddServerGuide: false }).then(setSettings) }} onClose={() => { setShowServerForm(false); setEditingServer(null) }} onSave={saveServer} />}
+      {showServerForm && <ServerForm managed={editingServer?.managed} initial={editingServer ? serverToDraft(editingServer) : undefined} defaultRemoteHistoryEnabled showGuide={settings?.showAddServerGuide ?? true} onGuideDismiss={() => { if (settings) void api.saveSettings({ ...settings, showAddServerGuide: false }).then(setSettings) }} onClose={() => { setShowServerForm(false); setEditingServer(null) }} onSave={saveServer} />}
       {projectEditor && <ProjectForm initial={projectEditor === 'new' ? null : projectEditor} projects={projects} servers={servers} activeSyncTargets={new Set([...busyProjectTargets, ...projectSyncProgress.map((progress) => `${progress.projectId}:${progress.targetServerId}`)])} onClose={() => setProjectEditor(null)} onSave={saveProject} />}
       {projectPendingDelete && <ProjectDeleteDialog project={projectPendingDelete} onClose={() => setProjectPendingDelete(null)} onDelete={async () => { await api.deleteProject(projectPendingDelete.id); setProjects((current) => current.filter((item) => item.id !== projectPendingDelete.id)); setProjectPendingDelete(null); setToast(`已移除“${projectPendingDelete.name}”的同步配置，服务器文件未删除`) }} />}
       {projectConflictTarget && <ProjectConflictDialog project={projectConflictTarget.project} server={servers.find((item) => item.id === projectConflictTarget.targetServerId)} onClose={() => setProjectConflictTarget(null)} onConfirm={() => { const pending = projectConflictTarget; setProjectConflictTarget(null); void syncProjectTarget(pending.project, pending.targetServerId, true, true) }} />}
@@ -1808,7 +1872,7 @@ function LoadingServer({ server, isRefreshing, onRefresh, onEdit, onDelete }: { 
       <span className="empty-state__icon"><Network size={28} /></span>
       <h2>{isConnecting ? `正在连接 ${server ? serverDisplayName(server.name) : ''}` : isOffline ? `${server ? serverDisplayName(server.name) : '服务器'} 当前离线` : '尚无采样数据'}</h2>
       <p>{server?.lastError ?? '通过 SSH 获取第一份指标后，这里会显示完整服务器详情。'}</p>
-      <div className="loading-server__actions"><button className="button button--primary" onClick={onRefresh} disabled={isConnecting}><RefreshCw size={17} className={isConnecting ? 'spin' : ''} />{isConnecting ? '连接中…' : isOffline ? '重新连接' : '立即连接'}</button>{server && <><button className="button button--secondary" onClick={onEdit}><Settings size={16} />编辑配置</button><button className="button button--danger" onClick={onDelete}><Trash2 size={16} />删除服务器</button></>}</div>
+      <div className="loading-server__actions"><button className="button button--primary" onClick={onRefresh} disabled={isConnecting || !!server?.managed && !server.managed.available}><RefreshCw size={17} className={isConnecting ? 'spin' : ''} />{isConnecting ? '连接中…' : isOffline ? '重新连接' : '立即连接'}</button>{server && <><button className="button button--secondary" onClick={onEdit}><Settings size={16} />编辑配置</button>{!server.managed && <button className="button button--danger" onClick={onDelete}><Trash2 size={16} />删除服务器</button>}</>}</div>
     </div>
   )
 }
@@ -2253,7 +2317,7 @@ function ConnectionView({ server, snapshot, nvidiaWarningIgnored, ignoredGpuMemo
   const canRestoreNvidiaWarning = nvidiaWarningIgnored && snapshot.nvidiaSmi !== 'available'
   const ignoredMemoryWarnings = ignoredGpuMemoryStallGpus(server.id, snapshot, ignoredGpuMemoryStallWarningIds)
   const ignoredCount = ignoredMemoryWarnings.length + (canRestoreNvidiaWarning ? 1 : 0)
-  return <div className="content-stack"><section className="panel connection-panel"><PanelHeader icon={<KeyRound />} title="SSH 连接" subtitle="认证信息仅在本机使用" /><dl className="definition-list"><div><dt>物理位置</dt><dd>{server.location || '未填写'}</dd></div><div><dt>连接地址</dt><dd className="mono">{server.username}@{server.host}:{server.port}</dd></div><div><dt>认证</dt><dd>{isRackTopManagedIdentity(server.identityFile) ? 'RackTop 专用密钥' : server.authMethod === 'sshAgent' ? 'SSH Agent / 默认密钥' : server.authMethod === 'privateKey' ? '指定私钥' : server.authMethod === 'sshConfig' ? 'SSH Config' : '系统钥匙串密码'}</dd></div><div><dt>SSH Config</dt><dd>{server.sshAlias || '未使用别名'}</dd></div><div><dt>私钥</dt><dd className="mono">{server.identityFile || '由 OpenSSH 自动选择'}</dd></div><div><dt>ProxyJump</dt><dd className="mono">{server.proxyJump || '无'}</dd></div>{server.proxyJump && <div><dt>跳板机认证</dt><dd>{server.proxyUsePassword ? '独立密码' : 'OpenSSH 配置'}</dd></div>}<div><dt>远端历史</dt><dd>{server.remoteHistoryEnabled ? `已启用 · ${server.remoteHistoryLastSyncAt ? `同步于 ${relativeTime(server.remoteHistoryLastSyncAt)}` : '等待首次同步'}` : '未启用'}</dd></div></dl><div className="panel__actions"><button className="button button--primary" onClick={onRefresh} disabled={isRefreshing}><RefreshCw size={16} className={isRefreshing ? 'spin' : ''} />测试并重新连接</button><button className="button button--secondary" onClick={onEdit}><Settings size={16} />编辑配置</button></div></section>{ignoredCount > 0 && <section className="panel ignored-warning-list"><PanelHeader icon={<BellOff />} title={`已忽略的 ${accelerator} 提醒`} subtitle={`${ignoredCount} 项提醒仅在此处保留`} /><div>{canRestoreNvidiaWarning && <div className="ignored-warning-row"><div><strong>GPU 读取异常</strong><p>不可读取的显卡仍会显示，但服务器状态暂按在线处理。</p></div><button className="button button--secondary button--small" onClick={onRestoreNvidiaWarning}><Bell size={14} />恢复提醒</button></div>}{ignoredMemoryWarnings.map((gpu) => <div className="ignored-warning-row" key={gpu.uuid}><div><strong>{accelerator} {gpu.index} · {gpu.name.replace(/^NVIDIA\s+/i, '')} 显存占用预警</strong><p>当前占用 {(gpu.memoryUsedMb / 1024).toFixed(1)} / {(gpu.memoryTotalMb / 1024).toFixed(1)} GB，UTL {clampPercent(gpu.utilization).toFixed(0)}%。</p></div><button className="button button--secondary button--small" onClick={() => onRestoreGpuMemoryStallWarning(`gpu-memory-stall:${server.id}:${gpu.uuid}`)}><Bell size={14} />恢复提醒</button></div>)}</div></section>}<ServerNotificationSettingsMenu settings={notificationSettings} onChange={onNotificationSettingsChange} openRequested={notificationMenuRequested} onOpenRequestHandled={onNotificationMenuRequestHandled} /><section className="panel danger-zone"><div><strong>删除服务器</strong><p>删除本机记录、历史数据、远端采集进程和服务器用户目录中的 RackTop 数据。</p></div><button className="button button--danger" onClick={onDelete}><Trash2 size={16} />删除</button></section></div>
+  return <div className="content-stack"><section className="panel connection-panel"><PanelHeader icon={<KeyRound />} title="SSH 连接" subtitle="认证信息仅在本机使用" /><dl className="definition-list"><div><dt>物理位置</dt><dd>{server.location || '未填写'}</dd></div><div><dt>连接地址</dt><dd className="mono">{server.username}@{server.host}:{server.port}</dd></div><div><dt>认证</dt><dd>{isRackTopManagedIdentity(server.identityFile) ? 'RackTop 专用密钥' : server.authMethod === 'sshAgent' ? 'SSH Agent / 默认密钥' : server.authMethod === 'privateKey' ? '指定私钥' : server.authMethod === 'sshConfig' ? 'SSH Config' : '系统钥匙串密码'}</dd></div><div><dt>SSH Config</dt><dd>{server.sshAlias || '未使用别名'}</dd></div><div><dt>私钥</dt><dd className="mono">{server.identityFile || '由 OpenSSH 自动选择'}</dd></div><div><dt>ProxyJump</dt><dd className="mono">{server.proxyJump || '无'}</dd></div>{server.proxyJump && <div><dt>跳板机认证</dt><dd>{server.proxyUsePassword ? '独立密码' : 'OpenSSH 配置'}</dd></div>}<div><dt>远端历史</dt><dd>{server.remoteHistoryEnabled ? `已启用 · ${server.remoteHistoryLastSyncAt ? `同步于 ${relativeTime(server.remoteHistoryLastSyncAt)}` : '等待首次同步'}` : '未启用'}</dd></div></dl><div className="panel__actions"><button className="button button--primary" onClick={onRefresh} disabled={isRefreshing}><RefreshCw size={16} className={isRefreshing ? 'spin' : ''} />测试并重新连接</button><button className="button button--secondary" onClick={onEdit}><Settings size={16} />编辑配置</button></div></section>{ignoredCount > 0 && <section className="panel ignored-warning-list"><PanelHeader icon={<BellOff />} title={`已忽略的 ${accelerator} 提醒`} subtitle={`${ignoredCount} 项提醒仅在此处保留`} /><div>{canRestoreNvidiaWarning && <div className="ignored-warning-row"><div><strong>GPU 读取异常</strong><p>不可读取的显卡仍会显示，但服务器状态暂按在线处理。</p></div><button className="button button--secondary button--small" onClick={onRestoreNvidiaWarning}><Bell size={14} />恢复提醒</button></div>}{ignoredMemoryWarnings.map((gpu) => <div className="ignored-warning-row" key={gpu.uuid}><div><strong>{accelerator} {gpu.index} · {gpu.name.replace(/^NVIDIA\s+/i, '')} 显存占用预警</strong><p>当前占用 {(gpu.memoryUsedMb / 1024).toFixed(1)} / {(gpu.memoryTotalMb / 1024).toFixed(1)} GB，UTL {clampPercent(gpu.utilization).toFixed(0)}%。</p></div><button className="button button--secondary button--small" onClick={() => onRestoreGpuMemoryStallWarning(`gpu-memory-stall:${server.id}:${gpu.uuid}`)}><Bell size={14} />恢复提醒</button></div>)}</div></section>}<ServerNotificationSettingsMenu settings={notificationSettings} onChange={onNotificationSettingsChange} openRequested={notificationMenuRequested} onOpenRequestHandled={onNotificationMenuRequestHandled} />{!server.managed && <section className="panel danger-zone"><div><strong>删除服务器</strong><p>删除本机记录、历史数据、远端采集进程和服务器用户目录中的 RackTop 数据。</p></div><button className="button button--danger" onClick={onDelete}><Trash2 size={16} />删除</button></section>}</div>
 }
 
 function NvidiaWarning({ snapshot, onRefresh, onIgnore }: { snapshot: Snapshot; onRefresh: () => void; onIgnore: () => void }) {

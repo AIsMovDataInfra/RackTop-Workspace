@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
-import { Building2, ArrowLeft, Check, ChevronRight, ClipboardList, LayoutGrid, FileText, HandHelping, LogOut, MapPin, Package, Pencil, Plus, QrCode, RefreshCw, Search, Settings, UserRound } from 'lucide-react'
+import { Building2, ArrowLeft, Check, ChevronRight, ClipboardList, LayoutGrid, FileText, HandHelping, LogOut, MapPin, Package, Pencil, Plus, QrCode, RefreshCw, Search, Server, Settings, UserRound } from 'lucide-react'
 import { api, ApiError } from './api'
 import { EquipmentPhoto } from './EquipmentPhoto'
 import { EquipmentThumbnail } from './EquipmentThumbnail'
 import { MemberAvatar } from './MemberAvatar'
 import { Brand } from './Brand'
+import { CompanySwitcher } from './CompanySwitcher'
 import './equipment-company.css'
 import './equipment-overview.css'
 import { EquipmentLabel } from './AssetLabel'
@@ -100,8 +101,8 @@ export function EquipmentWorkspace({ id, session, state, navigate, onSessionChan
   return <>
     <div className="workspace-shell equipment-workspace" inert={Boolean(modal)}>
       <aside className="sidebar">
-        <Brand t={t} />
-        <nav className="main-nav" aria-label={t('主导航', 'Main navigation')}><button onClick={() => navigate('/')}><LayoutGrid size={18} />{t('算力预约', 'Compute bookings')}</button><button onClick={() => navigate('/reports')}><FileText size={18}/>{t('周报与绩效', 'Weekly reports')}</button><button onClick={() => navigate('/requests')}><HandHelping size={18}/>{t('设备申请与领取', 'Device requests')}</button><button className="is-active" aria-current="page" onClick={() => navigate('/equipment')}><Package size={18} />{t('设备管理', 'Equipment')}</button>{session.user?.isSuperAdmin && <button onClick={() => navigate('/members')}><UserRound size={18} />{t('成员管理', 'Members')}</button>}</nav>
+        <Brand t={t} /><CompanySwitcher session={session} t={t} onSessionChanged={onSessionChanged}/>
+        <nav className="main-nav" aria-label={t('主导航', 'Main navigation')}><button onClick={() => navigate('/')}><LayoutGrid size={18} />{t('算力预约', 'Compute bookings')}</button><button onClick={() => navigate('/servers')}><Server size={18}/>{t('服务器目录', 'Servers')}</button><button onClick={() => navigate('/reports')}><FileText size={18}/>{t('周报与绩效', 'Weekly reports')}</button><button onClick={() => navigate('/requests')}><HandHelping size={18}/>{t('设备申请与领取', 'Device requests')}</button><button className="is-active" aria-current="page" onClick={() => navigate('/equipment')}><Package size={18} />{t('设备管理', 'Equipment')}</button>{session.user?.isSuperAdmin && <button onClick={() => navigate('/members')}><UserRound size={18} />{t('成员管理', 'Members')}</button>}</nav>
         <div className="sidebar-bottom"><div className="sidebar-note"><QrCode size={17} /><p>{t('贴上设备标签，成员登录后扫码查看与登记。', 'Members can scan a label to view and register equipment after signing in.')}</p></div><button className="sidebar-settings" onClick={() => setModal('settings')}><Settings size={17} />{t('设置', 'Settings')}</button><div className="profile"><MemberAvatar avatar={session.user?.avatar} /><div><strong>{session.user?.name || t('访客', 'Guest')}</strong><small>{session.user.isSuperAdmin ? t('跨公司管理', 'Across companies') : session.user.company || ''} · {session.user?.isSuperAdmin ? t('超级管理员', 'Super administrator') : session.user?.role === 'admin' ? t('资源管理员', 'Resource administrator') : t('团队成员', 'Team member')}</small></div>{session.user ? <button className="icon-button" aria-label={t('退出登录', 'Sign out')} disabled={loggingOut} onClick={async () => { setLoggingOut(true); try { await onLogout() } catch (reason) { setError(reason) } finally { setLoggingOut(false) } }}><LogOut size={16} /></button> : <button onClick={onSessionExpired}>{t('登录', 'Sign in')}</button>}</div></div>
       </aside>
       <main className="main-workspace">

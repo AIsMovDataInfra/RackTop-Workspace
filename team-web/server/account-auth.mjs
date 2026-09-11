@@ -70,6 +70,17 @@ function company(value) {
   if (!ACCOUNT_COMPANIES.includes(value)) throw fail(422, 'INVALID_COMPANY', '请选择 A公司、B公司、C公司或西浦。');
   return value;
 }
+function selectedCompanies(body) {
+  if (Object.hasOwn(body, 'companies')) {
+    if (Object.hasOwn(body, 'company') || !Array.isArray(body.companies)
+      || body.companies.length > ACCOUNT_COMPANIES.length || new Set(body.companies).size !== body.companies.length) {
+      throw fail(422, 'INVALID_COMPANY', '组织归属必须是不重复的组织列表。');
+    }
+    body.companies.forEach(company);
+    return ACCOUNT_COMPANIES.filter(value => body.companies.includes(value));
+  }
+  return [company(body.company)];
+}
 function version(value) {
   if (!Number.isSafeInteger(value) || value < 1) throw fail(422, 'INVALID_VERSION', '请刷新成员信息后重试。');
   return value;
@@ -139,6 +150,22 @@ export function createAccountAuth(config) {
         action TEXT NOT NULL, old_version INTEGER, new_version INTEGER NOT NULL,
         old_company TEXT, new_company TEXT, created_at INTEGER NOT NULL
       );`);
+    const sessionColumns = new Set(db.prepare('PRAGMA table_info(account_sessions)').all().map(column => column.name));
+    if (!sessionColumns.has('active_company')) db.exec("ALTER TABLE account_sessions ADD COLUMN active_company TEXT CHECK(active_company IS NULL OR active_company IN ('A公司','B公司','C公司','西浦'))");
+    if (!sessionColumns.has('company_scope_required')) db.exec('ALTER TABLE account_sessions ADD COLUMN company_scope_required INTEGER NOT NULL DEFAULT 0 CHECK(company_scope_required IN (0,1))');
+    db.exec(`CREATE TABLE IF NOT EXISTS account_user_companies (
+      user_id TEXT NOT NULL REFERENCES account_users(id) ON DELETE CASCADE,
+      company TEXT NOT NULL CHECK(company IN ('A公司','B公司','C公司','西浦')),
+      PRIMARY KEY(user_id,company)
+    ); CREATE INDEX IF NOT EXISTS account_user_companies_company ON account_user_companies(company,user_id);`);
+    // Backfill legacy single-company grants exactly once. A later restart must
+    // never resurrect an explicitly revoked membership from the legacy column.
+    if (!db.prepare("SELECT value FROM account_auth_meta WHERE key = 'company_memberships_v1'").get()) {
+      db.exec(`INSERT OR IGNORE INTO account_user_companies(user_id,company)
+        SELECT id,company FROM account_users WHERE deleted_at IS NULL AND is_super_admin = 0 AND company IS NOT NULL;
+        UPDATE account_sessions SET active_company = (SELECT company FROM account_users WHERE id = account_sessions.user_id AND is_super_admin = 0);`);
+      db.prepare("INSERT INTO account_auth_meta(key,value) VALUES('company_memberships_v1',?)").run(String(now()));
+    }
     db.exec('COMMIT');
   } catch (error) { db.exec('ROLLBACK'); db.close(); throw error; }
   const rates = new Map();
@@ -207,19 +234,31 @@ export function createAccountAuth(config) {
     const raw = req.headers?.authorization;
     return typeof raw === 'string' ? /^Bearer ([A-Za-z0-9_-]{43})$/.exec(raw)?.[1] ?? null : null;
   }
-  function userView(row) {
-    return row?.id && row.deleted_at == null ? { id: row.id, name: row.name, role: row.role, username: row.username,
-      isSuperAdmin: Boolean(row.is_super_admin), company: row.is_super_admin ? null : row.company ?? null, version: row.version ?? 1, avatar: row.avatar_choice ?? row.avatar ?? 'user' } : null;
+  function memberships(id) {
+    const granted = db.prepare('SELECT company FROM account_user_companies WHERE user_id = ?').all(id).map(row => row.company);
+    return ACCOUNT_COMPANIES.filter(value => granted.includes(value));
+  }
+  function hasCompanyMembership(id, selectedCompany) {
+    return typeof id === 'string' && ACCOUNT_COMPANIES.includes(selectedCompany) && Boolean(db.prepare(`SELECT 1 FROM account_user_companies m
+      JOIN account_users u ON u.id = m.user_id WHERE m.user_id = ? AND m.company = ? AND u.deleted_at IS NULL AND u.is_super_admin = 0`).get(id, selectedCompany));
+  }
+  function userView(row, activeCompany = row?.company) {
+    if (!row?.id || row.deleted_at != null) return null;
+    const companies = row.is_super_admin ? [] : memberships(row.id);
+    const primary = companies.includes(row.company) ? row.company : companies[0] ?? null;
+    return { id: row.id, name: row.name, role: row.role, username: row.username,
+      isSuperAdmin: Boolean(row.is_super_admin), company: companies.includes(activeCompany) ? activeCompany : primary,
+      companies, version: row.version ?? 1, avatar: row.avatar_choice ?? row.avatar ?? 'user' };
   }
   function recordFor(req, browserOnly = false) {
     purge();
     const hasBearer = !browserOnly && req.headers?.authorization !== undefined;
     const token = hasBearer ? bearerToken(req) : browserToken(req);
     if (!token) return null;
-    const row = db.prepare(`SELECT s.token_hash, s.kind, s.expires_at, s.remember_me, a.id, a.name, a.username, a.role, a.is_super_admin, a.company, a.version, a.deleted_at, a.avatar, a.avatar_choice
+    const row = db.prepare(`SELECT s.token_hash, s.kind, s.expires_at, s.remember_me, s.active_company, s.company_scope_required, a.id, a.name, a.username, a.role, a.is_super_admin, a.company, a.version, a.deleted_at, a.avatar, a.avatar_choice
       FROM account_sessions s LEFT JOIN account_users a ON a.id = s.user_id
       WHERE s.token_hash = ? AND s.kind = ? AND s.expires_at > ?`).get(digest(token), hasBearer ? 'device' : 'browser', now());
-    return row ? { user: userView(row), csrfToken: row.kind === 'browser' ? csrfFor(token) : null,
+    return row ? { user: userView(row, row.active_company), scopeRequired: Boolean(row.company_scope_required), csrfToken: row.kind === 'browser' ? csrfFor(token) : null,
       kind: row.kind, rememberMe: Boolean(row.remember_me), tokenHash: row.token_hash, expiresAt: row.expires_at } : null;
   }
   function payload(record) {
@@ -227,7 +266,7 @@ export function createAccountAuth(config) {
       feishuConfigured: false, accountRegistration: true, rememberMe: record?.rememberMe ?? false,
       notifications: { configured: Boolean(config.notificationsConfigured) }, timezone: 'Asia/Shanghai' };
   }
-  function createSession(req, res, account, rememberMe = false) {
+  function createSession(req, res, account, rememberMe = false, activeCompany = account?.company, scopeRequired = false) {
     purge();
     const previous = browserToken(req);
     if (previous) db.prepare("DELETE FROM account_sessions WHERE token_hash = ? AND kind = 'browser'").run(digest(previous));
@@ -238,11 +277,12 @@ export function createAccountAuth(config) {
       SELECT token_hash FROM account_sessions WHERE user_id = ? AND kind = 'browser' ORDER BY created_at DESC LIMIT -1 OFFSET 7
     )`).run(account.id);
     const token = randomToken(), ttl = account ? (rememberMe ? REMEMBERED_SESSION_MS : SESSION_MS) : ANONYMOUS_MS;
-    db.prepare("INSERT INTO account_sessions(token_hash,user_id,kind,remember_me,expires_at,created_at) VALUES(?,?,'browser',?,?,?)").run(digest(token), account?.id ?? null, account && rememberMe ? 1 : 0, now() + ttl, now());
+    const user = userView(account, activeCompany);
+    db.prepare("INSERT INTO account_sessions(token_hash,user_id,kind,remember_me,expires_at,created_at,active_company,company_scope_required) VALUES(?,?,'browser',?,?,?,?,?)").run(digest(token), account?.id ?? null, account && rememberMe ? 1 : 0, now() + ttl, now(), user?.company ?? null, scopeRequired ? 1 : 0);
     const current = res.getHeader('Set-Cookie');
     res.setHeader('Set-Cookie', [...(Array.isArray(current) ? current : current ? [current] : []),
       `${cookieName}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${ttl / 1000}${secure ? '; Secure' : ''}`]);
-    return { user: userView(account), csrfToken: csrfFor(token), kind: 'browser', rememberMe: Boolean(account && rememberMe), expiresAt: now() + ttl };
+    return { user, scopeRequired, csrfToken: csrfFor(token), kind: 'browser', rememberMe: Boolean(account && rememberMe), expiresAt: now() + ttl };
   }
   function verifyCsrf(req) {
     verifyOrigin(req);
@@ -253,11 +293,27 @@ export function createAccountAuth(config) {
   function resolve(req) {
     validateRequest(req);
     const record = recordFor(req);
+    verifyCompanyScope(req, record);
     return record?.user ? { user: { ...record.user }, csrfToken: record.csrfToken, kind: record.kind, expiresAt: new Date(record.expiresAt).toISOString() } : null;
+  }
+  function verifyCompanyScope(req, record) {
+    // Session refresh and an explicit switch are how a stale tab recovers.
+    const path = typeof req.url === 'string' ? req.url.split('?')[0] : '';
+    if (!record?.user || path === '/api/session' || path === '/api/auth/company') return;
+    const header = req.headers?.['x-racktop-company'];
+    if (header === undefined && !record.scopeRequired) return; // Existing single-company clients.
+    let expected;
+    try {
+      if (typeof header !== 'string' || /[^\x20-\x7e]/.test(header)) throw new Error('invalid');
+      expected = decodeURIComponent(header);
+      if (expected !== '' && !ACCOUNT_COMPANIES.includes(expected)) throw new Error('invalid');
+    } catch { throw fail(409, 'COMPANY_CHANGED', '当前组织已变化，请刷新页面后重试。'); }
+    if ((expected || null) !== record.user.company) throw fail(409, 'COMPANY_CHANGED', '当前组织已变化，请刷新页面后重试。');
   }
   function verifyWrite(req, session) {
     verifyOrigin(req);
     const record = recordFor(req);
+    verifyCompanyScope(req, record);
     if (record?.kind !== 'device') verifyCsrf(req);
     if (!record?.user || !session?.user || record.user.id !== session.user.id || record.user.role !== session.user.role
       || record.user.isSuperAdmin !== session.user.isSuperAdmin || record.user.company !== session.user.company || record.user.version !== session.user.version
@@ -319,13 +375,23 @@ export function createAccountAuth(config) {
     try { const result = fn(); db.exec('COMMIT'); return result; }
     catch (error) { db.exec('ROLLBACK'); throw error; }
   }
-  function insertMember(normalizedUsername, displayName, passwordHash, selectedCompany, actorId, superAdmin = false) {
+  function revokeRemovedCompanyGrants(userId) {
+    if (db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='managed_server_grants'").get()
+      && db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='managed_servers'").get()) {
+      db.prepare(`DELETE FROM managed_server_grants WHERE user_id = ? AND server_id IN (
+        SELECT s.id FROM managed_servers s WHERE NOT EXISTS (
+          SELECT 1 FROM account_user_companies m WHERE m.user_id = ? AND m.company = s.company))`).run(userId, userId);
+    }
+  }
+  function insertMember(normalizedUsername, displayName, passwordHash, companies, actorId, superAdmin = false) {
+    const selectedCompany = companies?.[0] ?? null;
     const nameKey = displayName.normalize('NFKC').toLowerCase();
     if (db.prepare('SELECT COUNT(*) AS n FROM account_users WHERE deleted_at IS NULL').get().n >= 500) throw fail(403, 'ACCOUNT_LIMIT', '本站成员数量已达上限，请联系管理员。');
     if (db.prepare('SELECT id FROM account_users WHERE username_key = ? OR name_key = ?').get(username(normalizedUsername), nameKey)) throw fail(409, 'ACCOUNT_EXISTS', '用户名或名字已被使用。');
     const id = randomUUID();
     db.prepare(`INSERT INTO account_users(id,username,name,name_key,password_hash,role,created_at,is_super_admin,company,username_key)
       VALUES(?,?,?,?,?,?,?,?,?,?)`).run(id, normalizedUsername, displayName, nameKey, passwordHash, superAdmin ? 'admin' : 'member', now(), superAdmin ? 1 : 0, selectedCompany, username(normalizedUsername));
+    for (const selected of companies ?? []) db.prepare('INSERT INTO account_user_companies(user_id,company) VALUES(?,?)').run(id, selected);
     const row = activeMember(id);
     audit(actorId, { ...row, version: null, company: null }, superAdmin ? 'super-admin-created' : 'member-created', row.version, selectedCompany);
     return row;
@@ -337,13 +403,13 @@ export function createAccountAuth(config) {
       return true;
     }
     if (path === '/api/admin/members' && req.method === 'POST') {
-      fields(body, ['username', 'name', 'password', 'company']);
-      const { username: normalizedUsername, name: displayName } = accountIdentity(body), supplied = password(body.password), selectedCompany = company(body.company);
+      fields(body, ['username', 'name', 'password', 'company', 'companies']);
+      const { username: normalizedUsername, name: displayName } = accountIdentity(body), supplied = password(body.password), companies = selectedCompanies(body);
       rate(`admin-write:${actor.user.id}`, 60, 15 * 60_000);
       const passwordHash = await hashPassword(supplied);
       const fresh = requireSuperAdmin(req, true);
       if (fresh.user.id !== actor.user.id) throw fail(401, 'AUTH_REQUIRED', '登录状态已变化，请重新登录。');
-      const row = transaction(() => insertMember(normalizedUsername, displayName, passwordHash, selectedCompany, fresh.user.id));
+      const row = transaction(() => insertMember(normalizedUsername, displayName, passwordHash, companies, fresh.user.id));
       json(res, 201, { member: memberView(row) });
       return true;
     }
@@ -369,13 +435,19 @@ export function createAccountAuth(config) {
       return true;
     }
     if (!reset && req.method === 'PATCH') {
-      fields(body, ['version', 'company']);
-      const expectedVersion = version(body.version), selectedCompany = company(body.company);
+      fields(body, ['version', 'company', 'companies']);
+      const expectedVersion = version(body.version), companies = selectedCompanies(body);
       const row = transaction(() => {
         const previous = editableMember(id, expectedVersion, actor.user.id, true);
         if (previous.is_super_admin) throw fail(403, 'SUPERADMIN_COMPANY_NOT_REQUIRED', '超级管理员无需分配公司。');
-        if (previous.company !== selectedCompany) {
+        const selectedCompany = companies.includes(previous.company) ? previous.company : companies[0] ?? null;
+        if (previous.company !== selectedCompany || JSON.stringify(memberships(id)) !== JSON.stringify(companies)) {
+          db.prepare('DELETE FROM account_user_companies WHERE user_id = ?').run(id);
+          for (const selected of companies) db.prepare('INSERT INTO account_user_companies(user_id,company) VALUES(?,?)').run(id, selected);
           db.prepare('UPDATE account_users SET company = ?, version = version + 1 WHERE id = ?').run(selectedCompany, id);
+          db.prepare(`UPDATE account_sessions SET active_company = ? WHERE user_id = ? AND
+            (active_company IS NULL OR active_company NOT IN (SELECT company FROM account_user_companies WHERE user_id = ?))`).run(selectedCompany, id, id);
+          revokeRemovedCompanyGrants(id);
           audit(actor.user.id, previous, 'company-changed', previous.version + 1, selectedCompany);
         }
         return activeMember(id);
@@ -392,6 +464,8 @@ export function createAccountAuth(config) {
           company = NULL, recovery_requested_at = NULL, deleted_at = ?, version = version + 1 WHERE id = ?`)
           .run(`deleted-${randomUUID()}`, `deleted-${randomUUID()}`, `deleted:${randomUUID()}`, now(), id);
         db.prepare('DELETE FROM account_sessions WHERE user_id = ?').run(id);
+        db.prepare('DELETE FROM account_user_companies WHERE user_id = ?').run(id);
+        revokeRemovedCompanyGrants(id);
         audit(actor.user.id, previous, 'member-deleted', previous.version + 1, null);
       });
       json(res, 200, { ok: true });
@@ -453,6 +527,21 @@ export function createAccountAuth(config) {
       return handleMembers(req, res, path, body);
     }
     if (req.method !== 'POST') throw fail(404, 'NOT_FOUND', '没有此认证接口。');
+    if (path === '/api/auth/company') {
+      if (url.search) throw fail(422, 'INVALID_INPUT', '此接口不接受查询参数。');
+      const current = resolve(req);
+      if (!current?.user) throw fail(401, 'AUTH_REQUIRED', '请先登录。');
+      verifyWrite(req, current);
+      fields(body, ['company']);
+      const selected = current.user.isSuperAdmin && body.company === null ? null : company(body.company);
+      if (current.user.isSuperAdmin ? selected !== null : !hasCompanyMembership(current.user.id, selected)) {
+        throw fail(403, 'COMPANY_NOT_ALLOWED', '你不属于此组织。');
+      }
+      const record = recordFor(req);
+      db.prepare('UPDATE account_sessions SET active_company = ?, company_scope_required = 1 WHERE token_hash = ?').run(selected, record.tokenHash);
+      json(res, 200, payload(recordFor(req)));
+      return true;
+    }
     if (path === '/api/auth/register') {
       verifyCsrf(req);
       fields(body, ['username', 'name', 'password', 'bootstrapToken', 'rememberMe']);
@@ -507,7 +596,7 @@ export function createAccountAuth(config) {
       if (db.prepare("SELECT COUNT(*) AS n FROM account_sessions WHERE user_id = ? AND kind = 'device'").get(account.id).n >= 8) throw fail(409, 'DEVICE_LIMIT', '最多登录 8 台设备，请先退出其他设备，或修改密码撤销所有设备。');
       if (db.prepare('SELECT COUNT(*) AS n FROM account_sessions').get().n >= 2500) throw fail(503, 'SESSION_LIMIT', '当前登录请求较多，请稍后重试。');
       const token = randomToken(), expiresAt = now() + DEVICE_MS;
-      db.prepare("INSERT INTO account_sessions(token_hash,user_id,kind,device_name,expires_at,created_at) VALUES(?,?,'device',?,?,?)").run(digest(token), account.id, deviceName, expiresAt, now());
+      db.prepare("INSERT INTO account_sessions(token_hash,user_id,kind,device_name,expires_at,created_at,active_company) VALUES(?,?,'device',?,?,?,?)").run(digest(token), account.id, deviceName, expiresAt, now(), userView(account).company);
       json(res, 200, { token, expiresAt: new Date(expiresAt).toISOString(), user: userView(account) });
       return true;
     }
@@ -568,12 +657,12 @@ export function createAccountAuth(config) {
         db.prepare('DELETE FROM account_sessions WHERE user_id = ?').run(account.id);
         db.exec('COMMIT');
       } catch (error) { db.exec('ROLLBACK'); throw error; }
-      json(res, 200, payload(createSession(req, res, db.prepare('SELECT * FROM account_users WHERE id = ?').get(account.id), current.rememberMe)));
+      json(res, 200, payload(createSession(req, res, db.prepare('SELECT * FROM account_users WHERE id = ?').get(account.id), current.rememberMe, fresh.user.company, fresh.scopeRequired)));
       return true;
     }
     throw fail(404, 'NOT_FOUND', '没有此认证接口。');
   }
-  return { handle, resolve, verifyWrite, provisionSuperAdmin,
+  return { handle, resolve, verifyWrite, provisionSuperAdmin, hasCompanyMembership,
     getMemberIdentity(id) { if (typeof id !== 'string') return null; return userView(db.prepare('SELECT * FROM account_users WHERE id = ? AND deleted_at IS NULL').get(id)); },
     sessionPayload(req) { validateRequest(req); return payload(recordFor(req)); },
     close() { if (!closed) { closed = true; rates.clear(); db.close(); } } };

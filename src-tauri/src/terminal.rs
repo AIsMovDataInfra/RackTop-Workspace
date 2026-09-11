@@ -13,6 +13,8 @@ use tauri::{AppHandle, Emitter};
 use uuid::Uuid;
 
 struct TerminalSession {
+    server_id: String,
+    authorization_epoch: Option<i64>,
     writer: Box<dyn Write + Send>,
     child: Box<dyn Child + Send + Sync>,
     master: Box<dyn MasterPty + Send>,
@@ -42,6 +44,7 @@ impl TerminalManager {
         app: AppHandle,
         server: &Server,
         password: Option<&crate::ssh_connection::SshPasswords>,
+        authorization_epoch: Option<i64>,
         columns: u16,
         rows: u16,
         gpu_index: Option<u32>,
@@ -84,6 +87,8 @@ impl TerminalManager {
         });
 
         self.sessions.lock().map_err(|error| error.to_string())?.insert(session_id.clone(), TerminalSession {
+            server_id: server.id.clone(),
+            authorization_epoch,
             writer,
             child,
             master: pair.master,
@@ -91,21 +96,41 @@ impl TerminalManager {
         Ok(session_id)
     }
 
-    pub fn write(&self, session_id: &str, data: &[u8]) -> Result<(), String> {
+    pub fn write(&self, database: &crate::storage::Database, session_id: &str, data: &[u8]) -> Result<(), String> {
         let mut sessions = self.sessions.lock().map_err(|error| error.to_string())?;
+        Self::validate_session(&mut sessions, database, session_id)?;
         let session = sessions.get_mut(session_id).ok_or("终端会话已关闭")?;
         session.writer.write_all(data).and_then(|_| session.writer.flush()).map_err(|error| format!("终端写入失败：{error}"))
     }
 
-    pub fn resize(&self, session_id: &str, columns: u16, rows: u16) -> Result<(), String> {
-        let sessions = self.sessions.lock().map_err(|error| error.to_string())?;
+    pub fn resize(&self, database: &crate::storage::Database, session_id: &str, columns: u16, rows: u16) -> Result<(), String> {
+        let mut sessions = self.sessions.lock().map_err(|error| error.to_string())?;
+        Self::validate_session(&mut sessions, database, session_id)?;
         let session = sessions.get(session_id).ok_or("终端会话已关闭")?;
         session.master.resize(PtySize { rows: rows.max(2), cols: columns.max(2), pixel_width: 0, pixel_height: 0 }).map_err(|error| format!("终端尺寸调整失败：{error}"))
+    }
+
+    fn validate_session(sessions: &mut HashMap<String, TerminalSession>, database: &crate::storage::Database, id: &str) -> Result<(), String> {
+        let session = sessions.get(id).ok_or("终端会话已关闭")?;
+        if let Some(epoch) = session.authorization_epoch {
+            if database.managed_epoch(&session.server_id)? != Some(epoch) || database.get_server(&session.server_id).is_err() {
+                if let Some(mut session) = sessions.remove(id) { let _ = session.child.kill(); }
+                return Err("组织服务器权限已变化，终端已关闭".into());
+            }
+        }
+        Ok(())
     }
 
     pub fn close(&self, session_id: &str) -> Result<(), String> {
         let Some(mut session) = self.sessions.lock().map_err(|error| error.to_string())?.remove(session_id) else { return Ok(()); };
         session.child.kill().map_err(|error| format!("终端关闭失败：{error}"))
+    }
+
+    pub fn close_servers(&self, ids: &[String]) {
+        if let Ok(mut sessions) = self.sessions.lock() {
+            let matching: Vec<_> = sessions.iter().filter(|(_, session)| ids.contains(&session.server_id)).map(|(id, _)| id.clone()).collect();
+            for id in matching { if let Some(mut session) = sessions.remove(&id) { let _ = session.child.kill(); } }
+        }
     }
 
     pub fn close_all(&self) {

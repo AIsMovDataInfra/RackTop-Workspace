@@ -21,9 +21,11 @@ pub struct RemoteCleanupTask {
 }
 
 pub struct Database {
-    connection: Mutex<Connection>,
-    session_passwords: Mutex<HashMap<String, String>>,
-    credential_errors: Mutex<HashMap<String, String>>,
+    pub(crate) connection: Mutex<Connection>,
+    pub(crate) managed_gate: Mutex<()>,
+    pub(crate) managed_changes: tokio::sync::watch::Sender<()>,
+    pub(crate) session_passwords: Mutex<HashMap<String, String>>,
+    pub(crate) credential_errors: Mutex<HashMap<String, String>>,
     path: PathBuf,
 }
 
@@ -675,7 +677,8 @@ impl Database {
         }
         connection.execute_batch("CREATE TABLE IF NOT EXISTS proxy_credentials (server_id TEXT PRIMARY KEY, proxy_jump TEXT NOT NULL, storage_state TEXT NOT NULL DEFAULT 'none')").map_err(|error| error.to_string())?;
         recover_interrupted_project_syncs(&connection)?;
-        Ok(Self { connection: Mutex::new(connection), session_passwords: Mutex::new(HashMap::new()), credential_errors: Mutex::new(HashMap::new()), path: path.to_path_buf() })
+        crate::managed_servers::initialize(&connection)?;
+        Ok(Self { managed_changes: tokio::sync::watch::channel(()).0, managed_gate: Mutex::new(()), connection: Mutex::new(connection), session_passwords: Mutex::new(HashMap::new()), credential_errors: Mutex::new(HashMap::new()), path: path.to_path_buf() })
     }
 
     pub fn storage_size_bytes(&self) -> u64 {
@@ -701,7 +704,7 @@ impl Database {
         let rows = statement
             .query_map([], |row| {
                 let tags: String = row.get(9)?;
-                Ok(Server {
+                Ok(Server { managed: None,
                     id: row.get(0)?, name: row.get(1)?, location: row.get(2)?, host: row.get(3)?, port: row.get(4)?, username: row.get(5)?,
                     ssh_alias: row.get(6)?, identity_file: row.get(7)?, proxy_jump: row.get(8)?, proxy_use_password: row.get(19)?, save_proxy_password: row.get(20)?,
                     tags: serde_json::from_str(&tags).unwrap_or_default(), sampling_interval_seconds: row.get(10)?,
@@ -710,14 +713,17 @@ impl Database {
                 })
             })
             .map_err(|error| error.to_string())?;
-        rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())
+        let mut servers = rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())?;
+        crate::managed_servers::decorate(&connection, &mut servers, crate::managed_servers::now_ms())?;
+        Ok(servers)
     }
 
     pub fn get_server(&self, id: &str) -> Result<Server, String> {
-        self.list_servers()?
-            .into_iter()
-            .find(|server| server.id == id)
-            .ok_or_else(|| format!("找不到服务器 {id}"))
+        let server = self.list_servers()?.into_iter().find(|server| server.id == id).ok_or_else(|| format!("找不到服务器 {id}"))?;
+        if let Some(managed) = &server.managed {
+            if !managed.available { return Err(managed.reason.clone().unwrap_or_else(|| "此组织服务器当前不可用".into())); }
+        }
+        Ok(server)
     }
 
     pub fn list_server_notification_settings(&self) -> Result<Vec<ServerNotificationSettings>, String> {
@@ -757,6 +763,9 @@ impl Database {
     }
 
     pub fn save_server(&self, draft: ServerDraft) -> Result<Server, String> {
+        let _gate = self.managed_gate.lock().map_err(|e| e.to_string())?;
+        let credential_epoch = draft.id.as_deref().map(|id| self.managed_epoch(id)).transpose()?.flatten();
+        let managed = self.validate_managed_draft(&draft)?;
         if draft.host.trim().is_empty() || draft.username.trim().is_empty() {
             return Err("主机地址和用户名不能为空".into());
         }
@@ -785,11 +794,11 @@ impl Database {
         let tags = serde_json::to_string(&draft.tags).map_err(|error| error.to_string())?;
         let connection = self.connection.lock().map_err(|error| error.to_string())?;
         let duplicate_name = connection.query_row(
-            "SELECT name FROM servers WHERE lower(trim(host))=lower(trim(?1)) AND port=?2 AND trim(username)=trim(?3) AND id<>?4 LIMIT 1",
+            "SELECT name FROM servers WHERE lower(trim(host))=lower(trim(?1)) AND port=?2 AND trim(username)=trim(?3) AND id<>?4 AND id NOT IN (SELECT local_id FROM managed_servers) LIMIT 1",
             params![draft.host, draft.port, draft.username, id],
             |row| row.get::<_, String>(0),
         ).optional().map_err(|error| error.to_string())?;
-        if let Some(existing_name) = duplicate_name {
+        if let Some(existing_name) = duplicate_name.filter(|_| !managed) {
             return Err(format!("服务器已存在：{existing_name}（{}@{}:{}）", draft.username.trim(), draft.host.trim(), draft.port));
         }
         connection.execute(
@@ -818,7 +827,14 @@ impl Database {
             self.set_credential_storage_state(&id, "none")?;
         }
         self.save_proxy_credentials(&id, proxy_jump.as_deref(), draft.proxy_use_password, draft.proxy_password.as_deref(), draft.save_proxy_password)?;
-        self.get_server(&id)
+        if managed && self.managed_epoch(&id)? != credential_epoch {
+            self.forget_managed_session_credentials(std::slice::from_ref(&id))?;
+            return Err("团队权限在保存认证时发生变化，请刷新后重试".into());
+        }
+        if managed {
+            self.connection.lock().map_err(|e| e.to_string())?.execute("UPDATE managed_servers SET configured=1 WHERE local_id=?1", [&id]).map_err(|e| e.to_string())?;
+        }
+        self.list_servers()?.into_iter().find(|server| server.id == id).ok_or_else(|| "找不到刚保存的服务器".into())
     }
 
     pub fn reorder_servers(&self, server_ids: &[String]) -> Result<(), String> {
@@ -835,6 +851,7 @@ impl Database {
     }
 
     pub fn delete_server_record(&self, id: &str, delete_credential: bool) -> Result<(), String> {
+        self.reject_managed_delete(id)?;
         let mut connection = self.connection.lock().map_err(|error| error.to_string())?;
         let auth_method = connection.query_row("SELECT auth_method FROM servers WHERE id=?1", [id], |row| row.get::<_, String>(0)).optional().map_err(|error| error.to_string())?;
         let transaction = connection.transaction().map_err(|error| error.to_string())?;
@@ -989,11 +1006,25 @@ impl Database {
     }
 
     pub fn get_ssh_passwords(&self, server: &Server, allow_prompt: bool) -> Result<Option<crate::ssh_connection::SshPasswords>, String> {
-        let target = if server.auth_method == "password" { self.get_password(&server.id, allow_prompt)? } else { None };
-        let proxy = if server.proxy_use_password {
-            self.get_proxy_password(&server.id, server.proxy_jump.as_deref().ok_or("请填写跳板机地址")?, allow_prompt)?
-        } else { None };
-        Ok(Some(crate::ssh_connection::SshPasswords { target, proxy }))
+        self.with_managed_credentials(server, || {
+            let target = if server.auth_method == "password" { self.get_password(&server.id, allow_prompt)? } else { None };
+            let proxy = if server.proxy_use_password {
+                self.get_proxy_password(&server.id, server.proxy_jump.as_deref().ok_or("请填写跳板机地址")?, allow_prompt)?
+            } else { None };
+            Ok(Some(crate::ssh_connection::SshPasswords { target, proxy }))
+        })
+    }
+
+    pub(crate) fn with_managed_credentials<T>(&self, server: &Server, load: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+        let _gate = self.managed_gate.lock().map_err(|e| e.to_string())?;
+        let epoch = self.managed_epoch(&server.id)?;
+        self.check_managed_server(server)?;
+        let result = load();
+        if server.managed.is_some() && (self.managed_epoch(&server.id)? != epoch || self.check_managed_server(server).is_err()) {
+            self.forget_managed_session_credentials(std::slice::from_ref(&server.id))?;
+            return Err("团队权限在读取认证时发生变化，请重新发起操作".into());
+        }
+        result
     }
 
     pub fn get_password(&self, id: &str, allow_prompt: bool) -> Result<Option<String>, String> {

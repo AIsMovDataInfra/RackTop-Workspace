@@ -42,8 +42,10 @@ The installer verifies SHA256SUMS and installs only these local bundles, without
 consulting Flathub or changing system libraries. It uses your user installation.
 Existing GNOME 50 / Mesa runtime deployments are retained rather than downgraded.
 RackTop data uses ~/.var/app/com.racktop.desktop and is separate from a DEB install.
-To update RackTop, obtain a newer verified kit and run its installer. The DEB
-updater is disabled in the Flatpak app. The installer does NOT update runtimes
+From 2.5.0, RackTop can download verified signed Flatpak application updates
+in the app, preserving its installation scope and data. The older 2.2.2 app
+requires one initial upgrade with the installer; see docs/DOWNLOADS.md.
+No Debian package is used for a Flatpak update. This installer does NOT update runtimes
 that are already present. To replace those runtimes with a newer kit's versions,
 first compare RUNTIME-COMMITS.txt with `flatpak info --user --show-commit ID//BRANCH`
 and check the kit's date. The following explicit replacement can also downgrade

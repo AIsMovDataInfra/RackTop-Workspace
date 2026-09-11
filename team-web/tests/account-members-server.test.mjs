@@ -54,6 +54,100 @@ async function fixture(t) {
 const equipmentDraft = (extra = {}) => ({ name: '设备管理隐私验收', category: '摄像头模组', location: '上海', ...extra });
 const resourceDraft = { company: '西浦', name: '预约隐私验收', cluster: '训练集群', gpuModel: 'A100', gpuCount: 1, notes: '已登录成员业务备注' };
 
+test('browser and device organization switches isolate catalogs, reports and stale writes while legacy sessions keep the primary organization', async t => {
+  const { app, call, admin, login } = await fixture(t);
+  const added = await call('/api/admin/members', { method: 'POST', session: admin, body: { name: '跨组织成员', password: '密', companies: ['A公司', '西浦'] } });
+  assert.equal(added.status, 201, added.text);
+  let member = added.body.member;
+  const session = (await login(member.name, '密')).session;
+  const legacy = (await login(member.name, '密')).session;
+  const device = (await call('/api/auth/device-login', { method: 'POST', body: { username: member.name, password: '密', deviceName: '组织切换测试' } })).body;
+  const scoped = company => ({ 'x-racktop-company': encodeURIComponent(company) });
+  for (const company of ['A公司', '西浦']) {
+    assert.equal((await call('/api/equipment', { method: 'POST', session: admin, body: equipmentDraft({ company, name: company }) })).status, 201);
+    assert.equal((await call('/api/resources', { method: 'POST', session: admin, body: { ...resourceDraft, company, name: company } })).status, 201);
+  }
+  const reportInput = { weekStart: '2026-09-07', todos: [], nextPlan: '' };
+  const reportA = await call('/api/workspace/reports', { method: 'POST', session, headers: scoped('A公司'), body: reportInput });
+  assert.equal(reportA.status, 201, reportA.text);
+  const switched = await call('/api/auth/company', { method: 'POST', session, headers: scoped('A公司'), body: { company: '西浦' } });
+  assert.equal(switched.status, 200, switched.text); assert.equal(switched.body.user.company, '西浦');
+  assert.deepEqual(switched.body.user.companies, ['A公司', '西浦']);
+  assert.equal(app.auth.getMemberIdentity(member.id).company, 'A公司', 'switching preserves the legacy primary');
+  assert.equal((await call('/api/session', { session: legacy })).body.user.company, 'A公司');
+  assert.equal((await call('/api/session', { token: device.token })).body.user.company, 'A公司');
+  assert.equal((await call('/api/equipment', { session: legacy })).body.equipment[0].company, 'A公司');
+  for (const headers of [{}, scoped('A公司'), { 'x-racktop-company': '%' }, { 'x-racktop-company': '%FF' }, scoped('D公司')]) {
+    const stale = await call('/api/equipment', { method: 'POST', session, headers, body: equipmentDraft() });
+    assert.equal(stale.status, 409, stale.text); assert.equal(stale.body.error.code, 'COMPANY_CHANGED');
+  }
+  for (const [path, key] of [['/api/equipment', 'equipment'], ['/api/resources', 'resources']]) {
+    const result = await call(path, { session, headers: scoped('西浦') });
+    assert.equal(result.status, 200, result.text); assert.deepEqual(result.body[key].map(row => row.company), ['西浦']);
+  }
+  assert.equal((await call(`/api/workspace/reports/${reportA.body.report.id}`, { session, headers: scoped('西浦') })).status, 404);
+  const reportB = await call('/api/workspace/reports', { method: 'POST', session, headers: scoped('西浦'), body: reportInput });
+  assert.equal(reportB.status, 201, reportB.text); assert.equal(reportB.body.report.company, '西浦');
+  const statistics = await call(`/api/workspace/reports/statistics?weekStart=2026-09-07&memberId=${member.id}`, { session: admin });
+  assert.equal(statistics.status, 200, statistics.text); assert.equal(statistics.body.rows.length, 2);
+  assert.deepEqual(new Set(statistics.body.rows.map(row => row.reportId)), new Set([reportA.body.report.id, reportB.body.report.id]));
+  assert.equal((await call('/api/auth/company', { method: 'POST', token: device.token, body: { company: '西浦' } })).status, 200);
+  assert.equal((await call('/api/equipment', { token: device.token, headers: scoped('A公司') })).status, 409);
+  assert.equal((await call('/api/equipment', { token: device.token, headers: scoped('西浦') })).status, 200);
+  assert.equal((await call('/api/auth/company', { method: 'POST', session, body: { company: 'B公司' } })).status, 403);
+  const revoked = await call(`/api/admin/members/${member.id}`, { method: 'PATCH', session: admin, body: { version: member.version, companies: ['A公司'] } });
+  assert.equal(revoked.status, 200, revoked.text); member = revoked.body.member;
+  for (const auth of [{ session }, { token: device.token }]) {
+    assert.equal((await call('/api/equipment', { ...auth, headers: scoped('西浦') })).status, 409);
+    assert.equal((await call('/api/session', auth)).body.user.company, 'A公司');
+    assert.equal((await call('/api/auth/company', { method: 'POST', ...auth, body: { company: '西浦' } })).status, 403);
+  }
+  const unassigned = await call(`/api/admin/members/${member.id}`, { method: 'PATCH', session: admin, body: { version: member.version, companies: [] } });
+  assert.equal(unassigned.status, 200, unassigned.text);
+  assert.equal((await call('/api/equipment', { session, headers: scoped('') })).status, 403);
+  assert.equal((await call('/api/equipment', { session: legacy })).status, 403);
+  assert.equal((await call('/api/equipment', { session: admin, headers: scoped('') })).body.equipment.length, 2);
+  assert.equal((await call('/api/auth/company', { method: 'POST', session: admin, body: { company: 'A公司' } })).status, 403);
+});
+
+test('non-primary membership permits equipment collection and reviewer assignment, and revocation removes both grants', async t => {
+  const { call, admin, login } = await fixture(t);
+  const add = async name => {
+    const result = await call('/api/admin/members', { method: 'POST', session: admin, body: { name, password: '密', companies: ['A公司', '西浦'] } });
+    assert.equal(result.status, 201, result.text);
+    const session = (await login(name, '密')).session;
+    assert.equal((await call('/api/auth/company', { method: 'POST', session, body: { company: '西浦' } })).status, 200);
+    return { member: result.body.member, session };
+  };
+  const author = await add('双组织领用人'), reviewer = await add('双组织评审人');
+  const headers = { 'x-racktop-company': encodeURIComponent('西浦') };
+  for (const revoke of [false, true]) {
+    const equipment = (await call('/api/equipment', { method: 'POST', session: author.session, headers, body: equipmentDraft() })).body.equipment;
+    const requestInput = { category: equipment.category, quantity: 1, purpose: '非主组织领用', equipmentId: equipment.id };
+    const created = await call('/api/workspace/requests', { method: 'POST', session: author.session, headers, body: requestInput });
+    assert.equal(created.status, 201, created.text);
+    const path = `/api/workspace/requests/${created.body.id}`;
+    assert.equal((await call(path, { method: 'PATCH', session: admin, body: { version: 1, status: 'approved', comment: '' } })).status, 200);
+    if (revoke) assert.equal((await call(`/api/admin/members/${author.member.id}`, { method: 'PATCH', session: admin, body: { version: author.member.version, companies: ['A公司'] } })).status, 200);
+    const collected = await call(path, { method: 'PATCH', session: admin, body: { version: 2, status: 'collected', comment: '' } });
+    assert.equal(collected.status, revoke ? 409 : 200, collected.text);
+    if (revoke) assert.equal((await call(path, { session: admin })).body.request.status, 'approved');
+  }
+  const report = await call('/api/workspace/reports', { method: 'POST', session: admin,
+    body: { authorId: reviewer.member.id, company: '西浦', weekStart: '2026-09-07', todos: [], nextPlan: '' } });
+  assert.equal(report.status, 201, report.text);
+  // Regrant the author's secondary membership, then use it as a reviewer grant.
+  assert.equal((await call(`/api/admin/members/${author.member.id}`, { method: 'PATCH', session: admin, body: { version: author.member.version + 1, companies: ['A公司', '西浦'] } })).status, 200);
+  assert.equal((await call('/api/auth/company', { method: 'POST', session: author.session, body: { company: '西浦' } })).status, 200);
+  const path = `/api/workspace/reports/${report.body.report.id}`;
+  const assigned = await call(`${path}/reviewer`, { method: 'POST', session: admin, body: { version: 1, reviewerId: author.member.id } });
+  assert.equal(assigned.status, 200, assigned.text);
+  assert.equal((await call(path, { session: author.session, headers })).status, 200);
+  assert.equal((await call(`/api/admin/members/${author.member.id}`, { method: 'PATCH', session: admin, body: { version: author.member.version + 2, companies: ['A公司'] } })).status, 200);
+  assert.equal((await call(path, { session: author.session, headers })).status, 409);
+  assert.equal((await call(`${path}/reviewer`, { method: 'POST', session: admin, body: { version: 2, reviewerId: author.member.id } })).status, 422);
+});
+
 async function seedBusiness(call, admin) {
   const resource = await call('/api/resources', { method: 'POST', session: admin, body: resourceDraft });
   assert.equal(resource.status, 201, resource.text);
@@ -168,7 +262,7 @@ test('real HTTP member administration protects the directory, recovers access an
   const beforeEquipment = (await call(`/api/equipment/${equipment.id}`, { session: admin })).body;
   const beforeReservation = (await call(`/api/reservations/${reservation.id}`, { session: admin })).body;
   const directory = await call('/api/admin/members', { session: admin });
-  for (const row of directory.body.members) assert.deepEqual(Object.keys(row).sort(), ['id','username','name','role','isSuperAdmin','company','version','createdAt','recoveryRequestedAt','avatar'].sort());
+  for (const row of directory.body.members) assert.deepEqual(Object.keys(row).sort(), ['id','username','name','role','isSuperAdmin','company','companies','version','createdAt','recoveryRequestedAt','avatar'].sort());
   assert.equal(directory.headers['cache-control'], 'no-store');
   const denied = await call('/api/admin/members', { session: employee });
   assert.equal(denied.status, 403); assert.equal(denied.text.includes('设备使用者'), false);

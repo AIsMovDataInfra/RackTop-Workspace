@@ -22,3 +22,7 @@
 .member-empty { margin: 0; padding: 32px 20px; color: var(--muted); }
 .member-form { display: grid; gap: 16px; }
 @media (max-width: 640px) { .member-filters { align-items: stretch; gap: 12px; } .member-filters > label:nth-child(2) { flex: 1 1 160px; } .member-directory-heading { padding: 14px; } }
+
+.member-company-choices { display: flex; flex-wrap: wrap; gap: 12px 20px; border: 1px solid var(--border); border-radius: 8px; padding: 14px; }
+.member-company-choices legend { padding: 0 6px; font-size: .85rem; }
+.member-company-choices .field-help { width: 100%; margin: 0; }

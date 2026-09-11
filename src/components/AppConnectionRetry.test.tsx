@@ -6,9 +6,12 @@ import App from '../App'
 import { api } from '../services/api'
 import { CONNECTION_RETRY_DELAY_MS } from '../utils/connectionRetry'
 import { FOREGROUND_STATUS_INTERVAL_MS } from '../utils/refreshCadence'
+import type { Server, Snapshot } from '../types/models'
+
+const managedListeners = vi.hoisted(() => new Map<string, (event: { payload: { affectedIds: string[] } }) => unknown>())
 
 vi.mock('./SshTerminal', () => ({ SshTerminal: () => null }))
-vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(async () => () => {}) }))
+vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(async (name: string, listener: (event: { payload: { affectedIds: string[] } }) => unknown) => { managedListeners.set(name, listener); return () => managedListeners.delete(name) }) }))
 vi.mock('../services/appUpdater', () => ({ checkDesktopAppUpdate: vi.fn(async () => null), relaunchUpdatedApp: vi.fn() }))
 ;(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 globalThis.ResizeObserver = class { observe() {} unobserve() {} disconnect() {} }
@@ -25,15 +28,18 @@ afterEach(() => {
   document.body.innerHTML = ''
   localStorage.clear()
   intervals.clear()
+  managedListeners.clear()
   vi.restoreAllMocks()
 })
 
-async function mount() {
+async function mount(managed?: Server['managed'], pending?: Promise<Snapshot>) {
   const servers = await api.listServers()
   const snapshot = await api.collectServer(servers[0].id)
-  vi.spyOn(api, 'listServers').mockResolvedValue([{ ...servers[0], remoteHistoryEnabled: true }])
+  const server = { ...servers[0], remoteHistoryEnabled: true, managed }
+  const list = vi.spyOn(api, 'listServers').mockResolvedValue([server])
   vi.spyOn(api, 'listLatestSnapshots').mockResolvedValue([])
   const collect = vi.spyOn(api, 'collectServer').mockRejectedValue(new Error('SSH 连接失败'))
+  if (pending) collect.mockReturnValue(pending)
   const configure = vi.spyOn(api, 'configureRemoteHistory').mockResolvedValue(undefined)
   const sync = vi.spyOn(api, 'syncRemoteHistory').mockResolvedValue({ importedCount: 0, latestTimestamp: null })
   vi.spyOn(api, 'notify').mockResolvedValue(undefined)
@@ -48,7 +54,7 @@ async function mount() {
   const container = document.createElement('div'); document.body.append(container)
   root = createRoot(container)
   await act(async () => { root?.render(<App />); await Promise.resolve() })
-  return { collect, configure, sync, snapshot, container }
+  return { collect, configure, sync, snapshot, container, list, server }
 }
 
 async function tick(delay: number) {
@@ -90,5 +96,35 @@ describe('failed SSH connection retry scheduling', () => {
     expect(refresh).toBeDefined()
     await act(async () => { refresh?.click(); await Promise.resolve() })
     expect(collect).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('managed server authorization changes', () => {
+  const managed = { accountId: 'member', company: 'A公司', remoteId: 'cloud', available: true, reason: null, version: 1 }
+  it('discards an in-flight snapshot and stops reconnecting after access is revoked', async () => {
+    let complete!: (value: Snapshot) => void
+    const pending = new Promise<Snapshot>(resolve => { complete = resolve })
+    const { collect, snapshot, list, server } = await mount(managed, pending)
+    expect(collect).toHaveBeenCalledOnce()
+    list.mockResolvedValue([{ ...server, status: 'offline', lastError: '团队授权已撤销', managed: { ...managed, available: false, reason: '团队授权已撤销' } }])
+    await act(async () => { await managedListeners.get('managed-servers-changed')!({ payload: { affectedIds: [server.id] } }) })
+    await act(async () => { complete(snapshot); await Promise.resolve() })
+    expect(document.body.textContent).not.toContain(snapshot.gpus[0]?.name)
+    now += 30 * 60_000
+    await tick(FOREGROUND_STATUS_INTERVAL_MS)
+    expect(collect).toHaveBeenCalledOnce()
+    expect(document.querySelector('.sidebar__section-header')?.textContent).toContain('0/1')
+  })
+  it('closes the edited managed form when its cloud configuration changes', async () => {
+    const { container, list, server } = await mount({ ...managed, available: false, reason: '请先配置本机 SSH 认证' })
+    await act(async () => container.querySelector<HTMLButtonElement>('.server-row')!.click())
+    const edit = [...container.querySelectorAll('button')].find(button => button.textContent === '编辑配置')!
+    expect(edit).toBeDefined()
+    await act(async () => edit.click())
+    expect(document.querySelector('.server-form')).not.toBeNull()
+    list.mockResolvedValue([{ ...server, host: 'new.example.test', managed: { ...managed, available: false, reason: '请先配置本机 SSH 认证', version: 2 } }])
+    await act(async () => { await managedListeners.get('managed-servers-changed')!({ payload: { affectedIds: [server.id] } }) })
+    expect(document.querySelector('.server-form')).toBeNull()
+    expect(container.textContent).toContain('团队服务器配置已变化')
   })
 })

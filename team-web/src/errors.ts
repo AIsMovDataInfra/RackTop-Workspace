@@ -10,6 +10,7 @@ export function errorText(error: unknown, t: Translate) {
       INVALID_NAME: ['姓名须为 1–60 个字符。', 'Your name must contain 1–60 characters.'],
       INVALID_PASSWORD: ['请输入密码', 'Enter a password'],
       INVALID_COMPANY: ['请选择 A公司、B公司、C公司或西浦。', 'Choose A公司, B公司, C公司 or 西浦.'],
+      COMPANY_CHANGED: ['当前组织已变化，正在刷新，请确认当前组织后继续。', 'The active organization changed. Refreshing; check the organization before continuing.'],
       COMPANY_REQUIRED: ['请等待超级管理员分配公司后再使用。', 'Wait for the super administrator to assign your company.'],
       SUPERADMIN_REQUIRED: ['只有超级管理员可以管理成员账号。', 'Only the super administrator can manage member accounts.'],
       SUPERADMIN_COMPANY_NOT_REQUIRED: ['超级管理员跨公司管理，无需分配公司。', 'Super administrators manage all companies and do not need a company assignment.'],

@@ -16,7 +16,7 @@ const expired = vi.fn()
 async function mount(user = admin) { await act(async () => root.render(<MembersWorkspace session={{ ...session, user }} state={state} navigate={vi.fn()} onLogout={vi.fn()} onSessionChanged={vi.fn()} onSessionExpired={expired} />)) }
 async function click(text: string) { const button = [...container.querySelectorAll('button')].find((item) => item.getAttribute('aria-label') === text || item.textContent === text)!; expect(button, text).toBeDefined(); await act(async () => button.click()) }
 function enter(name: string, value: string) { const input = container.querySelector<HTMLInputElement>(`input[name="${name}"]`)!; act(() => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value); input.dispatchEvent(new Event('input', { bubbles: true })) }) }
-function select(value: string) { act(() => { const input = container.querySelector<HTMLSelectElement>('select[name="company"]')!; input.value = value; input.dispatchEvent(new Event('change', { bubbles: true })) }) }
+function select(value: string) { act(() => container.querySelector<HTMLInputElement>(`input[name="companies"][value="${value}"]`)!.click()) }
 async function submit() { await act(async () => container.querySelector('.dialog form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))) }
 beforeEach(() => { container = document.createElement('div'); document.body.append(container); root = createRoot(container); vi.spyOn(api, 'members').mockResolvedValue({ members: [admin, employee] }); expired.mockClear() })
 afterEach(() => { act(() => root.unmount()); container.remove(); vi.restoreAllMocks() })
@@ -29,7 +29,7 @@ it('does not fetch or render the roster for ordinary admins, and erases it when 
 it.each([null, '西浦'] as const)('keeps super administrators with company %s global and out of employee company filters', async (company) => {
   const globalAdmin = { ...admin, company }
   const assigned = { ...employee, id: 'assigned', name: '已分配员工', username: 'assigned', company: '西浦' as const }
-  const update = vi.spyOn(api, 'setMemberCompany')
+  const update = vi.spyOn(api, 'setMemberCompanies')
   vi.mocked(api.members).mockResolvedValue({ members: [globalAdmin, employee, assigned] })
   await mount(globalAdmin)
   const rows = () => [...container.querySelectorAll<HTMLTableRowElement>('.member-table tbody tr')]
@@ -62,18 +62,18 @@ it.each([null, '西浦'] as const)('keeps super administrators with company %s g
 it('supports single-character Chinese credentials, fixed company choices and clears the password after creating', async () => {
   const create = vi.spyOn(api, 'createMember').mockResolvedValue({ member: { ...employee, id: 'new', name: '名', company: 'A公司' } })
   await mount(); await click('增加员工'); enter('name', '名'); enter('password', '密'); select('A公司')
-  expect([...container.querySelectorAll('select[name="company"] option')].map((option) => option.textContent)).toEqual(['请选择公司', 'A公司', 'B公司', 'C公司', '西浦'])
-  await submit(); expect(create).toHaveBeenCalledWith({ name: '名', password: '密', company: 'A公司' }); expect(container.querySelector('input[type="password"]')).toBeNull()
+  expect([...container.querySelectorAll<HTMLInputElement>('input[name="companies"]')].map(input => input.value)).toEqual(['A公司', 'B公司', 'C公司', '西浦'])
+  await submit(); expect(create).toHaveBeenCalledWith({ name: '名', password: '密', companies: ['A公司'] }); expect(container.querySelector('input[type="password"]')).toBeNull()
 })
 it('creates long Chinese and English member names without a length gate or accent normalization', async () => {
-  const create = vi.spyOn(api, 'createMember').mockImplementation(async (value) => ({ member: { ...employee, id: value.name, name: value.name, company: value.company } }))
+  const create = vi.spyOn(api, 'createMember').mockImplementation(async (value) => ({ member: { ...employee, id: value.name, name: value.name, company: value.companies[0], companies: value.companies } }))
   await mount()
   for (const name of ['Member中文 + @.'.repeat(100), 'Cafe\u0301员工']) {
     await click('增加员工'); enter('name', name); enter('password', '密'); select('A公司')
     const input = container.querySelector<HTMLInputElement>('input[name="name"]')!
     for (const attr of ['minlength', 'maxlength', 'pattern']) expect(input.hasAttribute(attr)).toBe(false)
     expect(container.querySelector<HTMLFormElement>('.dialog form')!.checkValidity()).toBe(true)
-    await submit(); expect(create).toHaveBeenLastCalledWith({ name, password: '密', company: 'A公司' })
+    await submit(); expect(create).toHaveBeenLastCalledWith({ name, password: '密', companies: ['A公司'] })
   }
 })
 it('shows recovery requests and resets with a version without exposing passwords in notices', async () => {
@@ -83,9 +83,9 @@ it('shows recovery requests and resets with a version without exposing passwords
 })
 it('requires a second explicit submit after a concurrent company change and preserves the selected company', async () => {
   const latest = { ...employee, version: 2, company: 'B公司' as const }
-  const update = vi.spyOn(api, 'setMemberCompany').mockRejectedValueOnce(new ApiError('changed', 409, 'VERSION_CONFLICT')).mockResolvedValue({ member: { ...latest, version: 3, company: '西浦' } })
+  const update = vi.spyOn(api, 'setMemberCompanies').mockRejectedValueOnce(new ApiError('changed', 409, 'VERSION_CONFLICT')).mockResolvedValue({ member: { ...latest, version: 3, company: '西浦' } })
   await mount(); await click(`分配公司 · ${employee.name}`); select('西浦'); vi.mocked(api.members).mockResolvedValue({ members: [admin, latest] }); await submit()
-  expect(update).toHaveBeenCalledTimes(1); expect(container.querySelector<HTMLSelectElement>('select[name="company"]')!.value).toBe('西浦'); expect(container.textContent).toContain('你的输入已保留'); await submit(); expect(update).toHaveBeenLastCalledWith(latest, '西浦')
+  expect(update).toHaveBeenCalledTimes(1); expect(container.querySelector<HTMLInputElement>('input[name="companies"][value="西浦"]')!.checked).toBe(true); expect(container.textContent).toContain('你的输入已保留'); await submit(); expect(update).toHaveBeenLastCalledWith(latest, ['西浦'])
 })
 it('confirms employee deletion while never offering a superadmin delete or reset action', async () => {
   const remove = vi.spyOn(api, 'deleteMember').mockResolvedValue({ ok: true })
@@ -100,4 +100,24 @@ it('ignores a delayed roster after superadmin permission is removed', async () =
   let resolve!: (value: { members: Member[] }) => void
   vi.mocked(api.members).mockImplementation(() => new Promise((done) => { resolve = done }))
   await mount(); await mount({ ...admin, isSuperAdmin: false }); await act(async () => resolve({ members: [employee] })); expect(container.textContent).toBe('')
+})
+
+it('assigns multiple organizations and includes a member when filtering by a secondary organization', async () => {
+  const multi = { ...employee, company: 'A公司' as const, companies: ['A公司', '西浦'] as const }
+  const update = vi.spyOn(api, 'setMemberCompanies').mockResolvedValue({ member: { ...multi, companies: [...multi.companies], version: 2 } })
+  await mount(); await click(`分配公司 · ${employee.name}`); select('A公司'); select('西浦'); await submit()
+  expect(update).toHaveBeenCalledWith(employee, ['A公司', '西浦'])
+  expect(container.querySelector('.member-table')!.textContent).toContain('A公司、西浦')
+  act(() => { const input = container.querySelector<HTMLSelectElement>('.member-filters select')!; input.value = '西浦'; input.dispatchEvent(new Event('change', { bubbles: true })) })
+  expect(container.querySelectorAll('.member-table tbody tr')).toHaveLength(1)
+  expect(container.querySelector('.member-table tbody')!.textContent).toContain(employee.name)
+})
+it('permits removing all memberships with a visible explanation and keeps the account', async () => {
+  const assigned = { ...employee, company: 'A公司' as const, companies: ['A公司' as const] }
+  vi.mocked(api.members).mockResolvedValue({ members: [assigned, admin] })
+  const update = vi.spyOn(api, 'setMemberCompanies').mockResolvedValue({ member: { ...employee, companies: [], version: 2 } })
+  await mount(); await click(`分配公司 · ${employee.name}`); select('A公司')
+  expect(container.querySelector('[role="dialog"]')!.textContent).toContain('取消全部归属后')
+  await submit(); expect(update).toHaveBeenCalledWith(assigned, [])
+  expect(container.querySelector('.member-table')!.textContent).toContain(employee.name)
 })

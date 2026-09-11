@@ -600,7 +600,7 @@ mod tests {
         let external = manager.home.join("external-identity");
         fs::copy(generated.private_key_path.unwrap(), &external).unwrap();
         set_private_permissions(&external).unwrap();
-        let server = Server {
+        let server = Server { managed: None,
             id: "server-test".into(), name: "测试服务器".into(), location: None,
             host: "127.0.0.1".into(), port: 22, username: "test".into(), ssh_alias: None,
             identity_file: Some(display_path(&external)), proxy_jump: None,

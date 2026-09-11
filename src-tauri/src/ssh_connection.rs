@@ -52,6 +52,10 @@ pub struct SshOptions {
 
 pub fn options(server: &Server, passwords: Option<&SshPasswords>, probe_keys: Option<&Path>) -> Result<SshOptions, String> {
     let mut options = SshOptions { args: Vec::new(), env: Vec::new() };
+    if server.managed.is_some() {
+        // An organization address cannot be redirected by a local Host stanza.
+        options.args.extend(["-F".into(), if cfg!(windows) { "NUL" } else { "/dev/null" }.into()]);
+    }
     let mut setting = |value: &str| options.args.extend(["-o".into(), value.into()]);
     for value in ["ConnectTimeout=8", "ServerAliveInterval=5", "ServerAliveCountMax=2", "ControlMaster=no", "ControlPath=none"] { setting(value); }
     if let Some(path) = probe_keys {
@@ -84,9 +88,10 @@ pub fn options(server: &Server, passwords: Option<&SshPasswords>, probe_keys: Op
         let password = passwords.and_then(|value| value.proxy.as_deref()).ok_or("没有可用的跳板机密码；请编辑服务器并重新输入跳板机密码")?;
         let executable = std::env::current_exe().map_err(|error| error.to_string())?;
         let executable = executable.to_str().ok_or("RackTop 安装路径不是有效的 UTF-8")?;
+        let isolated_config = if server.managed.is_some() { " no-config" } else { "" };
         // Secrets never appear in ProxyCommand or process arguments. The helper
         // gives the outer ssh only the jump password, and replaces itself with ssh.
-        options.args.extend(["-o".into(), format!("ProxyCommand={} --racktop-ssh-proxy {} {} {}", quote(executable), quote(proxy), quote(&server.host), server.port)]);
+        options.args.extend(["-o".into(), format!("ProxyCommand={} --racktop-ssh-proxy {} {} {}{isolated_config}", quote(executable), quote(proxy), quote(&server.host), server.port)]);
         options.env.push(("RACKTOP_PROXY_PASSWORD".into(), password.into()));
     } else if let Some(proxy) = server.proxy_jump.as_deref().filter(|value| !value.is_empty()) {
         options.args.extend(["-J".into(), proxy.into()]);
@@ -102,13 +107,14 @@ pub fn options(server: &Server, passwords: Option<&SshPasswords>, probe_keys: Op
 /// Called before the desktop runtime or askpass handler, so the target password
 /// can never accidentally be printed into the proxy's SSH byte stream.
 pub fn run_proxy(args: &[String]) -> Result<(), String> {
-    if args.len() != 3 { return Err("无效的跳板机连接参数".into()); }
+    if args.len() != 3 && !(args.len() == 4 && args[3] == "no-config") { return Err("无效的跳板机连接参数".into()); }
     let jump = parse_jump(&args[0])?;
     let target_port = args[2].parse::<u16>().map_err(|_| "无效的目标端口")?;
     let target_host = &args[1];
     if target_port == 0 || target_host.is_empty() || target_host.starts_with('-') || !target_host.chars().all(|c| c.is_ascii_alphanumeric() || "_.-:".contains(c)) { return Err("无效的目标地址".into()); }
     let password = std::env::var("RACKTOP_PROXY_PASSWORD").map_err(|_| "没有可用的跳板机密码")?;
     let mut command = std::process::Command::new("ssh");
+    if args.len() == 4 { command.args(["-F", if cfg!(windows) { "NUL" } else { "/dev/null" }]); }
     command.args(["-T", "-o", "StrictHostKeyChecking=yes", "-o", "BatchMode=no", "-o", "PreferredAuthentications=password,keyboard-interactive", "-o", "PubkeyAuthentication=no", "-o", "NumberOfPasswordPrompts=1", "-o", "ConnectTimeout=8", "-o", "ServerAliveInterval=5", "-o", "ServerAliveCountMax=2", "-o", "ControlMaster=no", "-o", "ControlPath=none", "-o", "ProxyCommand=none", "-o", "ProxyJump=none"]);
     #[cfg(feature = "integration-probe")]
     if let Some(path) = std::env::var_os("RACKTOP_TEST_KNOWN_HOSTS") { command.args(["-o", &format!("UserKnownHostsFile={}", Path::new(&path).display())]); }

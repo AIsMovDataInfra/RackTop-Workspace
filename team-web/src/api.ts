@@ -1,4 +1,4 @@
-import type { BookingDraft, Company, Equipment, EquipmentDraft, EquipmentHistory, EquipmentStats, Member, Reservation, Resource, ResourceDraft, Session } from './types'
+import type { BookingDraft, Company, Equipment, EquipmentDraft, EquipmentHistory, EquipmentStats, ManagedServer, ManagedServerDraft, Member, Reservation, Resource, ResourceDraft, Session } from './types'
 
 export class ApiError extends Error {
   constructor(message: string, public status: number, public code: string, public conflicts: Reservation[] = []) { super(message); this.name = 'ApiError' }
@@ -10,11 +10,21 @@ const GET_ATTEMPTS = 2
 const RETRYABLE_GET_STATUSES = new Set([408, 500, 502, 503, 504])
 const NON_RETRYABLE_GET_PATHS = new Set(['/session'])
 let csrfToken: string | null = null
+let companyScope: string | null = null
+let sessionGeneration = 0
+export function acceptSession(session: Session) {
+  sessionGeneration++
+  csrfToken = session.csrfToken
+  companyScope = session.authMode === 'account' && session.user ? encodeURIComponent(session.user.company ?? '') : null
+}
+function scopeHeaders(path: string, scope: string | null): Record<string, string> {
+  return scope !== null && !['/session', '/auth/company'].includes(path.split('?', 1)[0]) ? { 'X-RackTop-Company': scope } : {}
+}
 export const SESSION_EXPIRED_EVENT = 'racktop-team-session-expired'
 export const ACCOUNT_CHANGED_EVENT = 'racktop-team-account-changed'
 function expired(path: string, status: number, code?: string) {
-  if (status === 403 && ['COMPANY_REQUIRED', 'SUPERADMIN_REQUIRED'].includes(code || '')) window.dispatchEvent(new Event(ACCOUNT_CHANGED_EVENT))
-  if (status === 401 && !(path === '/auth/change-password' && code === 'INVALID_CREDENTIALS') && !['/session', '/auth/login', '/auth/register', '/auth/demo'].includes(path)) { csrfToken = null; window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT)) }
+  if ((status === 409 && code === 'COMPANY_CHANGED') || (status === 403 && ['COMPANY_REQUIRED', 'SUPERADMIN_REQUIRED'].includes(code || ''))) window.dispatchEvent(new Event(ACCOUNT_CHANGED_EVENT))
+  if (status === 401 && !(path === '/auth/change-password' && code === 'INVALID_CREDENTIALS') && !['/session', '/auth/login', '/auth/register', '/auth/demo'].includes(path)) { csrfToken = null; companyScope = null; window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT)) }
 }
 
 function timeoutError() {
@@ -50,10 +60,10 @@ function retryableGetFailure(reason: unknown) {
     || (reason.code === 'INVALID_RESPONSE' && (reason.status === 0 || reason.status === 200 || reason.status >= 500))
 }
 
-async function jsonRequest<T>(path: string, method: string, body: unknown, signal: AbortSignal): Promise<T> {
+async function jsonRequest<T>(path: string, method: string, body: unknown, signal: AbortSignal, scope: string | null): Promise<T> {
   const response = await fetch(`/api${path}`, {
     method, credentials: 'same-origin', signal, headers: {
-      Accept: 'application/json', ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+      Accept: 'application/json', ...scopeHeaders(path, scope), ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
       ...(method !== 'GET' && csrfToken ? { 'X-CSRF-Token': csrfToken } : {}),
     }, ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   })
@@ -68,12 +78,13 @@ async function jsonRequest<T>(path: string, method: string, body: unknown, signa
 }
 
 export async function request<T>(path: string, method = 'GET', body?: unknown, options: RequestOptions = {}): Promise<T> {
+  const scope = companyScope
   const normalizedMethod = method.toUpperCase()
   const isGet = normalizedMethod === 'GET'
   const attempts = isGet && !NON_RETRYABLE_GET_PATHS.has(path.split('?', 1)[0]) ? GET_ATTEMPTS : 1
   const timeoutFailure = isGet ? timeoutError() : writeResultUnknownError()
   for (let attempt = 0; attempt < attempts; attempt++) {
-    try { return await withTimeout((signal) => jsonRequest<T>(path, normalizedMethod, body, signal), options.signal, timeoutFailure) }
+    try { return await withTimeout((signal) => jsonRequest<T>(path, normalizedMethod, body, signal, scope), options.signal, timeoutFailure) }
     catch (reason) {
       if (options.signal?.aborted || attempt + 1 === attempts || !retryableGetFailure(reason)) throw reason
     }
@@ -82,25 +93,33 @@ export async function request<T>(path: string, method = 'GET', body?: unknown, o
 }
 
 async function sessionRequest(path: string, method = 'GET', body?: unknown) {
+  const generation = ++sessionGeneration
   const result = await request<Session>(path, method, body)
-  csrfToken = result.csrfToken
+  if (generation === sessionGeneration) acceptSession(result)
   return result
 }
 
 export const api = {
   session: () => sessionRequest('/session'),
+  switchCompany: (details: { company: Company }) => sessionRequest('/auth/company', 'POST', details),
   register: (details: { username?: string; name: string; password: string; bootstrapToken?: string; rememberMe?: boolean }) => sessionRequest('/auth/register', 'POST', details),
   login: (details: { username: string; password: string; rememberMe?: boolean }) => sessionRequest('/auth/login', 'POST', details),
   changePassword: (details: { oldPassword: string; newPassword: string }) => sessionRequest('/auth/change-password', 'POST', details),
   updateProfile: (details: { version: number; avatar: string }) => sessionRequest('/auth/profile', 'POST', details),
   requestPasswordRecovery: (username: string) => request<{ ok: true }>('/auth/recovery-request', 'POST', { username }),
   members: () => request<{ members: Member[] }>('/admin/members'),
-  createMember: (details: { username?: string; name: string; password: string; company: Company }) => request<{ member: Member }>('/admin/members', 'POST', details),
+  createMember: (details: { username?: string; name: string; password: string; companies: Company[] }) => request<{ member: Member }>('/admin/members', 'POST', details),
+  setMemberCompanies: (member: Member, companies: Company[]) => request<{ member: Member }>(`/admin/members/${encodeURIComponent(member.id)}`, 'PATCH', { version: member.version, companies }),
   setMemberCompany: (member: Member, company: Company) => request<{ member: Member }>(`/admin/members/${encodeURIComponent(member.id)}`, 'PATCH', { version: member.version, company }),
   resetMemberPassword: (member: Member, newPassword: string) => request<{ member: Member }>(`/admin/members/${encodeURIComponent(member.id)}/reset-password`, 'POST', { version: member.version, newPassword }),
   deleteMember: (member: Member) => request<{ ok: true }>(`/admin/members/${encodeURIComponent(member.id)}`, 'DELETE', { version: member.version }),
   demoLogin: (userId: string) => sessionRequest('/auth/demo', 'POST', { userId }),
-  logout: async () => { try { await request('/auth/logout', 'POST', {}) } finally { csrfToken = null } },
+  logout: async () => { try { await request('/auth/logout', 'POST', {}) } finally { sessionGeneration++; csrfToken = null; companyScope = null } },
+  servers: (company?: Company) => request<{ schemaVersion: 1; revision: string; servers: ManagedServer[] }>(`/servers${company ? `?${new URLSearchParams({ company })}` : ''}`),
+  createServer: (input: ManagedServerDraft) => request<{ server: ManagedServer }>('/servers', 'POST', input),
+  updateServer: (id: string, input: { version: number } & Partial<Omit<ManagedServerDraft, 'company' | 'memberIds'>>) => request<{ server: ManagedServer }>(`/servers/${encodeURIComponent(id)}`, 'PATCH', input),
+  serverMembers: (company: Company) => request<{ members: { id: string; name: string; username: string }[] }>(`/servers/members?${new URLSearchParams({ company })}`),
+  grantServer: (id: string, version: number, memberIds: string[]) => request<{ server: ManagedServer }>(`/servers/${encodeURIComponent(id)}/grants`, 'PUT', { version, memberIds }),
   resources: () => request<{ resources: Resource[] }>('/resources'),
   reservations: (options: { from?: string; to?: string; mine?: boolean } = {}) => {
     const query = new URLSearchParams()
@@ -120,7 +139,7 @@ export const api = {
   equipmentPhoto: async (id: string, version: number, options: RequestOptions = {}) => {
     const path = `/equipment/${encodeURIComponent(id)}/photo?v=${version}`
     return withTimeout(async (signal) => {
-      const response = await fetch(`/api${path}`, { credentials: 'same-origin', cache: 'no-store', signal })
+      const response = await fetch(`/api${path}`, { credentials: 'same-origin', cache: 'no-store', signal, headers: scopeHeaders(path, companyScope) })
       if (!response.ok) {
         let code = 'PHOTO_READ_FAILED'
         try { const body = await response.json(); if (typeof body?.error?.code === 'string') code = body.error.code } catch { /* The proxy may return a non-JSON error. */ }
