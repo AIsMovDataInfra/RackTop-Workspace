@@ -1,3 +1,11 @@
+## 组织维护身份与公开历史
+
+- 公开仓库的推送、PR、Release、附件上传和 Actions 触发统一使用 `AIsMovDataInfra` 所有的 GitHub App `dusan2026`，公开身份为 `dusan2026[bot]`。CI 内部使用仓库自带的 `GITHUB_TOKEN`。个人账户的 PAT、SSH 密钥或 GitHub App 用户令牌不得用于这些公开操作。
+- 本机已配置 `racktop-gh` 执行 GitHub CLI 操作，`racktop-maintain <命令>` 为现有发布脚本注入短期 App 安装令牌。安装令牌通过 `racktop-gh api installation/repositories` 核验；不要套用历史段落里的个人 `gh auth status` 或重新登录流程。
+- 只从迁移后的完整干净 clone 继续维护。旧工作树保留用于参考和提取未提交修改，不得 merge、rebase 或 force-push 旧历史到当前公开仓库；移植修改时先检查内容，再在当前基线上重新提交。
+- 本机 Git 推送使用专用 App credential helper 和仓库级 pre-push 检查。保持检查启用；若检查失败，修正拟推送内容或维护配置，不得跳过检查。
+- 上游作者、许可证、NOTICE 和既有功能继续保留。维护署名使用组织身份；本节覆盖下文涉及旧维护账户、认证和推送方式的历史说明。
+
 ## RackTop Workspace 当前分发与版本规则（2.0.0 起）
 
 本项目当前独立公开仓库为 [`AIsMovDataInfra/RackTop-Workspace`](https://github.com/AIsMovDataInfra/RackTop-Workspace)，GitHub 上不是 fork。桌面应用保留 **RackTop** 名称，在线产品为 **AIsMov RackTop 团队工作台**。保留源自 `Tongzh-SEU/RackTop` 与原维护仓库 `AIsMovDataInfra/RackTop` 的完整 Git 历史、原作者署名、GPL-3.0、NOTICE 和全部历史版本说明；“独立仓库”不改变来源或许可证义务。
