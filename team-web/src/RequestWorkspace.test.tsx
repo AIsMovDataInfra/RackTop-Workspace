@@ -44,6 +44,25 @@ it('submits an unlinked need with explicit category, quantity and immutable purp
   expect(create).toHaveBeenCalledWith({ category: '摄像头模组', quantity: 3, purpose: '三路视觉采集', equipmentId: null })
 })
 
+it('shows Laptop in English requests while submitting the canonical Chinese category', async () => {
+  const english: PreferencesState = { ...state, t: (_zh, en) => en, preferences: { ...state.preferences, locale: 'en' } }
+  const create = vi.spyOn(workspaceApi, 'createRequest').mockResolvedValue({ id: request.id, submitted: true })
+  const render = async (user = author) => act(async () => root.render(<RequestWorkspace session={{ ...session, user }} state={english} navigate={vi.fn()} onLogout={vi.fn()} onSessionChanged={vi.fn()} onSessionExpired={expired}/>))
+  await render()
+  const option = [...container.querySelectorAll<HTMLOptionElement>('[name="category"] option')].find(item => item.textContent === 'Laptop')
+  expect(option?.value).toBe('笔记本电脑')
+  select('category', option!.value); enter('purpose', 'Mobile development'); await submit()
+  expect(create).toHaveBeenCalledWith({ category: '笔记本电脑', quantity: 1, purpose: 'Mobile development', equipmentId: null })
+  const laptopRequest = { ...request, category: '笔记本电脑' }
+  vi.mocked(workspaceApi.requests).mockResolvedValue({ requests: [laptopRequest] })
+  vi.mocked(workspaceApi.deviceRequest).mockResolvedValue({ request: laptopRequest, history: [] })
+  await render(admin)
+  expect(container.querySelector('.work-request-section')?.textContent).toContain('Laptop × 1')
+  await click('View request')
+  expect(container.querySelector('.work-request-facts')?.textContent).toContain('Laptop × 1')
+  expect(container.querySelector('.work-request-facts')?.textContent).not.toContain('笔记本电脑')
+})
+
 it('supports super administrator approval followed by atomic equipment collection and shows the preserved original request', async () => {
   const approved = { ...request, status: 'approved' as const, decisionComment: '批准使用', version: 2 }
   const collected = { ...approved, status: 'collected' as const, equipmentUpdated: true, version: 3 }

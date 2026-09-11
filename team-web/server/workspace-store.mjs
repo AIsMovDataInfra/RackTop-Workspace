@@ -5,7 +5,7 @@ import { dirname, resolve } from 'node:path';
 import { ApiError } from './store.mjs';
 
 const companies = new Set(['A公司', 'B公司', 'C公司', '西浦']);
-const categories = new Set(['机械臂', '台式主机', '显示屏', '摄像头模组', '实验物料', '小推车', '夹爪']);
+const categories = new Set(['机械臂', '台式主机', '笔记本电脑', '显示屏', '摄像头模组', '实验物料', '小推车', '夹爪']);
 const own = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
 const fail = (status, code, message) => { throw new ApiError(status, code, message); };
 const invalid = (message) => fail(422, 'INVALID_INPUT', message);

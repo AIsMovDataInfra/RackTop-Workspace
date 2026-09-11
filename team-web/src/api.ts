@@ -22,7 +22,8 @@ function scopeHeaders(path: string, scope: string | null): Record<string, string
 }
 export const SESSION_EXPIRED_EVENT = 'racktop-team-session-expired'
 export const ACCOUNT_CHANGED_EVENT = 'racktop-team-account-changed'
-function expired(path: string, status: number, code?: string) {
+function expired(generation: number, path: string, status: number, code?: string) {
+  if (generation !== sessionGeneration) return
   if ((status === 409 && code === 'COMPANY_CHANGED') || (status === 403 && ['COMPANY_REQUIRED', 'SUPERADMIN_REQUIRED'].includes(code || ''))) window.dispatchEvent(new Event(ACCOUNT_CHANGED_EVENT))
   if (status === 401 && !(path === '/auth/change-password' && code === 'INVALID_CREDENTIALS') && !['/session', '/auth/login', '/auth/register', '/auth/demo'].includes(path)) { csrfToken = null; companyScope = null; window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT)) }
 }
@@ -60,7 +61,7 @@ function retryableGetFailure(reason: unknown) {
     || (reason.code === 'INVALID_RESPONSE' && (reason.status === 0 || reason.status === 200 || reason.status >= 500))
 }
 
-async function jsonRequest<T>(path: string, method: string, body: unknown, signal: AbortSignal, scope: string | null): Promise<T> {
+async function jsonRequest<T>(path: string, method: string, body: unknown, signal: AbortSignal, scope: string | null, generation: number): Promise<T> {
   const response = await fetch(`/api${path}`, {
     method, credentials: 'same-origin', signal, headers: {
       Accept: 'application/json', ...scopeHeaders(path, scope), ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
@@ -68,25 +69,25 @@ async function jsonRequest<T>(path: string, method: string, body: unknown, signa
     }, ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   })
   let result: unknown
-  try { result = await response.json() } catch { expired(path, response.status); throw new ApiError('服务返回了无法读取的响应 / Invalid server response', response.status, 'INVALID_RESPONSE') }
+  try { result = await response.json() } catch { expired(generation, path, response.status); throw new ApiError('服务返回了无法读取的响应 / Invalid server response', response.status, 'INVALID_RESPONSE') }
   if (!response.ok) {
     const error = (result as { error?: { message?: string; code?: string; conflicts?: Reservation[] } })?.error
-    expired(path, response.status, error?.code)
+    expired(generation, path, response.status, error?.code)
     throw new ApiError(error?.message || `请求失败 / Request failed (${response.status})`, response.status, error?.code || 'REQUEST_FAILED', error?.conflicts || [])
   }
   return result as T
 }
 
 export async function request<T>(path: string, method = 'GET', body?: unknown, options: RequestOptions = {}): Promise<T> {
-  const scope = companyScope
+  const scope = companyScope, generation = sessionGeneration
   const normalizedMethod = method.toUpperCase()
   const isGet = normalizedMethod === 'GET'
   const attempts = isGet && !NON_RETRYABLE_GET_PATHS.has(path.split('?', 1)[0]) ? GET_ATTEMPTS : 1
   const timeoutFailure = isGet ? timeoutError() : writeResultUnknownError()
   for (let attempt = 0; attempt < attempts; attempt++) {
-    try { return await withTimeout((signal) => jsonRequest<T>(path, normalizedMethod, body, signal, scope), options.signal, timeoutFailure) }
+    try { return await withTimeout((signal) => jsonRequest<T>(path, normalizedMethod, body, signal, scope, generation), options.signal, timeoutFailure) }
     catch (reason) {
-      if (options.signal?.aborted || attempt + 1 === attempts || !retryableGetFailure(reason)) throw reason
+      if (generation !== sessionGeneration || options.signal?.aborted || attempt + 1 === attempts || !retryableGetFailure(reason)) throw reason
     }
   }
   throw new Error('请求未完成 / Request did not complete')
@@ -117,6 +118,7 @@ export const api = {
   logout: async () => { try { await request('/auth/logout', 'POST', {}) } finally { sessionGeneration++; csrfToken = null; companyScope = null } },
   servers: (company?: Company) => request<{ schemaVersion: 1; revision: string; servers: ManagedServer[] }>(`/servers${company ? `?${new URLSearchParams({ company })}` : ''}`),
   createServer: (input: ManagedServerDraft) => request<{ server: ManagedServer }>('/servers', 'POST', input),
+  importServers: (input: { company: Company; memberIds: string[]; servers: Omit<ManagedServerDraft, 'company' | 'memberIds'>[] }) => request<{ servers: ManagedServer[]; skipped: number }>('/servers/import', 'POST', input),
   updateServer: (id: string, input: { version: number } & Partial<Omit<ManagedServerDraft, 'company' | 'memberIds'>>) => request<{ server: ManagedServer }>(`/servers/${encodeURIComponent(id)}`, 'PATCH', input),
   serverMembers: (company: Company) => request<{ members: { id: string; name: string; username: string }[] }>(`/servers/members?${new URLSearchParams({ company })}`),
   grantServer: (id: string, version: number, memberIds: string[]) => request<{ server: ManagedServer }>(`/servers/${encodeURIComponent(id)}/grants`, 'PUT', { version, memberIds }),
@@ -138,12 +140,13 @@ export const api = {
   updateResource: (id: string, draft: Partial<ResourceDraft>) => request<{ resource: Resource }>(`/resources/${encodeURIComponent(id)}`, 'PATCH', draft),
   equipmentPhoto: async (id: string, version: number, options: RequestOptions = {}) => {
     const path = `/equipment/${encodeURIComponent(id)}/photo?v=${version}`
+    const scope = companyScope, generation = sessionGeneration
     return withTimeout(async (signal) => {
-      const response = await fetch(`/api${path}`, { credentials: 'same-origin', cache: 'no-store', signal, headers: scopeHeaders(path, companyScope) })
+      const response = await fetch(`/api${path}`, { credentials: 'same-origin', cache: 'no-store', signal, headers: scopeHeaders(path, scope) })
       if (!response.ok) {
         let code = 'PHOTO_READ_FAILED'
         try { const body = await response.json(); if (typeof body?.error?.code === 'string') code = body.error.code } catch { /* The proxy may return a non-JSON error. */ }
-        expired(path, response.status, code)
+        expired(generation, path, response.status, code)
         throw new ApiError('照片暂时无法读取 / Could not load the photo', response.status, code)
       }
       return response.blob()

@@ -7,7 +7,7 @@ import { ApiError } from './store.mjs';
 const fields = { name: 120, category: 80, model: 160, company: 80, responsiblePerson: 80, currentUser: 80, location: 160, notes: 4000 };
 const mutable = [...Object.keys(fields), 'status'];
 const statuses = new Set(['available', 'in_use', 'maintenance', 'retired']);
-const categories = new Set(['机械臂', '台式主机', '显示屏', '摄像头模组', '实验物料', '小推车', '夹爪']);
+const categories = new Set(['机械臂', '台式主机', '笔记本电脑', '显示屏', '摄像头模组', '实验物料', '小推车', '夹爪']);
 const locations = new Set(['上海', '太仓']);
 const companies = new Set(['A公司', 'B公司', 'C公司', '西浦']);
 const columns = { name: 'name', category: 'category', model: 'model', company: 'company', responsiblePerson: 'responsible_person', currentUser: 'current_user', location: 'location', notes: 'notes', status: 'status' };

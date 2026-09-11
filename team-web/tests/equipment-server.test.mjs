@@ -149,3 +149,44 @@ test('concurrent HTTP updates cannot overwrite each other and retirement keeps i
   assert.equal(restored.body.equipment.id, original.id); assert.equal(restored.body.equipment.code, original.code);
   assert.equal(restored.body.equipment.version, 3); assert.equal(restored.body.history.length, 3);
 });
+
+test('laptops persist across equipment creation, editing, statistics and requests while existing categories remain valid', async t => {
+  const { call, register, restart } = await fixture(t);
+  const member = await register('laptop-member');
+  const categories = ['机械臂', '台式主机', '笔记本电脑', '显示屏', '摄像头模组', '实验物料', '小推车', '夹爪'];
+  const records = [];
+  for (const category of categories) {
+    const response = await call('/api/equipment', { method: 'POST', session: member, body: draft({ name: `类别验收-${category}`, category }) });
+    assert.equal(response.status, 201, response.text);
+    assert.equal(response.body.equipment.category, category);
+    records.push(response.body.equipment);
+  }
+  const desktop = records.find(item => item.category === '台式主机');
+  const changed = await call(`/api/equipment/${desktop.id}`, { method: 'PATCH', session: member,
+    body: { version: desktop.version, category: '笔记本电脑' } });
+  assert.equal(changed.status, 200, changed.text);
+  assert.equal(changed.body.equipment.category, '笔记本电脑');
+  for (const equipmentId of [null, desktop.id]) {
+    const response = await call('/api/workspace/requests', { method: 'POST', session: member,
+      body: { category: '笔记本电脑', quantity: 1, purpose: '移动开发设备', equipmentId } });
+    assert.equal(response.status, 201, response.text);
+    assert.equal(response.body.submitted, true);
+  }
+  for (const category of ['Laptop', '不存在的类别']) {
+    assert.equal((await call('/api/equipment', { method: 'POST', session: member, body: draft({ category }) })).status, 422);
+    assert.equal((await call('/api/workspace/requests', { method: 'POST', session: member,
+      body: { category, quantity: 1, purpose: '无效类别' } })).status, 422);
+  }
+  await restart();
+  const detail = await call(`/api/equipment/${desktop.id}`, { session: member });
+  assert.equal(detail.status, 200, detail.text);
+  assert.equal(detail.body.equipment.category, '笔记本电脑');
+  assert.ok(detail.body.history.some(entry => entry.changes.some(change => change.field === 'category'
+    && change.oldValue === '台式主机' && change.newValue === '笔记本电脑')));
+  const listed = await call('/api/equipment', { session: member });
+  assert.equal(listed.body.equipment.filter(item => item.category === '笔记本电脑').length, 2);
+  const stats = (await call('/api/equipment/stats', { session: member })).body.stats;
+  assert.equal(stats.total, categories.length);
+  assert.deepEqual(stats.categories.find(item => item.category === '笔记本电脑'), { category: '笔记本电脑', count: 2 });
+  assert.equal(stats.categories.reduce((total, item) => total + item.count, 0), categories.length);
+});

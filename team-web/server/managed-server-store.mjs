@@ -32,6 +32,10 @@ function definition(input) {
   if (typeof input.enabled !== 'boolean') invalid('服务器启用状态无效');
   return { name, ...target, jump, enabled: input.enabled };
 }
+function connectionKey({ host, port, username, jump }) {
+  const target = value => [value.host.trim().toLowerCase(), value.port, value.username];
+  return JSON.stringify([target({ host, port, username }), jump ? target(jump) : null]);
+}
 function version(input, row) {
   if (!Number.isSafeInteger(input.version) || input.version < 1) invalid('请提交服务器当前版本');
   if (input.version !== row.version) throw new ApiError(409, 'VERSION_CONFLICT', '服务器已被更新，请刷新后重试');
@@ -63,10 +67,11 @@ export function createManagedServerStore({ dbPath, now = Date.now }) {
     try { const result = action(); db.exec('COMMIT'); return result; }
     catch (error) { db.exec('ROLLBACK'); throw error; }
   };
-  function actor(user, company, admin = false) {
+  function actor(user, company, admin = false, superAdmin = false) {
     if (!user?.id) throw new ApiError(401, 'UNAUTHENTICATED', '请先登录');
     const live = db.prepare('SELECT role,is_super_admin,deleted_at FROM account_users WHERE id=?').get(user.id);
     if (!live || live.deleted_at !== null || live.role !== user.role || Boolean(live.is_super_admin) !== Boolean(user.isSuperAdmin)) throw new ApiError(403, 'ACCOUNT_CHANGED', '账号权限已变化，请刷新');
+    if (superAdmin && !live.is_super_admin) throw new ApiError(403, 'SUPERADMIN_REQUIRED', '仅超级管理员可批量导入服务器');
     if (live.is_super_admin && company === undefined && !admin) return;
     if (!ACCOUNT_COMPANIES.includes(company)) invalid('请选择服务器所属组织');
     if (!live.is_super_admin && (company !== user.company || !db.prepare('SELECT 1 FROM account_user_companies WHERE user_id=? AND company=?').get(user.id, company))) missing();
@@ -109,6 +114,12 @@ export function createManagedServerStore({ dbPath, now = Date.now }) {
     // No addresses, credentials, or member lists in the audit payload.
     db.prepare('INSERT INTO managed_server_audit(server_id,company,actor_id,action,version,created_at) VALUES(?,?,?,?,?,?)').run(id, company, user.id, action, nextVersion, at);
   }
+  function insert(data, company, memberIds, user) {
+    const id = randomUUID(), at = new Date(now()).toISOString();
+    db.prepare('INSERT INTO managed_servers VALUES(?,?,?,?,?,?,?,?,1,?,?)').run(id, company, data.name, data.host, data.port, data.username, data.jump ? JSON.stringify(data.jump) : null, data.enabled ? 1 : 0, at, at);
+    setGrants(id, memberIds); audit(id, company, user, 'created', 1, at);
+    return view(rowFor(id, user, true), user);
+  }
   return {
     close() { db.close(); },
     list(user, company) {
@@ -138,10 +149,32 @@ export function createManagedServerStore({ dbPath, now = Date.now }) {
         actor(user, company, true);
         if (db.prepare('SELECT COUNT(*) AS n FROM managed_servers WHERE company=?').get(company).n >= 500) throw new ApiError(409, 'SERVER_LIMIT', '每个组织最多维护 500 台服务器');
         const memberIds = validateGrants(input.memberIds === undefined ? [] : input.memberIds, company);
-        const id = randomUUID(), at = new Date(now()).toISOString();
-        db.prepare('INSERT INTO managed_servers VALUES(?,?,?,?,?,?,?,?,1,?,?)').run(id, company, data.name, data.host, data.port, data.username, data.jump ? JSON.stringify(data.jump) : null, data.enabled ? 1 : 0, at, at);
-        setGrants(id, memberIds); audit(id, company, user, 'created', 1, at);
-        return view(rowFor(id, user, true), user);
+        return insert(data, company, memberIds, user);
+      });
+    },
+    importServers(input, user) {
+      return transaction(() => {
+        // Validate all metadata and grants before creating any rows. The write
+        // transaction also serializes retries and the per-company capacity check.
+        actor(user, input?.company, true, true);
+        fields(input, ['company', 'memberIds', 'servers']);
+        if (!Array.isArray(input.servers) || input.servers.length < 1 || input.servers.length > 50) invalid('每次请选择 1–50 台服务器');
+        const memberIds = validateGrants(input.memberIds, input.company);
+        const definitions = input.servers.map(server => {
+          fields(server, ['name', 'host', 'port', 'username', 'jump', 'enabled']);
+          return definition({ enabled: true, ...server });
+        });
+        const existing = db.prepare('SELECT host,port,username,jump_json FROM managed_servers WHERE company=?').all(input.company);
+        const seen = new Set(existing.map(row => connectionKey({ ...row, jump: row.jump_json ? JSON.parse(row.jump_json) : null })));
+        const fresh = [];
+        let skipped = 0;
+        for (const server of definitions) {
+          const key = connectionKey(server);
+          if (seen.has(key)) { skipped++; continue; }
+          seen.add(key); fresh.push(server);
+        }
+        if (existing.length + fresh.length > 500) throw new ApiError(409, 'SERVER_LIMIT', '每个组织最多维护 500 台服务器');
+        return { servers: fresh.map(server => insert(server, input.company, memberIds, user)), skipped };
       });
     },
     update(id, input, user) {

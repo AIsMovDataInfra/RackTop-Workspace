@@ -185,6 +185,9 @@ export function createTeamServer(overrides = {}) {
         if (url.pathname === '/api/servers/members' && req.method === 'GET') {
           json(res, 200, { members: managedServerStore.members(user, company) }); return;
         }
+        if (url.pathname === '/api/servers/import' && req.method === 'POST') {
+          json(res, 200, managedServerStore.importServers(body, user)); return;
+        }
         const serverMatch = /^\/api\/servers\/([a-f0-9-]{36})(?:\/(grants))?$/.exec(url.pathname);
         if (serverMatch) {
           const [, id, action] = serverMatch;

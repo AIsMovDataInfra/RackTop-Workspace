@@ -15,6 +15,10 @@ const PUBLIC = 'https://server-catalog.example.test';
 const NOW = Date.parse('2026-09-11T12:00:00Z');
 const companyQuery = company => `?company=${encodeURIComponent(company)}`;
 const draft = (extra = {}) => ({ company: 'A公司', name: '训练节点', host: 'gpu.internal.example', port: 22, username: 'researcher', ...extra });
+const importRow = (extra = {}) => ({ name: '导入节点', host: 'import.internal.example', port: 22, username: 'researcher', ...extra });
+const importBatch = (servers = [importRow()], extra = {}) => ({ company: 'A公司', memberIds: [], servers, ...extra });
+const catalogState = db => Object.fromEntries(['managed_servers', 'managed_server_grants', 'managed_server_audit']
+  .map(table => [table, db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()]));
 
 async function fixture(t, prepare) {
   const directory = mkdtempSync(join(tmpdir(), 'racktop-managed-servers-'));
@@ -27,11 +31,11 @@ async function fixture(t, prepare) {
   await app.auth.provisionSuperAdmin({ mode: 'create', password });
   const { port } = await app.start();
   t.after(async () => { await app.close(); rmSync(directory, { recursive: true, force: true }); });
-  const call = (path, { method = 'GET', body, session, token, headers = {}, legacy = false } = {}) => new Promise((resolve, reject) => {
+  const call = (path, { method = 'GET', body, session, token, headers = {}, legacy = false, chunked = false } = {}) => new Promise((resolve, reject) => {
     const data = body === undefined ? undefined : JSON.stringify(body);
     const req = request({ host: '127.0.0.1', port, path, method, agent: false, headers: {
       host: new URL(PUBLIC).host, origin: PUBLIC,
-      ...(data === undefined ? {} : { 'content-type': 'application/json', 'content-length': Buffer.byteLength(data) }),
+      ...(data === undefined ? {} : { 'content-type': 'application/json', ...(chunked ? { 'transfer-encoding': 'chunked' } : { 'content-length': Buffer.byteLength(data) }) }),
       ...(session ? { cookie: session.cookie, 'x-csrf-token': session.csrfToken,
         ...(legacy ? {} : { 'x-racktop-company': encodeURIComponent(session.user?.company ?? '') }) } : {}),
       ...(token ? { authorization: `Bearer ${token}` } : {}), ...headers,
@@ -327,4 +331,173 @@ test('fresh account permissions reject forged superadmin and stale administrator
   assert.deepEqual((await call('/api/servers', { session: maintainer.session })).body.servers, []);
   db.prepare("UPDATE account_users SET role='member',version=version+1 WHERE id=?").run(admin.user.id);
   assert.throws(() => store.list(admin.user), { code: 'ACCOUNT_CHANGED' }, 'the cross-company superadmin list also rechecks the current role');
+});
+
+test('batch import requires a live superadmin, authenticated session and CSRF even when the caller previously had access', async t => {
+  const { call, admin, add, localAdmin, anonymous, dbPath } = await fixture(t);
+  const reader = await add('不能批量导入'), maintainer = await localAdmin();
+  const send = (session, extra = {}) => call('/api/servers/import', { method: 'POST', session, body: importBatch(), ...extra });
+  assert.equal((await send(undefined)).status, 401);
+  assert.equal((await send(await anonymous())).status, 401);
+  for (const session of [reader.session, maintainer.session]) {
+    const rejected = await send(session);
+    assert.equal(rejected.status, 403, rejected.text);
+    assert.equal(rejected.body.error.code, 'SUPERADMIN_REQUIRED');
+    assert.equal((await send(session, { body: importBatch(undefined, { company: 'B公司' }) })).status, 403);
+  }
+  for (const headers of [{ 'x-csrf-token': 'wrong' }, { origin: 'https://untrusted.example' }]) {
+    assert.equal((await send(admin, { headers })).status, 403);
+  }
+  const db = new DatabaseSync(dbPath); t.after(() => db.close());
+  const store = createManagedServerStore({ dbPath, now: () => NOW }); t.after(() => store.close());
+  assert.throws(() => store.importServers(importBatch(), { ...reader.session.user, role: 'admin', isSuperAdmin: true }), { code: 'ACCOUNT_CHANGED' });
+  db.prepare("UPDATE account_users SET is_super_admin=0,company='A公司',version=version+1 WHERE id=?").run(admin.user.id);
+  db.prepare("INSERT INTO account_user_companies(user_id,company) VALUES(?,'A公司')").run(admin.user.id);
+  assert.throws(() => store.importServers(importBatch(), admin.user), { code: 'ACCOUNT_CHANGED' });
+  const revoked = await send(admin, { legacy: true });
+  assert.equal(revoked.status, 403, revoked.text); assert.equal(revoked.body.error.code, 'SUPERADMIN_REQUIRED');
+  db.prepare('UPDATE account_users SET deleted_at=? WHERE id=?').run(NOW, admin.user.id);
+  assert.equal((await send(admin, { legacy: true })).status, 401);
+  assert.deepEqual(catalogState(db), { managed_servers: [], managed_server_grants: [], managed_server_audit: [] });
+});
+
+test('batch import deduplicates normalized destinations without changing existing metadata or adding grants on retries', async t => {
+  const { call, admin, add, dbPath } = await fixture(t);
+  const originalReader = await add('原授权成员'), selectedReader = await add('本次导入成员');
+  const jump = { host: 'Jump.Internal.Example', port: 2200, username: 'bridge' };
+  const existing = (await call('/api/servers', { method: 'POST', session: admin,
+    body: draft({ host: 'GPU.Internal.Example', name: '原名称', enabled: false, jump, memberIds: [originalReader.member.id] }) })).body.server;
+  const newRow = importRow({ host: 'New.Internal.Example', name: '批内第一条', jump });
+  const servers = [
+    importRow({ host: 'gpu.internal.example', name: '不可覆盖旧名称', enabled: true, jump: { ...jump, host: 'jump.internal.example' } }),
+    newRow,
+    { ...newRow, host: ' new.internal.example ', name: '重复条目不可覆盖', enabled: false, jump: { ...jump, host: 'JUMP.INTERNAL.EXAMPLE' } },
+    { ...newRow, username: 'Researcher' },
+    { ...newRow, port: 2222 },
+    { ...newRow, jump: { ...jump, host: 'other-jump.internal.example' } },
+    { ...newRow, jump: null },
+  ];
+  const result = await call('/api/servers/import', { method: 'POST', session: admin,
+    body: importBatch(servers, { memberIds: [selectedReader.member.id] }) });
+  assert.equal(result.status, 200, result.text); assert.equal(result.headers['cache-control'], 'no-store');
+  assert.deepEqual(Object.keys(result.body).sort(), ['servers', 'skipped']);
+  assert.equal(result.body.skipped, 2); assert.equal(result.body.servers.length, 5);
+  for (const server of result.body.servers) {
+    assert.equal(server.version, 1); assert.equal(server.enabled, true);
+    assert.deepEqual(server.memberIds, [selectedReader.member.id]);
+    assert.equal(server.company, 'A公司'); assert.equal(server.name, '批内第一条');
+  }
+  assert.deepEqual((await call(`/api/servers/${existing.id}`, { session: admin })).body.server, existing);
+  const db = new DatabaseSync(dbPath); t.after(() => db.close());
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM managed_server_audit').get().n, 6);
+  const beforeRetry = catalogState(db);
+  const retry = await call('/api/servers/import', { method: 'POST', session: admin,
+    body: importBatch(servers, { memberIds: [originalReader.member.id] }) });
+  assert.equal(retry.status, 200, retry.text); assert.deepEqual(retry.body, { servers: [], skipped: 7 });
+  assert.deepEqual(catalogState(db), beforeRetry, 'a changed grant selection on retry must not grant any existing server');
+  const otherCompany = await call('/api/servers/import', { method: 'POST', session: admin, body: importBatch([newRow], { company: 'B公司' }) });
+  assert.equal(otherCompany.status, 200, otherCompany.text); assert.equal(otherCompany.body.servers.length, 1);
+  const racing = await Promise.all([1, 2].map(() => call('/api/servers/import', { method: 'POST', session: admin,
+    body: importBatch([importRow({ host: 'retry-race.example' })]) })));
+  assert.deepEqual(racing.map(response => response.status), [200, 200]);
+  assert.deepEqual(racing.map(response => response.body.servers.length).sort(), [0, 1]);
+  assert.deepEqual(racing.map(response => response.body.skipped).sort(), [0, 1]);
+});
+
+test('batch import strictly rejects raw configuration, credentials, invalid rows and cross-company grants without partial writes', async t => {
+  const { call, admin, add, dbPath } = await fixture(t);
+  const reader = await add('导入授权成员'), outsider = await add('跨组织导入授权', ['B公司']);
+  const existing = (await call('/api/servers', { method: 'POST', session: admin, body: draft({ memberIds: [reader.member.id] }) })).body.server;
+  const db = new DatabaseSync(dbPath); t.after(() => db.close());
+  const before = catalogState(db);
+  const invalidRows = [null, [], 'Host original', importRow({ port: 0 }), importRow({ enabled: null }),
+    importRow({ name: '长'.repeat(25) }), importRow({ host: 'host\nProxyCommand=unwanted' }),
+    importRow({ password: 'synthetic-never-store' }), importRow({ privateKey: 'synthetic-never-store' }),
+    importRow({ identityFile: '/synthetic/key' }), importRow({ rawConfig: 'Host secret' }),
+    importRow({ company: 'B公司' }), importRow({ memberIds: [reader.member.id] }),
+    importRow({ jump: { host: 'jump.example', port: 22, username: 'bridge', password: 'synthetic-never-store' } }),
+    importRow({ jump: { host: 'jump.example', port: 22, username: 'bridge', privateKeyPath: '/synthetic/key' } }),
+  ];
+  for (const invalidRow of invalidRows) {
+    const rejected = await call('/api/servers/import', { method: 'POST', session: admin,
+      body: importBatch([importRow(), invalidRow], { memberIds: [reader.member.id] }) });
+    assert.equal(rejected.status, 422, rejected.text); assert.equal(rejected.text.includes('synthetic-never-store'), false);
+  }
+  for (const invalidBody of [
+    importBatch(undefined, { rawConfig: 'Host synthetic-never-store' }),
+    importBatch(undefined, { password: 'synthetic-never-store' }),
+    importBatch(undefined, { company: 'other' }), importBatch(undefined, { company: undefined }),
+    importBatch(undefined, { memberIds: undefined }), importBatch(undefined, { memberIds: null }),
+    importBatch(undefined, { memberIds: [outsider.member.id] }),
+    importBatch(undefined, { memberIds: [reader.member.id, reader.member.id] }),
+    importBatch(undefined, { memberIds: [admin.user.id] }),
+    importBatch([], {}), importBatch('raw SSH text'),
+    importBatch([importRow({ host: existing.host })], { memberIds: [outsider.member.id] }),
+  ]) {
+    const rejected = await call('/api/servers/import', { method: 'POST', session: admin, body: invalidBody });
+    assert.equal(rejected.status, 422, rejected.text);
+  }
+  assert.deepEqual(catalogState(db), before);
+});
+
+test('a failure while writing the second imported server rolls back the complete batch, grants and audit', async t => {
+  const { call, admin, add, dbPath } = await fixture(t);
+  const reader = await add('事务授权成员');
+  const db = new DatabaseSync(dbPath); t.after(() => db.close());
+  const before = catalogState(db);
+  db.exec(`CREATE TRIGGER reject_second_import BEFORE INSERT ON managed_server_audit
+    WHEN (SELECT name FROM managed_servers WHERE id=NEW.server_id)='触发失败'
+    BEGIN SELECT RAISE(ABORT,'synthetic second import failure'); END`);
+  const body = importBatch([importRow(), importRow({ host: 'second.example', name: '触发失败' })], { memberIds: [reader.member.id] });
+  const failed = await call('/api/servers/import', { method: 'POST', session: admin, body });
+  assert.equal(failed.status, 500, failed.text); assert.equal(failed.text.includes('synthetic second import failure'), false);
+  assert.deepEqual(catalogState(db), before);
+  db.exec('DROP TRIGGER reject_second_import');
+  const retried = await call('/api/servers/import', { method: 'POST', session: admin, body });
+  assert.equal(retried.status, 200, retried.text); assert.equal(retried.body.servers.length, 2);
+  assert.equal(retried.body.skipped, 0); assert.equal(db.prepare('SELECT COUNT(*) n FROM managed_server_grants').get().n, 2);
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM managed_server_audit').get().n, 2);
+});
+
+test('batch import retains the 64 KiB request limit, 50-row limit and strict route contract', async t => {
+  const { call, admin, dbPath } = await fixture(t);
+  const tooMany = await call('/api/servers/import', { method: 'POST', session: admin, body: importBatch(Array.from({ length: 51 }, () => importRow())) });
+  assert.equal(tooMany.status, 422, tooMany.text);
+  for (const chunked of [false, true]) {
+    const oversized = await call('/api/servers/import', { method: 'POST', session: admin,
+      body: importBatch([importRow({ name: 'x'.repeat(64 * 1024) })]), chunked });
+    assert.equal(oversized.status, 413, oversized.text); assert.equal(oversized.body.error.code, 'BODY_TOO_LARGE');
+  }
+  assert.equal((await call('/api/servers/import', { method: 'POST', session: admin, body: importBatch(), headers: { 'content-type': 'text/plain' } })).status, 415);
+  assert.equal((await call(`/api/servers/import${companyQuery('A公司')}`, { method: 'POST', session: admin, body: importBatch() })).status, 422);
+  for (const method of ['GET', 'PUT', 'DELETE']) assert.equal((await call('/api/servers/import', { method, session: admin, body: method === 'GET' ? undefined : {} })).status, 405);
+  const db = new DatabaseSync(dbPath); t.after(() => db.close());
+  assert.deepEqual(catalogState(db), { managed_servers: [], managed_server_grants: [], managed_server_audit: [] });
+});
+
+test('company capacity counts only new unique connections, rejects overflow atomically and accepts 50 rows in another company', async t => {
+  const { call, admin, dbPath } = await fixture(t);
+  const db = new DatabaseSync(dbPath); t.after(() => db.close());
+  const insert = db.prepare('INSERT INTO managed_servers VALUES(?,?,?,?,?,?,?,?,1,?,?)');
+  const at = new Date(NOW).toISOString();
+  db.exec('BEGIN');
+  for (let i = 0; i < 499; i++) insert.run(randomUUID(), 'A公司', `已有${i}`, `seed-${i}.example`, 22, 'researcher', null, 1, at, at);
+  db.exec('COMMIT');
+  const before = catalogState(db);
+  const overflow = await call('/api/servers/import', { method: 'POST', session: admin,
+    body: importBatch([importRow({ host: 'last.example' }), importRow({ host: 'overflow.example' })]) });
+  assert.equal(overflow.status, 409, overflow.text); assert.equal(overflow.body.error.code, 'SERVER_LIMIT');
+  assert.deepEqual(catalogState(db), before);
+  const fits = importBatch([importRow({ host: 'SEED-0.example' }), importRow({ host: 'last.example' }), importRow({ host: 'LAST.EXAMPLE' })]);
+  const added = await call('/api/servers/import', { method: 'POST', session: admin, body: fits });
+  assert.equal(added.status, 200, added.text); assert.equal(added.body.servers.length, 1); assert.equal(added.body.skipped, 2);
+  const full = catalogState(db);
+  const repeated = await call('/api/servers/import', { method: 'POST', session: admin, body: fits });
+  assert.equal(repeated.status, 200, repeated.text); assert.deepEqual(repeated.body, { servers: [], skipped: 3 });
+  assert.deepEqual(catalogState(db), full);
+  const another = await call('/api/servers/import', { method: 'POST', session: admin,
+    body: importBatch(Array.from({ length: 50 }, (_, i) => importRow({ host: `batch-${i}.example` })), { company: 'B公司' }) });
+  assert.equal(another.status, 200, another.text); assert.equal(another.body.servers.length, 50); assert.equal(another.body.skipped, 0);
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM managed_servers WHERE company='A公司'").get().n, 500);
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM managed_servers WHERE company='B公司'").get().n, 50);
 });

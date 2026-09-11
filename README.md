@@ -6,7 +6,7 @@
 
 ## 安装
 
-**当前版本：2.5.0 测试版（Pre-release）。** Ubuntu 20.04 / 22.04 推荐在终端运行统一安装命令；Mac 打开下载页，按芯片选择 DMG。无需下载源码或配置开发环境。
+**当前桌面安装包：2.5.0 测试版（Pre-release）。** Ubuntu 20.04 / 22.04 推荐在终端运行统一安装命令；Mac 打开下载页，按芯片选择 DMG。无需下载源码或配置开发环境。网页 2.6.0 增加超级管理员 SSH 配置导入与笔记本电脑类别，刷新网页即可使用。
 
 ```bash
 curl --proto '=https' --proto-redir '=https' -fL https://136.0.110.161/downloads/install-racktop.sh -o install-racktop.sh && bash install-racktop.sh

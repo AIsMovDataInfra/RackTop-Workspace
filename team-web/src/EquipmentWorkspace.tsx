@@ -20,9 +20,9 @@ import type { Equipment, EquipmentDraft, EquipmentHistory, EquipmentStats, Equip
 
 const statuses: EquipmentStatus[] = ['available', 'in_use', 'maintenance', 'retired']
 const limits = { name: 120, model: 160, responsiblePerson: 80, currentUser: 80, notes: 4000 }
-export const EQUIPMENT_CATEGORIES = ['机械臂', '台式主机', '显示屏', '摄像头模组', '实验物料', '小推车', '夹爪']
+export const EQUIPMENT_CATEGORIES = ['机械臂', '台式主机', '笔记本电脑', '显示屏', '摄像头模组', '实验物料', '小推车', '夹爪']
 export const EQUIPMENT_LOCATIONS = ['上海', '太仓']
-function categoryText(value: string, t: Translate) { return ({ '机械臂': t('机械臂', 'Robot arm'), '台式主机': t('台式主机', 'Desktop computer'), '显示屏': t('显示屏', 'Display'), '摄像头模组': t('摄像头模组', 'Camera module'), '实验物料': t('实验物料', 'Lab materials'), '小推车': t('小推车', 'Cart'), '夹爪': t('夹爪', 'Gripper') } as Record<string, string>)[value] || value }
+export function categoryText(value: string, t: Translate) { return ({ '机械臂': t('机械臂', 'Robot arm'), '台式主机': t('台式主机', 'Desktop computer'), '笔记本电脑': t('笔记本电脑', 'Laptop'), '显示屏': t('显示屏', 'Display'), '摄像头模组': t('摄像头模组', 'Camera module'), '实验物料': t('实验物料', 'Lab materials'), '小推车': t('小推车', 'Cart'), '夹爪': t('夹爪', 'Gripper') } as Record<string, string>)[value] || value }
 function locationText(value: string, t: Translate) { return value === '上海' ? t('上海', 'Shanghai') : value === '太仓' ? t('太仓', 'Taicang') : value }
 const fields = ['name', 'category', 'model', 'company', 'responsiblePerson', 'currentUser', 'location', 'notes', 'status'] as const
 const emptyDraft: EquipmentDraft = { name: '', category: '', model: '', company: '', responsiblePerson: '', currentUser: '', location: '', notes: '', status: 'available' }

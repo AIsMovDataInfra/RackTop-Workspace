@@ -83,6 +83,33 @@ describe('equipment inventory', () => {
     expect(update).toHaveBeenLastCalledWith(equipment.id, { location: '太仓', version: 2 })
   })
 
+  it.each(['zh-CN', 'en'] as const)('supports laptop selection, display and statistics in %s without changing the stored category', async (locale) => {
+    const laptop = { ...equipment, category: '笔记本电脑', model: '', name: '移动工作站' }
+    const translated: PreferencesState = { ...state, t: (zh, en) => locale === 'en' ? en : zh, preferences: { ...state.preferences, locale } }
+    const label = translated.t('笔记本电脑', 'Laptop')
+    vi.mocked(api.equipment).mockResolvedValue({ equipment: [laptop] })
+    vi.mocked(api.equipmentStats).mockResolvedValue({ stats: { total: 1, statuses: { available: 1, in_use: 0, maintenance: 0, retired: 0 }, companies: [{ company: 'A公司', count: 1 }], categories: [{ category: '笔记本电脑', count: 1 }], locations: [{ location: '上海', count: 1 }] } })
+    const create = vi.spyOn(api, 'createEquipment').mockResolvedValue({ equipment: laptop })
+    const edited = { ...equipment, category: '笔记本电脑', version: 2 }
+    const update = vi.spyOn(api, 'updateEquipment').mockResolvedValue({ equipment: edited })
+    const render = async (id?: string) => act(async () => root.render(<EquipmentWorkspace id={id} session={member} state={translated} navigate={vi.fn()} onSessionChanged={vi.fn()} onSessionExpired={vi.fn()} onLogout={vi.fn()} />))
+    await render()
+    expect(container.querySelector('.equipment-row-name')?.textContent).toContain(label)
+    expect(container.querySelector('[data-dimension="category"]')?.textContent).toContain(`${label}1`)
+    await click(translated.t('新增设备', 'Add device'))
+    expect([...container.querySelectorAll<HTMLOptionElement>('[name="category"] option')].find(option => option.value === '笔记本电脑')?.textContent).toBe(label)
+    enter('name', '移动工作站'); select('category', '笔记本电脑'); select('location', '上海'); await submit()
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ category: '笔记本电脑', name: '移动工作站' }))
+    await render(equipment.id)
+    await click(translated.t('编辑信息', 'Edit details'))
+    vi.mocked(api.equipmentDetails).mockResolvedValue({ equipment: edited, history: [] })
+    select('category', '笔记本电脑'); await submit()
+    expect(update).toHaveBeenCalledWith(equipment.id, { category: '笔记本电脑', version: 1 })
+    expect(container.querySelector('.equipment-detail-heading')?.textContent).toContain(label)
+    expect(container.querySelector('.equipment-facts')?.textContent).toContain(label)
+    expect(container.querySelector('.equipment-legacy')).toBeNull()
+  })
+
   it('clears the device and editor on expiry and reloads only after explicit sign-in', async () => {
     window.history.replaceState({}, '', `/equipment/${equipment.id}`)
     vi.spyOn(api, 'session').mockResolvedValueOnce(member).mockResolvedValue(anonymous)
