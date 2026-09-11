@@ -15,6 +15,7 @@ function text(value, max, label) {
 }
 function destination(input) {
   const host = text(input.host, 253, 'SSH 地址');
+  if (host.includes('%')) invalid('SSH 地址不支持带 zone 的 IPv6 地址');
   if (!isIP(host) && !host.split('.').every(part => /^[a-zA-Z0-9_](?:[a-zA-Z0-9_-]{0,61}[a-zA-Z0-9_])?$/.test(part))) invalid('SSH 地址只支持主机名或 IP 地址');
   if (!Number.isSafeInteger(input.port) || input.port < 1 || input.port > 65535) invalid('SSH 端口须为 1–65535');
   const username = text(input.username, 64, 'SSH 用户名');

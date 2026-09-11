@@ -32,29 +32,39 @@ export function ServersWorkspace(props: Props) {
   const [formError, setFormError] = useState<unknown>(null)
   const [busy, setBusy] = useState(false)
   const generation = useRef(0)
+  const pendingLoad = useRef<number | null>(null)
   const admin = session.user?.role === 'admin'
   const superAdmin = session.user?.isSuperAdmin === true
   function failed(reason: unknown) {
     if (reason instanceof ApiError && [401,403].includes(reason.status)) {
+      generation.current++; pendingLoad.current = null; setLoading(false)
       setServers([]); setEditor(null); setImporting(false)
       if (reason.status === 401) onSessionExpired()
     }
     setError(reason)
   }
-  async function load() {
+  async function load(automatic = false) {
+    if (automatic && pendingLoad.current !== null) return
     const attempt = ++generation.current
+    pendingLoad.current = attempt
     setLoading(true); setError(null)
     try { const value = await api.servers(company || undefined); if (attempt === generation.current) setServers(value.servers) }
     catch (reason) { if (attempt === generation.current) failed(reason) }
-    finally { if (attempt === generation.current) setLoading(false) }
+    finally {
+      if (pendingLoad.current === attempt) pendingLoad.current = null
+      if (attempt === generation.current) setLoading(false)
+    }
   }
   useEffect(() => {
     setServers([]); setEditor(null); setImporting(false); void load()
     return () => { generation.current++ }
   }, [session.user?.id, session.user?.company, session.user?.role, session.user?.isSuperAdmin, company])
   useEffect(() => {
-    const timer = window.setInterval(() => { if (!document.hidden && !editor && !importing && !busy) void load() }, 30_000)
-    return () => window.clearInterval(timer)
+    const refresh = () => { if (!document.hidden && !editor && !importing && !busy) void load(true) }
+    const timer = window.setInterval(refresh, 30_000)
+    window.addEventListener('focus', refresh)
+    document.addEventListener('visibilitychange', refresh)
+    return () => { window.clearInterval(timer); window.removeEventListener('focus', refresh); document.removeEventListener('visibilitychange', refresh) }
   }, [company, editor, importing, busy])
   useEffect(() => {
     const selectedCompany = editor?.draft.company
@@ -82,9 +92,11 @@ export function ServersWorkspace(props: Props) {
         const { company: _company, memberIds: _members, ...draft } = editor.draft
         value = await api.updateServer(editor.base!.id, { ...draft, version: editor.base!.version })
       }
+      // A GET started before this save must not overwrite the confirmed update.
       if (attempt !== generation.current) return
+      generation.current++; pendingLoad.current = null; setLoading(false)
       setServers(previous => [...previous.filter(item => item.id !== value.server.id), value.server])
-      setEditor(null); setNotice(t('已保存，获授权成员刷新后即可看到。', 'Saved. Authorized members can refresh to receive this change.'))
+      setEditor(null); setNotice(t('已保存，获授权成员会自动收到更新。', 'Saved. Authorized members receive updates automatically.'))
     } catch (reason) {
       if (attempt === generation.current) {
         if (reason instanceof ApiError && [401,403].includes(reason.status)) failed(reason)
@@ -99,7 +111,7 @@ export function ServersWorkspace(props: Props) {
   const filtered = servers.filter(server => [server.name,server.host,server.username,server.company].join(' ').toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()))
   const form = editor?.draft
   return <>
-    <WorkModuleFrame {...props} section="servers" title={t('服务器', 'Servers')} subtitle={t('统一维护 SSH 地址、用户名和访问成员。', 'Maintain SSH addresses, usernames and member access in one place.')} modal={Boolean(editor) || importing} actions={<><button disabled={loading} onClick={() => void load()}><RefreshCw size={16}/>{t('刷新', 'Refresh')}</button>{superAdmin && <button onClick={() => { setNotice(''); setImporting(true) }}><Upload size={16}/>{t('导入 SSH 配置', 'Import SSH configuration')}</button>}{admin && <button className="primary" onClick={() => open('create')}><Plus size={17}/>{t('添加服务器', 'Add server')}</button>}</>}>
+    <WorkModuleFrame {...props} section="servers" title={t('服务器资源', 'Server resources')} subtitle={t('统一维护 SSH 地址、用户名和访问成员。', 'Maintain SSH addresses, usernames and member access in one place.')} modal={Boolean(editor) || importing} actions={<><button disabled={loading} onClick={() => void load()}><RefreshCw size={16}/>{t('刷新', 'Refresh')}</button>{superAdmin && <button onClick={() => { setNotice(''); setImporting(true) }}><Upload size={16}/>{t('导入 SSH 配置', 'Import SSH configuration')}</button>}{admin && <button className="primary" onClick={() => open('create')}><Plus size={17}/>{t('添加服务器', 'Add server')}</button>}</>}>
           {Boolean(error) && <div className="error" role="alert">{errorText(error,t)}</div>}
           {notice && <div className="callout" role="status">{notice}</div>}
           <div className="server-filters"><label>{t('搜索服务器', 'Search servers')}<input type="search" value={search} onChange={event => setSearch(event.target.value)} placeholder={t('名称、地址或用户名', 'Name, address or username')}/></label>{superAdmin && <label>{t('组织', 'Organization')}<select value={company} onChange={event => setCompany(event.target.value as Company | '')}><option value="">{t('全部组织', 'All organizations')}</option>{COMPANY_OPTIONS.map(item => <option key={item}>{item}</option>)}</select></label>}<span role="status">{loading ? t('正在读取…', 'Loading…') : t(`${filtered.length} 台服务器`, `${filtered.length} ${filtered.length === 1 ? 'server' : 'servers'}`)}</span></div>
@@ -109,10 +121,10 @@ export function ServersWorkspace(props: Props) {
             <div className="server-entry-actions"><button onClick={() => void copy(server)}><Copy size={15}/>{t('复制地址', 'Copy address')}</button>{admin && <><button onClick={() => open('edit',server)}><Pencil size={15}/>{t('编辑', 'Edit')}</button><button onClick={() => open('grants',server)}><Users size={15}/>{t('授权', 'Access')}</button></>}</div>
           </article>)}</div>
           {!loading && !filtered.length && <div className="empty-state"><Server size={28}/><h2>{search ? t('没有匹配的服务器', 'No matching servers') : t('暂无可访问的服务器', 'No servers available')}</h2><p>{admin ? t('添加服务器后，为需要使用的成员授权。', 'Add a server and grant access to its members.') : t('请管理员将服务器授权给你。', 'Ask your administrator to grant server access.')}</p></div>}
-          <p className="server-help">{t('目录只保存连接信息。SSH 密码和私钥由使用者在本机管理。', 'The directory stores connection details. SSH passwords and private keys are managed on each member’s computer.')}</p>
+          <p className="server-help">{t('页面可见时约每 30 秒自动更新服务器资源，返回页面时也会检查。SSH 密码和私钥由使用者在本机管理。', 'Server resources refresh about every 30 seconds while this page is visible and check again when you return. SSH passwords and private keys are managed on each member’s computer.')}</p>
     </WorkModuleFrame>
     {importing && superAdmin && <SshImportDialog company={company || session.user?.company || COMPANY_OPTIONS[0]} t={t} onClose={() => setImporting(false)} onFailure={failed} onSaved={(importCompany, added, skipped) => {
-      setImporting(false); setNotice(t(`已导入 ${added} 台服务器${skipped ? `，跳过 ${skipped} 个重复连接` : ''}。获授权成员刷新后即可看到。`, `Imported ${added} servers${skipped ? `; skipped ${skipped} duplicate connections` : ''}. Authorized members can refresh to see them.`))
+      setImporting(false); setNotice(t(`已导入 ${added} 台服务器${skipped ? `，跳过 ${skipped} 个重复连接` : ''}。获授权成员会自动收到更新。`, `Imported ${added} servers${skipped ? `; skipped ${skipped} duplicate connections` : ''}. Authorized members receive updates automatically.`))
       if (company === importCompany) void load(); else setCompany(importCompany)
     }}/>}
     {editor && form && <Dialog title={editor.mode === 'create' ? t('添加服务器', 'Add server') : editor.mode === 'edit' ? t('编辑服务器', 'Edit server') : t('服务器授权', 'Server access')} subtitle={editor.base?.name} onClose={() => setEditor(null)} busy={busy} t={t}>

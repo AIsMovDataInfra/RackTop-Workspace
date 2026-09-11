@@ -18,7 +18,7 @@ export function WorkModuleFrame({ children, title, subtitle, section, actions, m
     <aside className="sidebar"><Brand t={t} /><CompanySwitcher session={session} t={t} onSessionChanged={onSessionChanged}/>
       <nav className="main-nav" aria-label={t('主导航', 'Main navigation')}>
         <button onClick={() => navigate('/')}><LayoutGrid size={18}/>{t('资源看板', 'Resource board')}</button>
-        <button className={section === 'servers' ? 'is-active' : ''} aria-current={section === 'servers' ? 'page' : undefined} onClick={() => navigate('/servers')}><Server size={18}/>{t('服务器目录', 'Servers')}</button>
+        <button className={section === 'servers' ? 'is-active' : ''} aria-current={section === 'servers' ? 'page' : undefined} onClick={() => navigate('/servers')}><Server size={18}/>{t('服务器资源', 'Server resources')}</button>
         <button onClick={() => navigate('/equipment')}><Package size={18}/>{t('设备管理', 'Equipment')}</button>
         <button className={section === 'requests' ? 'is-active' : ''} aria-current={section === 'requests' ? 'page' : undefined} onClick={() => navigate('/requests')}><ClipboardList size={18}/>{t('设备申请与领取', 'Device requests')}</button>
         <button className={section === 'reports' ? 'is-active' : ''} aria-current={section === 'reports' ? 'page' : undefined} onClick={() => navigate('/reports')}><FileText size={18}/>{t('周报与绩效', 'Weekly reports')}</button>

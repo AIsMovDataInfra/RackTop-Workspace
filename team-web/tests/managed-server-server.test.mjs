@@ -219,6 +219,46 @@ test('SSH configuration accepts only structured destinations and rejects credent
   assert.equal(catalog.text.includes('synthetic-rejected'), false);
 });
 
+test('IPv6 zone addresses cannot enter server metadata through create, update or import, while plain IPv6 remains readable', async t => {
+  const { call, admin, add, dbPath } = await fixture(t);
+  const readers = [await add('IPv6授权成员一'), await add('IPv6授权成员二')];
+  const memberIds = readers.map(reader => reader.member.id);
+  const jump = { host: '2001:db8::2', port: 2200, username: 'bridge' };
+  const created = await call('/api/servers', { method: 'POST', session: admin,
+    body: draft({ host: '2001:db8::1', jump, memberIds }) });
+  assert.equal(created.status, 201, created.text);
+  assert.equal(created.body.server.host, '2001:db8::1'); assert.deepEqual(created.body.server.jump, jump);
+  const path = `/api/servers/${created.body.server.id}`;
+  const updated = await call(path, { method: 'PATCH', session: admin,
+    body: { version: 1, host: '2001:db8::3', jump: { ...jump, host: '2001:db8::4' } } });
+  assert.equal(updated.status, 200, updated.text);
+  const imported = await call('/api/servers/import', { method: 'POST', session: admin,
+    body: importBatch([importRow({ host: '2001:db8::5', jump: { ...jump, host: '2001:db8::6' } })], { memberIds }) });
+  assert.equal(imported.status, 200, imported.text); assert.equal(imported.body.servers.length, 1);
+  const db = new DatabaseSync(dbPath); t.after(() => db.close());
+  const before = catalogState(db);
+  const snapshots = await Promise.all(readers.map(reader => call('/api/servers', { session: reader.session })));
+  for (const snapshot of snapshots) { assert.equal(snapshot.status, 200); assert.equal(snapshot.body.servers.length, 2); }
+  for (const host of ['fe80::1%eth0', 'fe80::1%2']) {
+    for (const patch of [{ host }, { jump: { ...jump, host } }]) {
+      for (const [target, method, body] of [
+        ['/api/servers', 'POST', draft({ ...patch, memberIds })],
+        [path, 'PATCH', { version: updated.body.server.version, ...patch }],
+        ['/api/servers/import', 'POST', importBatch([importRow({ host: 'valid-new.example' }), importRow(patch)], { memberIds })],
+      ]) {
+        const rejected = await call(target, { method, session: admin, body });
+        assert.equal(rejected.status, 422, rejected.text); assert.equal(rejected.body.error.code, 'INVALID_INPUT');
+        assert.deepEqual(catalogState(db), before, `${method} ${target} must preserve metadata, grants and audit`);
+      }
+    }
+  }
+  assert.deepEqual((await call(path, { session: admin })).body.server, updated.body.server);
+  for (const [index, reader] of readers.entries()) {
+    const retained = await call('/api/servers', { session: reader.session });
+    assert.equal(retained.status, 200, retained.text); assert.deepEqual(retained.body, snapshots[index].body);
+  }
+});
+
 test('server grants require current same-company members and failed writes roll back versions, grants and audit together', async t => {
   const { call, admin, add, dbPath } = await fixture(t);
   const reader = await add('保留授权'), outsider = await add('跨组织授权', ['B公司']), pending = await add('未分配授权', []);

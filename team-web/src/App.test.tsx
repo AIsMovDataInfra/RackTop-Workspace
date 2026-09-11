@@ -12,7 +12,7 @@ import type { Session } from './types'
 vi.mock('./Workspace', () => ({ Workspace: vi.fn(() => <div>预约工作台</div>) }))
 vi.mock('./EquipmentWorkspace', () => ({ EquipmentWorkspace: vi.fn(() => <div>设备工作台</div>) }))
 vi.mock('./MembersWorkspace', () => ({ MembersWorkspace: vi.fn(() => <div>成员管理工作台</div>) }))
-vi.mock('./ServersWorkspace', () => ({ ServersWorkspace: vi.fn(() => <div>服务器目录工作台</div>) }))
+vi.mock('./ServersWorkspace', () => ({ ServersWorkspace: vi.fn(() => <div>服务器资源工作台</div>) }))
 ;(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 const anonymous: Session = { user: null, csrfToken: 'test-csrf', authMode: 'account', feishuConfigured: false, notifications: { configured: false }, timezone: 'Asia/Shanghai' }
 const pending: Session = { ...anonymous, user: { id: 'test-member', name: '待分配员工', username: '中', role: 'member', isSuperAdmin: false, company: null } }
@@ -25,17 +25,37 @@ beforeEach(() => {
   vi.mocked(Workspace).mockImplementation(() => <div>预约工作台</div>)
   vi.mocked(EquipmentWorkspace).mockImplementation(() => <div>设备工作台</div>)
   vi.mocked(MembersWorkspace).mockImplementation(() => <div>成员管理工作台</div>)
-  vi.mocked(ServersWorkspace).mockImplementation(() => <div>服务器目录工作台</div>)
+  vi.mocked(ServersWorkspace).mockImplementation(() => <div>服务器资源工作台</div>)
 })
 afterEach(() => { act(() => root.unmount()); container.remove(); vi.useRealTimers(); vi.restoreAllMocks() })
 async function mount() { await act(async () => root.render(<App/>)) }
 async function click(text: string) { const button = [...container.querySelectorAll('button')].find((item) => item.textContent === text)!; expect(button, text).toBeDefined(); await act(async () => button.click()) }
 
+it('keeps a public download link available while connecting, after service failure and throughout anonymous sign-in forms', async () => {
+  let fail!: (error: Error) => void
+  vi.spyOn(api, 'session').mockImplementationOnce(() => new Promise((_resolve, reject) => { fail = reject })).mockResolvedValue(anonymous)
+  const checkDownload = () => {
+    const link = container.querySelector<HTMLAnchorElement>('.login-download a')!
+    expect(link.getAttribute('href')).toBe('/downloads/')
+    expect(new URL(link.href).origin).toBe(window.location.origin)
+    expect(link.textContent).toBe('下载 RackTop')
+    expect(container.querySelector('.main-workspace')).toBeNull()
+    expect(Workspace).not.toHaveBeenCalled(); expect(EquipmentWorkspace).not.toHaveBeenCalled()
+    expect(MembersWorkspace).not.toHaveBeenCalled(); expect(ServersWorkspace).not.toHaveBeenCalled()
+  }
+  await mount(); checkDownload()
+  await act(async () => fail(new Error('synthetic service unavailable')))
+  expect(container.querySelector('[role="alert"]')).not.toBeNull(); checkDownload()
+  await click('重试'); checkDownload()
+  await click('注册账号'); checkDownload()
+  await click('登录'); await click('忘记密码？'); checkDownload()
+})
+
 it('opens the authorized server directory with the shared workspace props', async () => {
   window.history.replaceState({}, '', '/servers')
   vi.spyOn(api, 'session').mockResolvedValue(assigned)
   await mount()
-  expect(container.textContent).toBe('服务器目录工作台')
+  expect(container.textContent).toBe('服务器资源工作台')
   expect(ServersWorkspace).toHaveBeenCalledWith(expect.objectContaining({ session: assigned, navigate: expect.any(Function), onSessionChanged: expect.any(Function) }), undefined)
 })
 

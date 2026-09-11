@@ -1,6 +1,6 @@
 import { Brand } from './Brand'
 import { useEffect, useRef, useState } from 'react'
-import { LoaderCircle, RefreshCw, Settings } from 'lucide-react'
+import { Download, LoaderCircle, RefreshCw, Settings } from 'lucide-react'
 import { api, acceptSession, ACCOUNT_CHANGED_EVENT, SESSION_EXPIRED_EVENT } from './api'
 import { AuthDialog } from './AuthDialog'
 import { errorText } from './errors'
@@ -73,5 +73,5 @@ export default function App() {
     return <EquipmentWorkspace key={scopeKey} id={id} session={session} state={state} navigate={navigate} bootstrapToken={bootstrapToken} onSessionChanged={signedIn} onSessionExpired={sessionExpired} onLogout={logout} />
   }
   if (session?.user) return <Workspace key={scopeKey} onNavigateEquipment={() => navigate('/equipment')} onNavigateServers={() => navigate('/servers')} onNavigateMembers={() => navigate('/members')} session={session} state={state} bootstrapToken={bootstrapToken} onSessionChanged={signedIn} onSessionExpired={sessionExpired} onLogout={logout} />
-  return <><main className="login-shell member-login-shell" inert={showSettings}><button className="login-settings icon-button" aria-label={t('设置', 'Settings')} onClick={() => setShowSettings(true)}><Settings size={19} /></button><div className="member-login"><Brand t={t} />{Boolean(error) && <div className="error" role="alert">{errorText(error, t)}<button onClick={() => void load(true)}><RefreshCw size={15} />{t('重试', 'Retry')}</button></div>}{session ? <AuthDialog embedded session={session} bootstrapToken={bootstrapToken} t={t} onClose={() => {}} onSignedIn={signedIn} /> : !error && <p role="status" className="loading-inline"><LoaderCircle size={18} />{t('正在连接服务…', 'Connecting to the service…')}</p>}</div></main>{showSettings && <SettingsDialog state={state} session={session} onClose={() => setShowSettings(false)} />}</>
+  return <><main className="login-shell member-login-shell" inert={showSettings}><button className="login-settings icon-button" aria-label={t('设置', 'Settings')} onClick={() => setShowSettings(true)}><Settings size={19} /></button><div className="member-login"><Brand t={t} />{Boolean(error) && <div className="error" role="alert">{errorText(error, t)}<button onClick={() => void load(true)}><RefreshCw size={15} />{t('重试', 'Retry')}</button></div>}{session ? <AuthDialog embedded session={session} bootstrapToken={bootstrapToken} t={t} onClose={() => {}} onSignedIn={signedIn} /> : !error && <p role="status" className="loading-inline"><LoaderCircle size={18} />{t('正在连接服务…', 'Connecting to the service…')}</p>}<div className="login-download"><a className="button" href="/downloads/"><Download size={16} aria-hidden="true" />{t('下载 RackTop', 'Download RackTop')}</a><p>{t('Linux 和 macOS 安装包与安装说明。', 'Linux and macOS installers and installation guides.')}</p></div></div></main>{showSettings && <SettingsDialog state={state} session={session} onClose={() => setShowSettings(false)} />}</>
 }

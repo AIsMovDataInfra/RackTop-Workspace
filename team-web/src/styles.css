@@ -423,6 +423,9 @@ legend { margin-bottom: 10px; color: var(--muted); font-size: .88rem; }
 
 .member-login { display: grid; gap: 24px; width: min(500px, 100%); }
 .member-login > .brand { justify-content: center; }
+.login-download { display: grid; justify-items: center; gap: 8px; text-align: center; }
+.login-download > .button { color: var(--info); }
+.login-download > p { margin: 0; color: var(--muted); font-size: .85rem; line-height: 1.6; }
 .login-auth { width: 100%; max-height: none; box-shadow: 0 12px 40px rgba(28,32,40,.06); }
 .login-auth .dialog-body { overflow: visible; }
 .equipment-legacy { display: block; margin-top: 5px; color: var(--orange); font-size: .8rem; }
