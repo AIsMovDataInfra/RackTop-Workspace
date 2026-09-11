@@ -1,11 +1,16 @@
 {
-  "version": "2.2.1",
-  "notes": "- 支持选择并一键复制全局日志和单台服务器日志中的失败信息，保留中文、换行与完整诊断内容。\n- 支持在任务实时日志中选择文本或复制整份日志，加载中和空日志不会复制占位文字。\n- 优化复制成功、重复复制和剪贴板不可用时的反馈，复制受限时可直接手动选择文字。\n- 修复快速切换任务时旧日志可能覆盖新任务日志的问题，避免显示或复制错任务内容。",
-  "pub_date": "2026-09-09T15:01:08Z",
+  "version": "2.5.0",
+  "notes": "- 新增在线服务器目录，管理员维护 SSH 连接信息和成员授权；云端仅保存连接元数据，密码与私钥由用户在本机配置。\n- 桌面登录后自动同步获授权的组织服务器，支持本机 SSH Agent、密码或私钥认证，保留个人连接和历史。\n- 成员可以同时属于多个组织，网页和桌面支持切换；周报代写、评审和统计按组织分别处理。\n- 新版 Flatpak 支持签名校验的应用内更新，复用已有运行时并保持原安装范围；Ubuntu 20.04 旧 2.2.2 须先手动升级一次。\n- 新增 Ubuntu 20.04／22.04 统一一键安装入口，简化 GitHub 首页与下载说明；Mac 按芯片选择 DMG，来源署名、许可证和历史文档保留。",
+  "pub_date": "2026-09-11T15:15:46Z",
   "platforms": {
     "linux-x86_64-deb": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTVThDMjZnT3Yrc2lHYkhYZHhQcmwybnhCNEFKTXZWNk5PQjlGbVdLd1NtQ1JsckQ5dDZaWlBoNno4bS9USGwxMFFTeExuQWNGMng2S1Y4RHczemE1eXVpZ01sVHFNTndrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4OTY1NTczCWZpbGU6UmFja1RvcF8yLjIuMV9saW51eC1hbWQ2NC5kZWIKai9hUVF2a1BkQUQ5eHljandjMUN6d1F6RVBqVHh4NlRESm1RT0JTTWx3QTFTY2FodHdoc0Y5MmhQM0FDWUEySDVHcFBFbkttczBPaWI2SjJvYUtaQlE9PQo=",
-      "url": "https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.2.1/RackTop_2.2.1_linux-amd64.deb"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTVThDMjZnT3Yrc2pHNDhKUzBPdGZhZVZnTi85bkJ6RDNmK3NRS1dwM0NwTmVqbkNOQ2FEbzJYNU1IQmViMFJvZVJrT1lPTHMyMFJwUGpMNmJoYjRxdTQzUHlHc1NsUlFrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg5MTM4NTk0CWZpbGU6UmFja1RvcF8yLjUuMF9saW51eC1hbWQ2NC5kZWIKUmo4amxwZkFkcU1zMUE4SzZLTGhUeG9xT1VMOGpJN0JmdTVZdUoxOERlL0w1VUtVMHlhUUtVL05YT290d0MrLzR4VXc1STU4TVZxaXloUERSOUp1Q0E9PQo=",
+      "url": "https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.5.0/RackTop_2.5.0_linux-amd64.deb"
+    },
+    "linux-x86_64-flatpak": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTVThDMjZnT3Yrc3B4akJGd2hMTkYwUHVOVHpGTmdCV016akZGRmxNZUUwRVFuSVFLM1dadEVCYTBtNmsvN1BaaUw3TGx1VWJiZDcxNGdTNUZkYms5SExJdXNHdUowMXd3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg5MTM4OTIxCWZpbGU6UmFja1RvcF8yLjUuMF9saW51eC1hbWQ2NC5mbGF0cGFrCjd4M080d3F1bHU3dXpIY3NhRWQ5WWdrVEhMZFo3eVNtVXR5VkdoQ0V0emVEQy9zRXovSXRkS2JHNmtESTg5bDk2M2JNVENidHIyVTIwcDYxVjY1WkF3PT0K",
+      "commit": "fab7794c1e694ad0a1af114cc16deb3c734547260f46055dcb81b6ae62693c81",
+      "url": "https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.5.0/RackTop_2.5.0_linux-amd64.flatpak"
     }
   }
 }

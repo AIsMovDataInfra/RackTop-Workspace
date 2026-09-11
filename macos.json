@@ -1,15 +1,15 @@
 {
-  "version": "2.2.1",
-  "notes": "- 支持选择并一键复制全局日志和单台服务器日志中的失败信息，保留中文、换行与完整诊断内容。\n- 支持在任务实时日志中选择文本或复制整份日志，加载中和空日志不会复制占位文字。\n- 优化复制成功、重复复制和剪贴板不可用时的反馈，复制受限时可直接手动选择文字。\n- 修复快速切换任务时旧日志可能覆盖新任务日志的问题，避免显示或复制错任务内容。",
-  "pub_date": "2026-09-09T15:01:08Z",
+  "version": "2.5.0",
+  "notes": "- 新增在线服务器目录，管理员维护 SSH 连接信息和成员授权；云端仅保存连接元数据，密码与私钥由用户在本机配置。\n- 桌面登录后自动同步获授权的组织服务器，支持本机 SSH Agent、密码或私钥认证，保留个人连接和历史。\n- 成员可以同时属于多个组织，网页和桌面支持切换；周报代写、评审和统计按组织分别处理。\n- 新版 Flatpak 支持签名校验的应用内更新，复用已有运行时并保持原安装范围；Ubuntu 20.04 旧 2.2.2 须先手动升级一次。\n- 新增 Ubuntu 20.04／22.04 统一一键安装入口，简化 GitHub 首页与下载说明；Mac 按芯片选择 DMG，来源署名、许可证和历史文档保留。",
+  "pub_date": "2026-09-11T15:15:46Z",
   "platforms": {
     "darwin-aarch64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTVThDMjZnT3Yrc3RyMkNCb25KSmFNZ1NXSmY1dVB1SGVSakpxbzFzQlJpQ1dPT1RpRWJHUTlyU2pObG16YU9wd0EyaXE1emNkSUh6TVBWNmZBb3dQdDlqVzduZlQ5dndBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4OTY1NTcxCWZpbGU6UmFja1RvcF8yLjIuMV9tYWNvcy1hcm02NC11bnNpZ25lZC5hcHAudGFyLmd6Cm9BMWtLandrRW5uT20zeTdrQXJpN0svc2xxQ0ExaGVDYWZSNEg4ak1HUDBJLysrb1F1TXhheHZQRTNGWVExR05pcVhLTkFzNk5tblRWYzBvUGkxREN3PT0K",
-      "url": "https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.2.1/RackTop_2.2.1_macos-arm64-unsigned.app.tar.gz"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTVThDMjZnT3Yrc3AwaFRwUXR6THdEUCs0ajhlUGJpYWRNLzRhMXM3YlVjWmMrd21JNStZd0Znd00wdzVUby9ZTC9EcU82NVVDOE1VR080c0hyYjdYUEJIVHR3ODlFVnc4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg5MTM4NTkzCWZpbGU6UmFja1RvcF8yLjUuMF9tYWNvcy1hcm02NC11bnNpZ25lZC5hcHAudGFyLmd6ClpHREVCRllXYW9uMnhlVUgwUlN6MS9nUDR1ZnJua3dvR1hYRjNmMWdoaVgzbXNlMzNPcDk5cHlZV1ZVOUFGWUpEYXFveGJlSXJqNEFBOFJQZ0xIVkNRPT0K",
+      "url": "https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.5.0/RackTop_2.5.0_macos-arm64-unsigned.app.tar.gz"
     },
     "darwin-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTVThDMjZnT3Yrc2hqU3JkZ3dDRHNRRllDZDluMGdNV2Q4YnNvb3llaTRHaUV1MFhlcFVhWDdENG5HYTE0cmxWbjhTeGluUUlEckJnN2JrenBkNVpHaHNRRFRMc3BVM3dNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4OTY1OTcxCWZpbGU6UmFja1RvcF8yLjIuMV9tYWNvcy14NjQtdW5zaWduZWQuYXBwLnRhci5negpYVk5iZ04zQzRHVG00dlhEUnkzM1YzSkJCdm4wN3phSEhxT2FCRnE4a1ZxaVBCV295M0kwdGJKQmZzcFlPV1FWUUpSQVJaK2VVYXdYaXFxNVJ1QStCQT09Cg==",
-      "url": "https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.2.1/RackTop_2.2.1_macos-x64-unsigned.app.tar.gz"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTVThDMjZnT3Yrc29yanV5cW9hbW8xOXdaaDhYOWxoL3dHZTR2Z0lHdHp3OHAwYXgyU1FFMGU1N1A3bFdob3ZaMldCcmtkS0Y1WnFrNGYrdzk3eW1uSFNwMkZjemd4bXdzPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg5MTM5MTE1CWZpbGU6UmFja1RvcF8yLjUuMF9tYWNvcy14NjQtdW5zaWduZWQuYXBwLnRhci5negpRZlo4NlI5SSthSk9YWEthN2pPcStLT0JIenh6V3ZteExGMjlkQkIzcCt4d3dhUWYyZnpaY0pKUFp6OVBkd2tRek4xTGV4NmFRa1ZSK2RiTEd6ZC9Edz09Cg==",
+      "url": "https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.5.0/RackTop_2.5.0_macos-x64-unsigned.app.tar.gz"
     }
   }
 }
