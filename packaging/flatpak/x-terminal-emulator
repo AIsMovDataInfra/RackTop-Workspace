@@ -1,0 +1,4 @@
+#!/bin/sh
+# Only the explicit SSH setup action opens a host terminal. RackTop's SSH,
+# password helpers and PTYs run inside the Flatpak with its bundled OpenSSH.
+exec flatpak-spawn --host x-terminal-emulator "$@"

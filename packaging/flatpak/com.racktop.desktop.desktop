@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=RackTop
+Comment=Monitor GPU and CPU servers over SSH
+Exec=racktop
+Icon=com.racktop.desktop
+Terminal=false
+Categories=Development;System;Monitor;
+StartupWMClass=RackTop

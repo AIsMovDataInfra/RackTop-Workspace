@@ -1,5 +1,7 @@
 # RackTop · AIsMov 团队工作台
 
+Ubuntu 20.04 桌面的兼容包正在 2.2.2 分支中验证；原因、Flatpak 构建与安装方式见 [Ubuntu 20.04 兼容说明](docs/LINUX.md#ubuntu-2004-兼容包222-开发版)。
+
 本项目由 **AIsMov** 维护，当前代码与 Linux / macOS 分发位于独立公开仓库 [AIsMovDataInfra/RackTop-Workspace](https://github.com/AIsMovDataInfra/RackTop-Workspace)。桌面应用继续叫 **RackTop**，在线网页为 **AIsMov RackTop 团队工作台**。项目源自 [Tongzh-SEU/RackTop](https://github.com/Tongzh-SEU/RackTop) 及 [原 AIsMov 维护仓库](https://github.com/AIsMovDataInfra/RackTop)，保留原作者 **Tongzh-SEU**、完整 Git 历史、[GPL-3.0](LICENSE) 和[来源说明](NOTICE.md)。
 
 当前桌面测试版为 **2.2.0**，面向 Linux amd64、Mac Apple Silicon 和 Mac Intel。它修复共享资源及其他桌面原生下拉菜单的纵向裁切；同一邀请码在到期前可供多台设备依次加入，每台设备独立授权，撤销成员时轮换邀请码；分享者仅在访客在线时看到公网出口 IP，并明确 NAT、VPN 或代理可能让多人显示同一地址。[GitHub v2.2.0 Release](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/tag/v2.2.0) 已作为测试版发布，Linux 与两种 Mac 架构的原生构建、公开附件、更新签名和启动检查均已通过；生产共享中继已升级到 `0.3.0`，本机 Linux 已完成 2.2.0 用户级安装。完整证据与验证边界见[2.2.0 验证记录](docs/VERIFICATION_2_2.md)。

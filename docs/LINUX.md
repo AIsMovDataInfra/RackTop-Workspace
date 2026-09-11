@@ -13,6 +13,41 @@ racktop
 
 也可从桌面应用菜单启动 RackTop。安装需要图形桌面以及 WebKitGTK 4.1；Linux 服务器端仍通过原有 OpenSSH 工作流管理。此包仅面向 amd64，不适用于 ARM。
 
+## Ubuntu 20.04 兼容包（2.2.2 开发版）
+
+Ubuntu 20.04 桌面不能直接安装当前 `.deb`：Tauri 2 使用 WebKitGTK 4.1，而 20.04 标准软件源提供的是 WebKitGTK 4.0；22.04 构建的 RackTop 还要求 `GLIBC_2.34`，高于 20.04 的 glibc 2.31。不能通过强制安装、改包依赖、为 4.0 建立 4.1 软链接或混入 22.04 软件源解决。这里说的是运行客户端的桌面系统；被 SSH 管理的服务器不需要安装 WebKitGTK。
+
+2.2.2 增加独立的 `RackTop_2.2.2_linux-amd64.flatpak` 构建，使用 GNOME 50 运行时提供 glibc、GTK 和 WebKitGTK 4.1。源码仍为 Tauri 2，Ubuntu 22.04 的 `.deb` 通道继续保留。兼容包与运行时均为 x86_64；需要图形桌面、Flatpak 和首次安装时的联网下载。
+
+本节描述开发中的兼容包；本轮实测结果及尚未覆盖的场景见 [2.2.2 验证记录](VERIFICATION_2_2_2.md)，未发布的包不能从历史 Release 获取。
+
+在 Ubuntu 20.04 上准备 Flatpak，下载经过校验的兼容包后执行：
+
+```bash
+sudo apt update
+sudo apt install flatpak xdg-desktop-portal xdg-desktop-portal-gtk
+flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+flatpak install --user ./RackTop_2.2.2_linux-amd64.flatpak
+flatpak run com.racktop.desktop
+```
+
+首次安装需要下载 GNOME 运行时，体积大于 `.deb`。Flatpak 版通过重新下载新版 `.flatpak` 并执行 `flatpak install --user ./新版文件.flatpak` 升级应用；`flatpak update --user` 用于更新已配置源中的运行时。当前没有 RackTop Flathub 应用仓库，不应把运行时更新描述为 RackTop 自动更新。应用内 Debian 更新器会提示使用 Flatpak 包，且不会下载或安装 `.deb`。
+
+兼容包包含 `ssh`、`ssh-keygen`、`ssh-keyscan`，支持应用内终端、SSH Agent、密码助手及 ProxyJump；宿主机独有的 ProxyCommand 程序不会自动进入沙箱，使用这类配置时需检查该程序是否在沙箱中可用。SSH 快速配置窗口通过宿主机 `x-terminal-emulator` 打开，宿主机需安装 OpenSSH 客户端和图形终端。
+
+本机项目同步及私钥引用需要访问用户选择的路径，因此兼容包允许访问宿主机普通文件系统、SSH Agent 和 Secret Service，并允许调用宿主机终端。此权限范围接近原 `.deb` 客户端，不把 Flatpak 包宣称为对本机文件严格隔离的应用。系统保留路径仍由运行时管理；托盘及钥匙串可用性取决于桌面环境。
+
+Flatpak 的应用数据默认位于 `~/.var/app/com.racktop.desktop/data/com.racktop.desktop`，与原 `.deb` 的 `~/.local/share/com.racktop.desktop` 分开。不会自动覆盖或搬迁旧资料；若需要迁移，应先退出两种客户端并备份，再复制应用数据和配置，检查本机私钥路径后重新连接。不要同时对同一份数据库运行两个客户端。
+
+维护者在已安装 `flatpak-builder` 和 GNOME 50 Platform / SDK 的环境中构建：
+
+```bash
+flatpak install --user flathub org.gnome.Platform//50 org.gnome.Sdk//50
+bash scripts/package-flatpak.sh /absolute/path/RackTop_2.2.2_linux-amd64.deb /absolute/path/output
+```
+
+参考：[Tauri 的 Linux 运行环境限制](https://v2.tauri.app/distribute/appimage/)、[Tauri Flatpak 分发](https://v2.tauri.app/distribute/flatpak/)、[Flatpak 运行时与沙箱](https://docs.flatpak.org/en/latest/basic-concepts.html)。
+
 ## 本机集成
 
 - Linux 使用系统窗口标题栏，支持窗口管理器提供的移动、缩放、最小化和关闭。

@@ -27,6 +27,19 @@ pub struct LinuxUpdateState {
 #[serde(rename_all = "camelCase")]
 pub struct UpdateInfo { version: String, date: Option<String> }
 
+fn require_debian_install(is_flatpak: bool) -> Result<(), String> {
+    if is_flatpak {
+        return Err("当前为 Flatpak 版，请下载安装新版 .flatpak 包后使用 flatpak install --user 更新；不能使用 Debian 安装包更新。".into());
+    }
+    Ok(())
+}
+
+fn check_install_format() -> Result<(), String> {
+    // Flatpak creates this file inside its sandbox. Do not infer the format
+    // from the host distribution or an inherited environment variable.
+    require_debian_install(Path::new("/.flatpak-info").is_file())
+}
+
 #[derive(Clone, Serialize)]
 #[serde(tag = "event", content = "data")]
 pub enum DownloadEvent {
@@ -48,6 +61,7 @@ pub fn validate_release(version: &str, url: &str, current: &str) -> Result<(), S
 
 #[tauri::command]
 pub async fn check_linux_update(app: tauri::AppHandle, state: State<'_, LinuxUpdateState>) -> Result<Option<UpdateInfo>, String> {
+    check_install_format()?;
     if std::env::consts::ARCH != "x86_64" { return Err("当前 Linux 更新通道仅提供 amd64 安装包".into()); }
     let update = app.updater_builder().pubkey(PUBLIC_KEY.trim()).target("linux-x86_64-deb")
         .endpoints(vec![ENDPOINT.parse().map_err(|_| "更新通道地址无效")?]).map_err(|error| error.to_string())?
@@ -75,6 +89,7 @@ async fn installed_version() -> Result<String, String> {
 
 #[tauri::command]
 pub async fn install_linux_update(state: State<'_, LinuxUpdateState>, version: String, on_event: Channel<DownloadEvent>) -> Result<(), String> {
+    check_install_format()?;
     if state.installing.swap(true, Ordering::SeqCst) { return Err("更新正在进行，请勿重复安装".into()); }
     struct Reset<'a>(&'a AtomicBool);
     impl Drop for Reset<'_> { fn drop(&mut self) { self.0.store(false, Ordering::SeqCst); } }
@@ -110,6 +125,7 @@ pub async fn install_linux_update(state: State<'_, LinuxUpdateState>, version: S
 
 #[tauri::command]
 pub async fn relaunch_linux_app(app: tauri::AppHandle, state: State<'_, LinuxUpdateState>) -> Result<(), String> {
+    check_install_format()?;
     let expected = state.installed.lock().map_err(|error| error.to_string())?.clone().ok_or("尚未完成安装")?;
     if installed_version().await? != expected { return Err("系统版本发生变化，请手动重新打开 RackTop".into()); }
     // /proc/self/exe may refer to the deleted old binary after dpkg replaces it.
@@ -121,6 +137,12 @@ pub async fn relaunch_linux_app(app: tauri::AppHandle, state: State<'_, LinuxUpd
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn flatpak_cannot_use_debian_update_channel() {
+        let error = require_debian_install(true).unwrap_err();
+        assert!(error.contains("flatpak install --user"));
+        assert!(require_debian_install(false).is_ok());
+    }
     #[test]
     fn accepts_only_newer_workspace_linux_packages() {
         let url = "https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.0.0/RackTop_2.0.0_linux-amd64.deb";

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.racktop.desktop</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-only</project_license>
+  <name>RackTop</name>
+  <summary>Monitor GPU and CPU servers over SSH</summary>
+  <description>
+    <p>RackTop monitors GPU, CPU, memory and processes across Linux servers over SSH, with integrated terminals, project synchronization and team workspaces.</p>
+  </description>
+  <launchable type="desktop-id">com.racktop.desktop.desktop</launchable>
+  <url type="homepage">https://github.com/AIsMovDataInfra/RackTop-Workspace</url>
+  <url type="bugtracker">https://github.com/AIsMovDataInfra/RackTop-Workspace/issues</url>
+  <developer id="io.github.AIsMovDataInfra"><name>AIsMov</name></developer>
+  <provides><binary>racktop</binary></provides>
+  <content_rating type="oars-1.1"/>
+  <releases><release version="@VERSION@" date="@DATE@"/></releases>
+</component>

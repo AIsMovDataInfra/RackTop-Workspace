@@ -14,7 +14,7 @@ on:
         type: boolean
         default: false
       build_linux:
-        description: Build Ubuntu 22.04 x64 Debian package
+        description: Build Linux x64 DEB and Ubuntu 20.04-compatible Flatpak
         required: true
         type: boolean
         default: true
@@ -32,6 +32,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: python3 scripts/check-release-version.py
+      - run: python3 scripts/test-flatpak-package.py
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -40,7 +41,7 @@ jobs:
       - name: Install Linux development dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev libdbus-1-dev openssh-client xvfb
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev libdbus-1-dev openssh-client xvfb flatpak flatpak-builder
       - run: npm ci
       - run: npm run test
       - run: npm run build
@@ -82,6 +83,29 @@ jobs:
           set -e
           test "$status" -eq 124
           echo "RACKTOP_VERSION=$(node -p "require('./package.json').version")" >> "$GITHUB_ENV"
+      - name: Install Flatpak build and application runtimes
+        run: |
+          flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          flatpak install --user --noninteractive flathub org.gnome.Platform//50 org.gnome.Sdk//50
+      - name: Build Ubuntu 20.04 compatibility bundle and verify runtime dependencies
+        run: scripts/package-flatpak.sh "$PWD/src-tauri/target/release/bundle/deb/RackTop_${RACKTOP_VERSION}_linux-amd64.deb" "$PWD/src-tauri/target/release/bundle/flatpak"
+      - name: Verify installed Flatpak native startup and WebKit
+        run: scripts/test-flatpak.sh "$PWD/src-tauri/target/release/bundle/flatpak/RackTop_${RACKTOP_VERSION}_linux-amd64.flatpak" "$RUNNER_TEMP/flatpak-verification"
+      - name: Upload Flatpak startup evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-flatpak-verification
+          if-no-files-found: warn
+          path: ${{ runner.temp }}/flatpak-verification
+      - name: Upload verified Flatpak compatibility package
+        uses: actions/upload-artifact@v4
+        with:
+          name: RackTop_${{ env.RACKTOP_VERSION }}_linux-amd64-flatpak
+          if-no-files-found: error
+          path: |
+            src-tauri/target/release/bundle/flatpak/*.flatpak
+            src-tauri/target/release/bundle/flatpak/*.sha256
       - uses: actions/upload-artifact@v4
         with:
           name: RackTop_${{ env.RACKTOP_VERSION }}_linux-amd64-deb

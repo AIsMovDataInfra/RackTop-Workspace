@@ -41,6 +41,9 @@ def collect_packages(assets, version):
     debs = list(assets.glob('*.deb'))
     if debs != [package] or not package.is_file() or not package.stat().st_size:
         raise ValueError('Require exactly one matching Linux amd64 Debian package')
+    flatpak = assets / f'RackTop_{version}_linux-amd64.flatpak'
+    if list(assets.glob('*.flatpak')) != [flatpak] or not flatpak.is_file() or not flatpak.stat().st_size:
+        raise ValueError('Require exactly one matching Linux amd64 Flatpak package')
     manifest = json.loads((assets / 'linux-amd64.json').read_text())
     expected_url = f'https://github.com/{REPO}/releases/download/v{version}/{package.name}'
     if manifest.get('version') != version or set(manifest.get('platforms', {})) != {'linux-x86_64-deb'}:
@@ -51,7 +54,8 @@ def collect_packages(assets, version):
     signature = (assets / (package.name + '.sig')).read_text().strip()
     if entry.get('signature') != signature or not base64.b64decode(signature, validate=True).startswith(b'untrusted comment:'):
         raise ValueError('Linux manifest signature mismatch')
-    return packages + [package], platforms, manifest['platforms'], signing
+    # Flatpak manages its own deployments; never offer its bundle to the DEB updater.
+    return packages + [package, flatpak], platforms, manifest['platforms'], signing
 
 
 def verify_release_assets(release, files):
@@ -137,8 +141,13 @@ def main():
         raise ValueError('Release notes must contain the current version changes')
     body = '## 主要更新\n\n' + '\n'.join(bullets) + '\n\n## 下载\n\n'
     for path in packages:
-        if path.suffix in ('.dmg', '.deb'):
-            label = 'Linux amd64 DEB' if path.suffix == '.deb' else ('Mac Apple Silicon（M 系列）DMG' if 'macos-arm64' in path.name else 'Mac Intel DMG')
+        if path.suffix in ('.dmg', '.deb', '.flatpak'):
+            if path.suffix == '.flatpak':
+                label = 'Linux amd64 Flatpak（Ubuntu 20.04 及以上）'
+            elif path.suffix == '.deb':
+                label = 'Linux amd64 DEB（Ubuntu 22.04）'
+            else:
+                label = 'Mac Apple Silicon（M 系列）DMG' if 'macos-arm64' in path.name else 'Mac Intel DMG'
             body += f'- [{label}](https://github.com/{REPO}/releases/download/{tag}/{path.name})\n'
         elif path.name.endswith('.app.tar.gz'):
             label = 'Mac Apple Silicon 自动更新附件' if 'macos-arm64' in path.name else 'Mac Intel 自动更新附件'
@@ -146,8 +155,8 @@ def main():
     body += f'- [对应源码（GPL-3.0）](https://github.com/{REPO}/releases/download/{tag}/{source.name})\n'
     for name, label in [('LICENSE', 'GPL-3.0 许可证'), ('NOTICE.md', '项目来源与署名'), ('SHA256SUMS', '文件校验清单')]:
         body += f'- [{label}](https://github.com/{REPO}/releases/download/{tag}/{name})\n'
-    body += '\nLinux：用系统软件安装器打开 DEB；Mac：打开对应芯片的 DMG，将 RackTop 拖入「应用程序」。\n'
-    body += '\n旧仓库的 1.x 客户端首次迁移需下载安装此版本，本地应用标识和数据保持兼容；后续更新使用独立仓库。\n'
+    body += '\nLinux：Ubuntu 20.04 使用 Flatpak；Ubuntu 22.04 也可用系统软件安装器打开 DEB。Flatpak 安装与更新步骤见 [Linux 安装说明](https://github.com/' + REPO + '/blob/' + tag + '/docs/LINUX.md)。Mac：打开对应芯片的 DMG，将 RackTop 拖入「应用程序」。\n'
+    body += '\n旧仓库的 1.x 客户端首次迁移需下载安装此版本；DEB 和 Mac 安装保留原应用数据，后续使用独立仓库更新。Flatpak 使用独立配置目录，通过重新安装新版 `.flatpak` 更新。\n'
     if signing:
         body += '\n本次 Mac 测试包未通过 Apple 公证；首次启动被阻止时，请在「系统设置 → 隐私与安全性」允许打开。\n'
     body += '\n`.app.tar.gz` 是 Mac 自动更新附件，手动安装请选择 DMG。所有安装包均可用 `SHA256SUMS` 校验。\n'
@@ -166,7 +175,7 @@ def main():
     common = {'version': version, 'notes': '\n'.join(bullets), 'pub_date': release['published_at']}
     publish_feeds({'macos.json': common | {'platforms': mac_platforms},
                    'linux-amd64.json': common | {'platforms': linux_platforms}})
-    print(f'Verified nine release assets and both update feeds: {release["html_url"]}')
+    print(f'Verified {len(files)} release assets and both update feeds: {release["html_url"]}')
 
 
 if __name__ == '__main__':
