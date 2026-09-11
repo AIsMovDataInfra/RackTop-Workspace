@@ -108,6 +108,8 @@ npm run team:build
 
 ## Evoxt 上的 Node.js / systemd 部署
 
+当前网页已于 **2026-09-11 18:01:59（UTC+8）** 更新至 2.3.0，部署目录 `/opt/racktop-team/releases/2.3.0-label-export-9fd1204`，源码 `9fd1204`。标签弹窗统一为「打印标签」下拉入口，支持已裁剪 PDF 和完整 PNG。一致性备份、数据保持、公网静态资源摘要与生产浏览器检查结果见 [2.3.0 验证记录](../docs/VERIFICATION_2_3_0.md#生产部署与数据保持)。
+
 线上已于 **2026-09-09 15:03:20（UTC+8）** 切换到2.1.1发布目录 `/opt/racktop-team/releases/2.1.1-superadmin-7fdecfa`，源码为PR #5合并提交 `7fdecfa`。切换前一致性备份为 `/var/lib/racktop-team/backups/workspace-deploy-20260909T070319Z-30886/before.sqlite`；20张表、59个schema对象、全部行内容摘要与自增计数器保持一致，没有schema迁移或历史数据重写。公网TLS、15项只读GET、匿名401、静态摘要与生产超管只读浏览器检查通过，见[2.1.1验证记录](../docs/VERIFICATION_2_1_1.md#生产部署与数据保持)。
 
 更早的2.0.0已于 **2026-09-09 08:23（UTC+8）** 部署至同一站点，源码提交为 `673fd35`。一致性备份后的加法迁移保留17张旧表全部原字段和计数器；公网 HTTPS、匿名业务拒绝、构建资产摘要和原管理员登录通过。生产检查没有修改真实业务资料。详细结果见[2.0.0验证记录](../docs/VERIFICATION.md)，以下保留部署与维护步骤。
