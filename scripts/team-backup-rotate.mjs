@@ -163,7 +163,8 @@ export async function rotateTeamBackup(source, destination, { now = new Date() }
   const walInfo = await lstat(`${source}-wal`).catch(error => { if (error.code !== 'ENOENT') throw error; return { size: 0 } })
   const space = await statfs(root)
   // Need the snapshot and an independent restore-drill copy at the same time.
-  if (space.bavail * space.bsize < 2 * (sourceInfo.size + walInfo.size) + 32 * 1024 * 1024) throw new Error('Insufficient backup disk space; existing snapshots preserved')
+  // Leave 1 GiB for the live database and system on deployments sharing a disk.
+  if (space.bavail * space.bsize < 2 * (sourceInfo.size + walInfo.size) + 1024 * 1024 * 1024) throw new Error('Insufficient backup disk space; existing snapshots preserved')
   const directory = `snapshot-${timestamp(now)}-${randomUUID()}`
   const target = join(root, directory)
   let staging = join(root, `.staging-${randomUUID()}`)
