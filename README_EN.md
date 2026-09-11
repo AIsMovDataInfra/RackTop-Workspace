@@ -1,10 +1,12 @@
 # RackTop · AIsMov Workspace
 
-Ubuntu 20.04 desktop compatibility is being verified on the 2.2.2 branch. See the [Ubuntu 20.04 / Flatpak guide](docs/LINUX.md#ubuntu-2004-兼容包222-开发版) for the native dependency limitation, build and installation instructions.
+**[Cloud downloads and installation](https://136.0.110.161/downloads/)** · [Detailed GitHub guide](docs/DOWNLOADS.md) (Chinese): choose the 2.2.2 development compatibility package for Ubuntu 20.04, or the 2.2.1 pre-release for Ubuntu 22.04 and Mac. The cloud download page and all four installers are live; anonymous downloads and SHA-256 checks have passed.
 
 **AIsMov** maintains RackTop in the independent public repository [AIsMovDataInfra/RackTop-Workspace](https://github.com/AIsMovDataInfra/RackTop-Workspace). The desktop app remains **RackTop**; the online product is **AIsMov RackTop Team Workspace**. The project derives from [Tongzh-SEU/RackTop](https://github.com/Tongzh-SEU/RackTop) and the [previous AIsMov maintenance repository](https://github.com/AIsMovDataInfra/RackTop). **Tongzh-SEU** remains the original author, and the full Git history, attribution, [GPL-3.0 license](LICENSE) and [NOTICE](NOTICE.md) are preserved.
 
-The current desktop pre-release is **2.2.0**, targeting Ubuntu 22.04 amd64 and both Apple Silicon and Intel Macs. It fixes vertically clipped native selects throughout the desktop; lets one invitation enroll multiple devices before expiry while keeping each device independently authorized and rotating the invitation when a member is revoked; and shows the owner an online guest's public egress IP with an explicit NAT, VPN, and proxy caveat. The [GitHub v2.2.0 release](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/tag/v2.2.0) is published, and the native builds, public assets, updater signatures, and startup checks passed for Linux and both Mac architectures. Production sharing relay 0.3.0 is deployed, and this Linux workstation has a user-level 2.2.0 installation. See the [2.2.0 verification record](docs/VERIFICATION_2_2.md) for evidence and test boundaries.
+The current published desktop pre-release is **[2.2.1](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/tag/v2.2.1)** for Linux amd64 and both Apple Silicon and Intel Macs. Ubuntu 20.04 has a separate **2.2.2 development compatibility package**. **2.4.0 is deployed for the team website only; no matching desktop installer has been published.** Equipment statistics, labels and backups are available through the website. See the [version history](docs/VERSION_INFOS.md) and [2.4.0 web verification record](docs/VERIFICATION_2_4_0.md).
+
+The live team website was updated to **web version 2.4.0** on 2026-09-11, adding equipment totals, statuses, and company/category/location breakdowns. Deployment data checks, public HTTP checks, and production browser verification passed; existing equipment and change history were retained. See the [2.4.0 web verification record](docs/VERIFICATION_2_4_0.md). This website update does not require a new desktop installer.
 
 The [online workspace guide](docs/WORKSPACE.md) covers equipment photos and QR labels, compute reservations, private weekly work reports with designated reviewers and manual scores, and equipment requests readable only by the super administrator. New ordinary members register with one name and password, then receive a company assignment from the super administrator. Business access is restricted to that company. The super administrator itself has no company assignment and manages all companies. Weekly submission and task statistics include ordinary members only; the super administrator may write for an ordinary member, assign reviewers, score reports, and approve equipment requests, but cannot create a report with itself as the author. Remembered web sessions last 360 days; desktop device tokens remain valid for 30 days.
 
@@ -47,13 +49,14 @@ Find the right GPU before launching a job, monitor resources and processes while
 
 ## Download
 
-**The 2.2.0 pre-release is published.** Installers for Linux amd64, Mac Apple Silicon, and Mac Intel can be downloaded anonymously from the [v2.2.0 release](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/tag/v2.2.0). All nine public assets match their GitHub digests, and `SHA256SUMS` covers and matches the other eight assets; source correspondence and updater signatures for all three platforms have also been checked. See the [2.2.0 verification record](docs/VERIFICATION_2_2.md).
+Choose your system on the shareable **[cloud download page](https://136.0.110.161/downloads/)**, or read the [detailed GitHub installation guide](docs/DOWNLOADS.md) (Chinese). The cloud download page and all four installers are live; anonymous downloads and SHA-256 checks have passed. The 2.2.1 installers are also available from the [GitHub release](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/tag/v2.2.1).
 
 | Platform | Installer |
 | --- | --- |
-| Linux amd64 | [RackTop_2.2.0_linux-amd64.deb](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.2.0/RackTop_2.2.0_linux-amd64.deb) |
-| Mac Apple Silicon | [RackTop_2.2.0_macos-arm64-unsigned.dmg](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.2.0/RackTop_2.2.0_macos-arm64-unsigned.dmg) |
-| Mac Intel | [RackTop_2.2.0_macos-x64-unsigned.dmg](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.2.0/RackTop_2.2.0_macos-x64-unsigned.dmg) |
+| Ubuntu 20.04 amd64 | [2.2.2 Flatpak easy installer, about 472 MiB](https://136.0.110.161/downloads/RackTop_2.2.2_linux-amd64-flatpak-easy.tar.gz) |
+| Ubuntu 22.04, amd64 | [RackTop_2.2.1_linux-amd64.deb](https://136.0.110.161/downloads/RackTop_2.2.1_linux-amd64.deb) |
+| Mac Apple Silicon | [RackTop_2.2.1_macos-arm64-unsigned.dmg](https://136.0.110.161/downloads/RackTop_2.2.1_macos-arm64-unsigned.dmg) |
+| Mac Intel | [RackTop_2.2.1_macos-x64-unsigned.dmg](https://136.0.110.161/downloads/RackTop_2.2.1_macos-x64-unsigned.dmg) |
 
 ### Previous 2.1.1 release
 
@@ -79,7 +82,7 @@ These 2.0.0 installers are available and their public downloads have been verifi
 Migration from the previous Linux `1.30.0-linux.12` or Mac distribution requires one manual installation because the new repository has dedicated signing keys and update feeds. The old feeds will not redirect to it. On Mac, quit RackTop and replace the app using the DMG for your processor. On Linux:
 
 ```bash
-sudo apt install ./RackTop_2.2.0_linux-amd64.deb
+sudo apt install ./RackTop_2.2.1_linux-amd64.deb
 racktop
 ```
 

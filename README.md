@@ -1,10 +1,10 @@
 # RackTop · AIsMov 团队工作台
 
-Ubuntu 20.04 桌面的兼容包正在 2.2.2 分支中验证；原因、Flatpak 构建与安装方式见 [Ubuntu 20.04 兼容说明](docs/LINUX.md#ubuntu-2004-兼容包222-开发版)。
+**[云端下载与安装](https://136.0.110.161/downloads/)** · [GitHub 详细教程](docs/DOWNLOADS.md)：Ubuntu 20.04 选择 2.2.2 开发兼容包，Ubuntu 22.04 和 Mac 选择 2.2.1 测试版。云端下载页与四种安装包已上线，已完成匿名下载及摘要核验。
 
 本项目由 **AIsMov** 维护，当前代码与 Linux / macOS 分发位于独立公开仓库 [AIsMovDataInfra/RackTop-Workspace](https://github.com/AIsMovDataInfra/RackTop-Workspace)。桌面应用继续叫 **RackTop**，在线网页为 **AIsMov RackTop 团队工作台**。项目源自 [Tongzh-SEU/RackTop](https://github.com/Tongzh-SEU/RackTop) 及 [原 AIsMov 维护仓库](https://github.com/AIsMovDataInfra/RackTop)，保留原作者 **Tongzh-SEU**、完整 Git 历史、[GPL-3.0](LICENSE) 和[来源说明](NOTICE.md)。
 
-当前桌面测试版为 **2.2.0**，面向 Linux amd64、Mac Apple Silicon 和 Mac Intel。它修复共享资源及其他桌面原生下拉菜单的纵向裁切；同一邀请码在到期前可供多台设备依次加入，每台设备独立授权，撤销成员时轮换邀请码；分享者仅在访客在线时看到公网出口 IP，并明确 NAT、VPN 或代理可能让多人显示同一地址。[GitHub v2.2.0 Release](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/tag/v2.2.0) 已作为测试版发布，Linux 与两种 Mac 架构的原生构建、公开附件、更新签名和启动检查均已通过；生产共享中继已升级到 `0.3.0`，本机 Linux 已完成 2.2.0 用户级安装。完整证据与验证边界见[2.2.0 验证记录](docs/VERIFICATION_2_2.md)。
+当前正式发布的桌面测试包为 **[2.2.1](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/tag/v2.2.1)**，面向 Linux amd64、Mac Apple Silicon 和 Mac Intel；Ubuntu 20.04 另提供 **2.2.2 开发兼容包**。**2.4.0 仅团队网页已上线，尚无对应桌面安装包**，新增设备统计及现有标签、备份功能可直接在网页使用。版本和验证边界见[版本信息](docs/VERSION_INFOS.md)与[2.4.0 网页验证记录](docs/VERIFICATION_2_4_0.md)。
 
 <div align="right">
   🌐 Language:
@@ -46,13 +46,14 @@ RackTop 是面向个人研究者和小型团队的 GPU 服务器桌面工作台�
 
 ## 下载
 
-**2.2.0 测试版已发布。** Linux amd64、Mac Apple Silicon 和 Mac Intel 安装包均可在 [v2.2.0 Release](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/tag/v2.2.0) 匿名下载；9 个公开附件均匹配 GitHub digest，`SHA256SUMS` 覆盖并匹配其余 8 个附件，标签源码对应关系和三个平台更新签名也已核验，详见[2.2.0 验证记录](docs/VERIFICATION_2_2.md)。
+打开 **[云端下载页](https://136.0.110.161/downloads/)** 选择系统，完整步骤见 [GitHub 安装教程](docs/DOWNLOADS.md)，两个页面都可转发。云端下载页与四种安装包已上线，已完成匿名下载及摘要核验；2.2.1 也可从 [GitHub Release](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/tag/v2.2.1) 下载。
 
 | 平台 | 安装包 |
 | --- | --- |
-| Linux amd64 | [RackTop_2.2.0_linux-amd64.deb](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.2.0/RackTop_2.2.0_linux-amd64.deb) |
-| Mac Apple Silicon | [RackTop_2.2.0_macos-arm64-unsigned.dmg](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.2.0/RackTop_2.2.0_macos-arm64-unsigned.dmg) |
-| Mac Intel | [RackTop_2.2.0_macos-x64-unsigned.dmg](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.2.0/RackTop_2.2.0_macos-x64-unsigned.dmg) |
+| Ubuntu 20.04 amd64 | [2.2.2 Flatpak 简易安装包，约 472 MiB](https://136.0.110.161/downloads/RackTop_2.2.2_linux-amd64-flatpak-easy.tar.gz) |
+| Ubuntu 22.04 amd64 | [RackTop_2.2.1_linux-amd64.deb](https://136.0.110.161/downloads/RackTop_2.2.1_linux-amd64.deb) |
+| Mac Apple Silicon | [RackTop_2.2.1_macos-arm64-unsigned.dmg](https://136.0.110.161/downloads/RackTop_2.2.1_macos-arm64-unsigned.dmg) |
+| Mac Intel | [RackTop_2.2.1_macos-x64-unsigned.dmg](https://136.0.110.161/downloads/RackTop_2.2.1_macos-x64-unsigned.dmg) |
 
 ### 上一版 2.1.1
 
@@ -78,7 +79,7 @@ RackTop 是面向个人研究者和小型团队的 GPU 服务器桌面工作台�
 从旧 `1.30.0-linux.12` 或其他旧维护版迁入，下载并手动安装一次新仓库包。新分发使用专用签名密钥和新更新地址，旧更新通道不会自动迁移；应用标识与本机数据目录保持兼容。Mac 用户先退出应用，再用新 DMG 替换安装。
 
 ```bash
-sudo apt install ./RackTop_2.2.0_linux-amd64.deb
+sudo apt install ./RackTop_2.2.1_linux-amd64.deb
 racktop
 ```
 
@@ -86,7 +87,7 @@ racktop
 
 ## 在线团队工作台
 
-在线工作台已切换到2.1.1发布目录 `/opt/racktop-team/releases/2.1.1-superadmin-7fdecfa`。部署前备份位于 `/var/lib/racktop-team/backups/workspace-deploy-20260909T070319Z-30886/before.sqlite`；20张表的结构、行数、内容摘要和自增计数器均保持，未执行schema迁移或历史重写。公网TLS、15项只读GET、匿名401、静态摘要和生产浏览器检查均通过，见[2.1.1验证记录](docs/VERIFICATION_2_1_1.md#生产部署与数据保持)。
+在线团队工作台已于 2026-09-11 更新到网页 **2.4.0**，设备管理新增总数、状态及公司／类别／位置分布统计。部署前后数据核对、公网检查和生产浏览器验收通过，既有设备及修改记录保留，见[2.4.0 网页验证记录](docs/VERIFICATION_2_4_0.md)。网页更新不要求安装新版桌面客户端。
 
 打开 [AIsMov RackTop](https://136.0.110.161)，用一个成员名称和密码注册，不需要邮箱。普通成员由超级管理员分配公司后即可使用本公司的设备台账和算力预约；超管本身没有公司归属，可跨公司管理。设置中可选择24种彩色头像，原7种保持兼容，网页“记住登录”为 360 天，桌面设备登录仍为 30 天。
 

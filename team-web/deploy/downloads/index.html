@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="description" content="按系统和芯片下载 RackTop：Ubuntu 20.04 简易兼容安装包、Ubuntu 22.04 DEB、Mac Apple Silicon 与 Intel DMG。">
+  <title>安装 RackTop</title>
+  <style>
+    :root { color-scheme: light dark; --canvas: #f3f4f6; --surface: #fff; --subtle: #f0f1f3; --text: #1d1d1f; --muted: #62636a; --border: #dedfe3; --link: #0066cc; --fill: #0067d9; --focus: #007aff; }
+    * { box-sizing: border-box; }
+    html { font-size: 16px; }
+    body { margin: 0; background: var(--canvas); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif; font-size: .9375rem; line-height: 1.65; }
+    a { color: var(--link); text-underline-offset: .2em; overflow-wrap: anywhere; }
+    a:focus-visible, summary:focus-visible { outline: 3px solid var(--focus); outline-offset: 4px; border-radius: 3px; }
+    .skip-link { position: fixed; z-index: 2; top: 12px; left: 12px; transform: translateY(-160%); padding: 9px 15px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; }
+    .skip-link:focus { transform: none; }
+    .page { width: min(100% - 48px, 1040px); margin: 0 auto; }
+    .site-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px 20px; padding: 25px 0; border-bottom: 1px solid var(--border); }
+    .brand { font-size: 1rem; font-weight: 650; letter-spacing: -.015em; }
+    .site-header a { font-size: .85rem; }
+    main { padding: 35px 0 28px; }
+    h1, h2, h3, p { margin-top: 0; }
+    h1 { margin-bottom: 9px; font-size: 1.9rem; line-height: 1.3; letter-spacing: -.025em; }
+    .intro { max-width: 760px; margin-bottom: 10px; color: var(--muted); }
+    .selection-help { margin-bottom: 25px; color: var(--muted); font-size: .85rem; }
+    .platforms { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+    .platform { min-width: 0; padding: 24px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
+    .platform h2 { margin-bottom: 3px; font-size: 1.25rem; line-height: 1.4; letter-spacing: -.015em; }
+    .chip { color: var(--muted); margin-bottom: 14px; font-size: .875rem; }
+    .release { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 18px; font-size: .8rem; color: var(--muted); }
+    .version { padding: 3px 8px; border-radius: 5px; background: var(--subtle); color: var(--text); }
+    .actions { display: flex; align-items: center; flex-wrap: wrap; gap: 11px 16px; margin-bottom: 22px; }
+    .download { display: inline-flex; justify-content: center; align-items: center; min-height: 42px; padding: 9px 15px; background: var(--fill); color: #fff; border: 1px solid transparent; border-radius: 8px; text-decoration: none; font-size: .875rem; font-weight: 550; line-height: 1.4; }
+    .download:active { transform: scale(.98); }
+    .alternate { font-size: .8rem; }
+    .platform h3 { margin-bottom: 9px; font-size: .9rem; font-weight: 600; }
+    .steps { margin: 0; padding-left: 1.4em; font-size: .85rem; }
+    .steps li { padding-left: 2px; margin-bottom: 10px; }
+    .steps li:last-child { margin-bottom: 0; }
+    pre { margin: 8px 0 0; padding: 11px 13px; border: 1px solid var(--border); border-radius: 8px; background: var(--subtle); white-space: pre-wrap; overflow-wrap: anywhere; }
+    code { font-family: ui-monospace, "SFMono-Regular", Consolas, "Liberation Mono", monospace; font-size: .78rem; line-height: 1.7; }
+    .hint { margin: 15px 0 0; color: var(--muted); font-size: .8rem; }
+    .guide-link { display: inline-block; margin-top: 12px; font-size: .85rem; }
+    .note { margin-top: 16px; padding: 20px 24px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
+    .note h2 { margin-bottom: 7px; font-size: .95rem; }
+    .note p { margin-bottom: 8px; color: var(--muted); font-size: .85rem; }
+    .note p:last-child { margin-bottom: 0; }
+    .online { display: flex; justify-content: space-between; align-items: center; gap: 12px 24px; flex-wrap: wrap; }
+    .online > div { flex: 1 1 360px; }
+    .online a { font-size: .875rem; }
+    footer { padding: 23px 0 30px; border-top: 1px solid var(--border); color: var(--muted); font-size: .8rem; }
+    footer p { margin-bottom: 9px; }
+    .footer-links { display: flex; flex-wrap: wrap; gap: 8px 20px; }
+    @media (hover: hover) and (pointer: fine) { .download:hover { filter: brightness(.92); } }
+    @media (prefers-color-scheme: dark) {
+      :root { --canvas: #111214; --surface: #25262a; --subtle: #303136; --text: #f5f5f7; --muted: #b1b2ba; --border: #3b3c40; --link: #7dbaff; --fill: #0067d9; --focus: #7dbaff; }
+    }
+    @media (max-width: 700px) {
+      .page { width: min(100% - 32px, 1040px); }
+      .site-header { padding: 19px 0; }
+      main { padding-top: 26px; }
+      h1 { font-size: 1.65rem; }
+      .platforms { grid-template-columns: minmax(0, 1fr); }
+      .platform, .note { padding: 20px; }
+      .download { min-height: 44px; }
+    }
+    @media (prefers-reduced-motion: reduce) { .download:active { transform: none; } }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#downloads">跳到安装包</a>
+  <div class="page">
+    <header class="site-header">
+      <span class="brand">AIsMov RackTop</span>
+      <a href="/equipment">打开在线设备管理</a>
+    </header>
+    <main>
+      <h1>安装 RackTop</h1>
+      <p class="intro">按电脑的系统和芯片选择安装包。下载后按下方步骤安装，无需编译源码。</p>
+      <p class="selection-help">Mac 可在苹果菜单的“关于本机”查看芯片；Ubuntu 请确认系统版本与电脑架构。</p>
+
+      <div class="platforms" id="downloads">
+        <section class="platform" aria-labelledby="ubuntu20-title">
+          <h2 id="ubuntu20-title">Ubuntu 20.04</h2>
+          <p class="chip">Intel / AMD 64 位电脑 · x86_64</p>
+          <p class="release"><span class="version">2.2.2 开发兼容版</span><span>简易安装套件 · 约 472 MiB</span></p>
+          <div class="actions"><a class="download" href="RackTop_2.2.2_linux-amd64-flatpak-easy.tar.gz" download>下载 Ubuntu 20.04 安装包</a></div>
+          <h3>解压后运行一个安装命令</h3>
+          <ol class="steps">
+            <li>提取压缩包，进入解压后的文件夹。</li>
+            <li>在文件夹空白处右键，选择“在终端打开”。</li>
+            <li>粘贴以下命令并回车：<pre><code>/bin/bash install-racktop.sh</code></pre></li>
+            <li>安装成功后启动：<pre><code>/usr/bin/flatpak run com.racktop.desktop</code></pre></li>
+          </ol>
+          <p class="hint">安装命令前不用加 sudo。首次补齐系统组件需要联网和本机管理员密码；应用与运行时已包含在套件中。</p>
+          <a class="guide-link" href="Ubuntu20.04-install.txt">查看 Ubuntu 20.04 详细教程</a>
+        </section>
+
+        <section class="platform" aria-labelledby="ubuntu22-title">
+          <h2 id="ubuntu22-title">Ubuntu 22.04</h2>
+          <p class="chip">Intel / AMD 64 位电脑 · amd64</p>
+          <p class="release"><span class="version">2.2.1 测试版</span><span>DEB 安装包</span></p>
+          <div class="actions">
+            <a class="download" href="RackTop_2.2.1_linux-amd64.deb" download>下载 Ubuntu 22.04 安装包</a>
+            <a class="alternate" href="https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.2.1/RackTop_2.2.1_linux-amd64.deb">GitHub 备用下载</a>
+          </div>
+          <h3>在下载目录安装</h3>
+          <ol class="steps">
+            <li>进入安装包所在文件夹，右键选择“在终端打开”。</li>
+            <li>运行以下命令，按提示输入本机管理员密码：<pre><code>sudo apt install ./RackTop_2.2.1_linux-amd64.deb</code></pre></li>
+            <li>在应用菜单搜索并打开 RackTop，也可运行：<pre><code>racktop</code></pre></li>
+          </ol>
+          <p class="hint">APT 会联网补齐缺少的运行组件。此 DEB 适用于 Ubuntu 22.04 amd64；Ubuntu 20.04 请选对应的兼容套件。</p>
+        </section>
+
+        <section class="platform" aria-labelledby="mac-arm-title">
+          <h2 id="mac-arm-title">Mac · Apple Silicon</h2>
+          <p class="chip">M 系列芯片 · arm64</p>
+          <p class="release"><span class="version">2.2.1 测试版</span><span>DMG 安装包</span></p>
+          <div class="actions">
+            <a class="download" href="RackTop_2.2.1_macos-arm64-unsigned.dmg" download>下载 Mac M 系列安装包</a>
+            <a class="alternate" href="https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.2.1/RackTop_2.2.1_macos-arm64-unsigned.dmg">GitHub 备用下载</a>
+          </div>
+          <ol class="steps">
+            <li>升级时先退出旧程序。打开 DMG，将 RackTop 拖入“应用程序”。</li>
+            <li>从“应用程序”打开 RackTop。</li>
+          </ol>
+          <p class="hint">此包未经 Apple 公证，首次打开可能需要手动允许。<a href="#mac-first-open">查看首次打开说明</a></p>
+        </section>
+
+        <section class="platform" aria-labelledby="mac-intel-title">
+          <h2 id="mac-intel-title">Mac · Intel</h2>
+          <p class="chip">Intel 处理器 · x64</p>
+          <p class="release"><span class="version">2.2.1 测试版</span><span>DMG 安装包</span></p>
+          <div class="actions">
+            <a class="download" href="RackTop_2.2.1_macos-x64-unsigned.dmg" download>下载 Mac Intel 安装包</a>
+            <a class="alternate" href="https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.2.1/RackTop_2.2.1_macos-x64-unsigned.dmg">GitHub 备用下载</a>
+          </div>
+          <ol class="steps">
+            <li>升级时先退出旧程序。打开 DMG，将 RackTop 拖入“应用程序”。</li>
+            <li>从“应用程序”打开 RackTop。</li>
+          </ol>
+          <p class="hint">此包未经 Apple 公证，首次打开可能需要手动允许。<a href="#mac-first-open">查看首次打开说明</a></p>
+        </section>
+      </div>
+
+      <section class="note" id="mac-first-open" aria-labelledby="mac-help-title">
+        <h2 id="mac-help-title">Mac 首次打开</h2>
+        <p>两种 Mac 安装包均采用 ad-hoc 本地代码签名，未经过 Apple 公证。若提示无法验证开发者，确认下载来源后，先尝试打开一次，再到“系统设置 → 隐私与安全性”选择“仍要打开”。</p>
+        <p>不同 macOS 版本的界面可能略有区别，请参考 <a href="https://support.apple.com/zh-cn/102445">Apple 官方打开 App 说明</a>。</p>
+      </section>
+
+      <section class="note online" aria-labelledby="online-title">
+        <div><h2 id="online-title">在线设备管理</h2><p>在线工作台 2.4.0 已上线，可直接在浏览器查看与登记团队设备。上方桌面安装包的版本以各项标注为准。</p></div>
+        <a href="/equipment">进入设备管理 →</a>
+      </section>
+    </main>
+
+    <footer>
+      <p>RackTop 源码与许可证</p>
+      <nav class="footer-links" aria-label="源码、许可证与文件校验">
+        <a href="RackTop_2.2.2_source.tar.gz" download>2.2.2 源代码</a>
+        <a href="https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.2.1/RackTop_2.2.1_source.tar.gz">2.2.1 源代码</a>
+        <a href="LICENSE">GPL-3.0 许可证</a>
+        <a href="NOTICE.md">来源与署名</a>
+        <a href="SHA256SUMS">文件校验清单</a>
+      </nav>
+    </footer>
+  </div>
+</body>
+</html>
