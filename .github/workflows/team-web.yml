@@ -24,7 +24,7 @@ jobs:
       - run: npm run team:test
       - run: npm run team:build
       - name: Package web deployment artifact
-        run: tar -czf RackTop-team-web.tar.gz team-web/dist team-web/server team-web/src team-web/tests team-web/index.html team-web/vite.config.ts team-web/tsconfig.json team-web/README.md team-web/API.md team-web/.env.example team-web/Dockerfile team-web/compose.yaml team-web/Caddyfile.example team-web/deploy scripts/team-backup.mjs scripts/team-admin.mjs scripts/team-import-inventory.mjs scripts/team-dev.mjs tsconfig.json .dockerignore package.json package-lock.json docs/EQUIPMENT.md docs/TEAM_ACCOUNTS.md LICENSE NOTICE.md
+        run: tar -czf RackTop-team-web.tar.gz team-web/dist team-web/server team-web/src team-web/tests team-web/index.html team-web/vite.config.ts team-web/tsconfig.json team-web/README.md team-web/API.md team-web/.env.example team-web/Dockerfile team-web/compose.yaml team-web/Caddyfile.example team-web/deploy scripts/team-backup.mjs scripts/team-backup-rotate.mjs scripts/team-admin.mjs scripts/team-import-inventory.mjs scripts/team-dev.mjs tsconfig.json .dockerignore package.json package-lock.json docs/EQUIPMENT.md docs/TEAM_ACCOUNTS.md docs/VERIFICATION_2_3_1.md LICENSE NOTICE.md
       - uses: actions/upload-artifact@v4
         with:
           name: RackTop-team-web

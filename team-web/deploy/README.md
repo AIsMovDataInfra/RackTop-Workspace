@@ -98,7 +98,7 @@ Nginx 的 `/` 与 `/api/` 转发到预约服务；`Host` 与公开站点一致�
 /opt/racktop-team/node/bin/node /opt/racktop-team/current/scripts/team-backup.mjs /var/lib/racktop-team/team.sqlite /var/lib/racktop-team/backups/唯一名称.sqlite
 ```
 
-备份脚本检查完整性，包含已提交的 WAL，不覆盖已有文件。恢复时先停服务，恢复一致性快照并核对权限，再启动；单独复制运行中的 `.sqlite` 主文件不可靠。
+备份脚本检查完整性，包含已提交的 WAL，不覆盖已有文件。恢复时先停服务，恢复一致性快照并核对权限，再启动；单独复制运行中的 `.sqlite` 主文件不可靠。定时快照、保留策略、独立位置备份与恢复步骤见 [资产数据持久化与备份](BACKUPS.md)。自动备份工具应安装在独立于网页 release 的稳定目录，并实际启用对应 systemd timer。
 
 完成后检查 HTTPS 和 `/api/health`、匿名业务接口拒绝访问、待分配成员的 `COMPANY_REQUIRED`、超管专属名册权限、公司分配后的成员资源列表、找回与重置后的会话撤销、删号后的历史保留、普通账号注册与所有权、管理员资源同步、GPU 冲突和旧版本保护、重启后的记录、备份恢复，以及原共享中继。未经实际执行的检查应记为未验证。日志不要输出环境秘密、请求密码或 Bearer 令牌；访问日志不应记录请求体。
 

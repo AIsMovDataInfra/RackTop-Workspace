@@ -1,0 +1,32 @@
+[Unit]
+Description=Verified RackTop team database backup and retention
+After=local-fs.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+UMask=0077
+WorkingDirectory=/opt/racktop-team/backup-tools
+ExecStart=/usr/bin/flock --exclusive --nonblock /var/backups/racktop-team/automatic/.backup.lock /opt/racktop-team/node/bin/node --max-old-space-size=256 /opt/racktop-team/backup-tools/team-backup-rotate.mjs
+TimeoutStartSec=10min
+Nice=10
+IOSchedulingClass=idle
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_UNIX
+ReadWritePaths=/var/backups/racktop-team/automatic
+MemoryMax=512M
+TasksMax=32
+StandardOutput=journal
+StandardError=journal
+
+# Install /var/backups/racktop-team and its automatic subdirectory as root:root
+# mode 0700 before starting. Keep backup-tools root-owned and not app-writable.
+# A failed unit/journal entry is an alert; no credentials or notifications sent.
