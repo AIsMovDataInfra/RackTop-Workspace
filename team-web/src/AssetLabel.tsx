@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
-import { Download, Printer } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { ChevronDown, Printer } from 'lucide-react'
 import QRCode from 'qrcode'
 import { Dialog } from './Dialog'
 import type { Equipment, Translate } from './types'
+import { downloadAssetLabel, exportAssetLabel, type LabelFormat } from './asset-label-export'
 import './asset-label.css'
 
 export const equipmentUrl = (id: string) => `${window.location.origin}/equipment/${encodeURIComponent(id)}`
@@ -32,7 +33,8 @@ function wrap(value: string, units: number) {
 
 export function assetLabelSvg(equipment: Equipment, qr: string, t: Translate) {
   if (!/^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/.test(qr)) throw new Error('Invalid QR image')
-  const layout = rows(equipment, t).map(([label, value]) => ({ label: wrap(label, 7), value: wrap(value, 18) }))
+  // These short field labels fit the key column; keep English words intact.
+  const layout = rows(equipment, t).map(([label, value]) => ({ label: label.split(' '), value: wrap(value, 18) }))
   const heights = layout.map((row) => Math.max(44, Math.max(row.label.length, row.value.length) * 25 + 16))
   const height = 52 + heights.reduce((sum, value) => sum + value, 0)
   const text = (lines: string[], x: number, y: number) => `<text x="${x}" y="${y}" font-size="18" stroke="none">${lines.map((line, index) => `<tspan x="${x}" dy="${index ? 25 : 0}">${escapeXml(line)}</tspan>`).join('')}</text>`
@@ -48,7 +50,15 @@ export function assetLabelSvg(equipment: Equipment, qr: string, t: Translate) {
 export function EquipmentLabel({ equipment, t, onClose }: { equipment: Equipment; t: Translate; onClose: () => void }) {
   const [image, setImage] = useState('')
   const [error, setError] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [exportError, setExportError] = useState(false)
+  const exportJob = useRef(0), exporting = useRef(false)
   const url = equipmentUrl(equipment.id)
+  const contentKey = JSON.stringify([url, title(t), rows(equipment, t)])
+  useEffect(() => {
+    exporting.current = false; setBusy(false); setExportError(false)
+    return () => { exportJob.current += 1 }
+  }, [contentKey])
   useEffect(() => {
     let active = true
     setImage(''); setError(false)
@@ -56,6 +66,19 @@ export function EquipmentLabel({ equipment, t, onClose }: { equipment: Equipment
     document.body.classList.add('equipment-label-open')
     return () => { active = false; document.body.classList.remove('equipment-label-open') }
   }, [url])
+  async function printLabel(format: LabelFormat) {
+    if (!image || exporting.current) return
+    const job = ++exportJob.current
+    exporting.current = true; setBusy(true); setExportError(false)
+    try {
+      const blob = await exportAssetLabel(assetLabelSvg(equipment, image, t), format)
+      if (job === exportJob.current) downloadAssetLabel(blob, equipment.serialNumber, format)
+    } catch {
+      if (job === exportJob.current) setExportError(true)
+    } finally {
+      if (job === exportJob.current) { exporting.current = false; setBusy(false) }
+    }
+  }
   return <Dialog title={t('设备标签', 'Device label')} t={t} onClose={onClose}>
     <div className="dialog-body">
       <div className="asset-label-scroll" role="region" aria-label={title(t)} tabIndex={0}>
@@ -70,7 +93,19 @@ export function EquipmentLabel({ equipment, t, onClose }: { equipment: Equipment
       </div>
       <p className="field-help">{t('标签较宽时可左右滑动。资产信息更新后，二维码保持不变；纸面信息需重新打印。扫码后登录团队账号查看。', 'Scroll horizontally to see a wide label. The QR code stays the same after updates; reprint to update the text on paper. Sign in with your team account after scanning.')}</p>
       <a className="equipment-label-url" href={url}>{t('打开此设备页面', 'Open this device page')}</a>
+      {exportError && <p className="error" role="alert">{t('标签生成失败，请重新选择 PDF 或 PNG 重试。', 'Could not generate the label. Choose PDF or PNG to try again.')}</p>}
     </div>
-    <footer>{image && <><a className="button" href={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(assetLabelSvg(equipment, image, t))}`} download={`${equipment.serialNumber}-asset-label.svg`}><Download size={16}/>{t('下载完整标签', 'Download full label')}</a><a className="button" href={image} download={`${equipment.serialNumber}-QR.png`}>{t('下载二维码', 'Download QR')}</a></>}<button className="primary" disabled={!image} onClick={() => window.print()}><Printer size={16}/>{t('打印标签', 'Print label')}</button></footer>
+    <footer>
+      {busy && <span className="field-help" role="status">{t('正在生成标签…', 'Generating label…')}</span>}
+      <label className="asset-label-print">
+        <Printer size={16} aria-hidden="true"/>
+        <select className="primary" aria-label={t('打印标签', 'Print label')} disabled={!image || busy} value="" onChange={(event) => { const format = event.target.value; if (format === 'pdf' || format === 'png') void printLabel(format) }}>
+          <option value="" disabled hidden>{t('打印标签', 'Print label')}</option>
+          <option value="pdf">{t('PDF（已裁剪）', 'PDF (cropped)')}</option>
+          <option value="png">PNG</option>
+        </select>
+        <ChevronDown size={16} aria-hidden="true"/>
+      </label>
+    </footer>
   </Dialog>
 }

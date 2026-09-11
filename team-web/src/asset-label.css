@@ -9,6 +9,13 @@
 .asset-label-table .asset-label-qr { padding: 8px; text-align: center; }
 .asset-label-qr img { display: block; width: 100%; height: auto; margin: 0 auto; }
 .asset-label-number { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+.asset-label-print { position: relative; display: inline-flex; max-width: 100%; }
+.asset-label-print select { appearance: none; width: auto; max-width: 100%; min-height: 40px; padding: 9px 36px; border-color: var(--blue); color: #fff; background: var(--blue); font-weight: 600; cursor: pointer; }
+.asset-label-print select:disabled { cursor: wait; }
+.asset-label-print option { color: var(--text); background: var(--surface); }
+.asset-label-print svg { position: absolute; top: 50%; transform: translateY(-50%); color: #fff; pointer-events: none; z-index: 1; }
+.asset-label-print svg:first-child { left: 12px; }
+.asset-label-print svg:last-child { right: 12px; }
 @media print {
   /* Undo the dialog's inline scroll lock for the printed page. */
   body.equipment-label-open { overflow: visible !important; }

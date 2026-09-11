@@ -173,8 +173,7 @@ describe('equipment inventory', () => {
     expect(text()).not.toContain('/api/'); expect(text()).not.toContain('机械臂'); expect(text()).not.toContain('上海')
   })
 
-  it('generates a stable local QR label and supports printing and downloading', async () => {
-    const print = vi.spyOn(window, 'print').mockImplementation(() => {})
+  it('generates a stable local QR label with a single print format control', async () => {
     await act(async () => root.render(<EquipmentLabel equipment={equipment} t={t} onClose={vi.fn()} />))
     expect(QRCode.toDataURL).toHaveBeenCalledWith(`${window.location.origin}/equipment/${equipment.id}`, expect.objectContaining({ margin: 4, errorCorrectionLevel: 'M' }))
     expect(container.querySelector('table')?.getAttribute('aria-label')).toBe('固定资产标识码')
@@ -182,10 +181,11 @@ describe('equipment inventory', () => {
     expect(container.querySelector('td[rowspan]')?.getAttribute('rowspan')).toBe('5')
     expect([...container.querySelectorAll('tbody th')].map((cell) => cell.textContent)).toEqual(['公司名称', '资产编号', '资产名称', '责任人', '使用人'])
     expect([...container.querySelectorAll('tbody tr')].map((row) => row.querySelector('td')?.textContent)).toEqual(['A公司', '00000001', '实验室相机', '负责人甲', '—'])
-    expect(container.querySelector('a[download="00000001-asset-label.svg"]')?.getAttribute('href')).toMatch(/^data:image\/svg\+xml;/)
-    expect(container.querySelector('a[download="00000001-QR.png"]')?.getAttribute('href')).toMatch(/^data:image\/png;/)
-    expect(container.querySelector('a[download="00000001-QR.png"]')?.getAttribute('download')).toBe('00000001-QR.png')
-    await click('打印标签'); expect(print).toHaveBeenCalledOnce()
+    expect(container.querySelectorAll('a[download]')).toHaveLength(0)
+    expect(container.textContent).not.toContain('下载完整标签'); expect(container.textContent).not.toContain('下载二维码')
+    const print = container.querySelector<HTMLSelectElement>('select[aria-label="打印标签"]')!
+    expect(print).not.toBeNull(); expect(print.disabled).toBe(false)
+    expect([...print.options].map(option => [option.value, option.textContent])).toEqual([['', '打印标签'], ['pdf', 'PDF（已裁剪）'], ['png', 'PNG']])
   })
 
   it('restricts member company choices to their own company and offers all four choices and member navigation for the super administrator', async () => {
