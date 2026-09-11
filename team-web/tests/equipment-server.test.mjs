@@ -106,6 +106,33 @@ test('equipment HTTP rejects unknown and duplicate parameters, forged metadata a
   assert.equal((await call(`/api/equipment/${created.body.equipment.id}`, { method: 'PATCH', session: member, body: { name: '未带版本' } })).status, 422);
 });
 
+test('equipment statistics are authenticated, read-only, unfiltered and never routed as an equipment ID', async t => {
+  const { call, register } = await fixture(t);
+  const anonymous = await call('/api/equipment/stats');
+  assert.equal(anonymous.status, 401); assert.equal(anonymous.headers['set-cookie'], undefined);
+  const member = await register('statistics-member');
+  assert.deepEqual((await call('/api/equipment/stats', { session: member })).body, {
+    stats: { total: 0, statuses: { available: 0, in_use: 0, maintenance: 0, retired: 0 }, companies: [], categories: [], locations: [] },
+  });
+  for (const status of ['available', 'in_use', 'maintenance', 'retired']) {
+    const created = await call('/api/equipment', { method: 'POST', session: member,
+      body: draft({ name: `不公开统计的设备-${status}`, currentUser: '不公开统计的使用者', status }) });
+    assert.equal(created.status, 201, created.text);
+  }
+  const result = await call('/api/equipment/stats', { session: member });
+  assert.equal(result.status, 200); assert.equal(result.headers['cache-control'], 'no-store');
+  assert.deepEqual(result.body, { stats: { total: 4, statuses: { available: 1, in_use: 1, maintenance: 1, retired: 1 },
+    companies: [{ company: '西浦', count: 4 }], categories: [{ category: '台式主机', count: 4 }], locations: [{ location: '上海', count: 4 }] } });
+  assert.equal(result.text.includes('不公开统计'), false); assert.equal(result.text.includes(member.user.id), false);
+  for (const query of ['?status=available', '?status=available&status=retired', '?company=A%E5%85%AC%E5%8F%B8', '?q=secret', '?limit=1']) {
+    assert.equal((await call(`/api/equipment/stats${query}`, { session: member })).status, 422);
+  }
+  for (const method of ['POST', 'PATCH', 'DELETE']) assert.equal((await call('/api/equipment/stats', { method, session: member, body: {} })).status, 405);
+  assert.equal((await call('/api/equipment/stats', { session: member })).body.stats.total, 4);
+  await call('/api/auth/logout', { method: 'POST', session: member, body: {} });
+  assert.equal((await call('/api/equipment/stats', { session: member })).status, 401);
+});
+
 test('concurrent HTTP updates cannot overwrite each other and retirement keeps its QR identity after restart', async t => {
   const { call, register, restart } = await fixture(t);
   const first = await register('writer-one'), second = await register('writer-two');

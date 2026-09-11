@@ -211,6 +211,26 @@ export function createEquipmentStore({ dbPath = ':memory:', now = Date.now, enfo
       return { equipment, history };
     }, false);
   }
+  function stats(user) {
+    const company = companyScope(user);
+    return transaction(() => {
+      const where = company === null ? '' : 'WHERE company=?';
+      const parameters = company === null ? [] : [company];
+      // Aggregate the whole permitted ledger, without fetching photos or applying
+      // the client's list filters. All dimensions share one read snapshot.
+      const totals = db.prepare(`SELECT COUNT(*) AS total,
+        ${[...statuses].map(status => `COUNT(CASE WHEN status='${status}' THEN 1 END) AS ${status}`).join(',')}
+        FROM equipment ${where}`).get(...parameters);
+      const grouped = column => db.prepare(`SELECT ${column},COUNT(*) AS count FROM equipment ${where}
+        GROUP BY ${column} ORDER BY count DESC,${column} ASC`).all(...parameters)
+        .map(row => ({ [column]: row[column], count: row.count }));
+      return {
+        total: totals.total,
+        statuses: Object.fromEntries([...statuses].map(status => [status, totals[status]])),
+        companies: grouped('company'), categories: grouped('category'), locations: grouped('location'),
+      };
+    }, false);
+  }
   function create(value, user) {
     const editor = actor(user), data = input(value, false);
     if (user.isSuperAdmin === true) {
@@ -296,5 +316,5 @@ export function createEquipmentStore({ dbPath = ':memory:', now = Date.now, enfo
     });
   }
   return { list: user => { const company = companyScope(user); return db.prepare(`${equipmentSelect} ${company === null ? '' : 'WHERE e.company=?'} ORDER BY e.updated_at DESC,e.serial_number ASC`).all(...(company === null ? [] : [company])).map(view); },
-    get, create, update, getPhoto, setPhoto, removePhoto, close: () => db.close() };
+    stats, get, create, update, getPhoto, setPhoto, removePhoto, close: () => db.close() };
 }

@@ -243,6 +243,11 @@ export function createTeamServer(overrides = {}) {
         }
         throw new ApiError(405, 'METHOD_NOT_ALLOWED', '照片仅支持查看、上传和移除');
       }
+      if (url.pathname === '/api/equipment/stats') {
+        if ([...url.searchParams].length) throw new ApiError(422, 'INVALID_INPUT', '设备统计接口不支持查询参数');
+        if (req.method !== 'GET') throw new ApiError(405, 'METHOD_NOT_ALLOWED', '设备统计仅支持读取');
+        json(res, 200, { stats: equipmentStore.stats(user) }); return;
+      }
       const equipmentMatch = /^\/api\/equipment\/([^/]+)$/.exec(url.pathname);
       if (url.pathname === '/api/equipment' || equipmentMatch) {
         if ([...url.searchParams].length) throw new ApiError(422, 'INVALID_INPUT', '设备接口不支持查询参数');

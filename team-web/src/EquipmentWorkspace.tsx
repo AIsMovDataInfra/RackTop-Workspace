@@ -6,6 +6,7 @@ import { EquipmentThumbnail } from './EquipmentThumbnail'
 import { MemberAvatar } from './MemberAvatar'
 import { Brand } from './Brand'
 import './equipment-company.css'
+import './equipment-overview.css'
 import { EquipmentLabel } from './AssetLabel'
 export { EquipmentLabel, equipmentUrl } from './AssetLabel'
 import { COMPANY_OPTIONS } from './types'
@@ -14,7 +15,7 @@ import { errorText } from './errors'
 import { SettingsDialog } from './SettingsDialog'
 import { formatTime } from './time'
 import type { PreferencesState } from './preferences'
-import type { Equipment, EquipmentDraft, EquipmentHistory, EquipmentStatus, Session, Translate } from './types'
+import type { Equipment, EquipmentDraft, EquipmentHistory, EquipmentStats, EquipmentStatus, Session, Translate } from './types'
 
 const statuses: EquipmentStatus[] = ['available', 'in_use', 'maintenance', 'retired']
 const limits = { name: 120, model: 160, responsiblePerson: 80, currentUser: 80, notes: 4000 }
@@ -40,6 +41,9 @@ type Modal = 'editor' | 'label' | 'settings' | null
 export function EquipmentWorkspace({ id, session, state, navigate, onSessionChanged, onSessionExpired, onLogout, bootstrapToken }: { id?: string; session: Session; state: PreferencesState; navigate: (path: string) => void; onSessionChanged: (session: Session) => void; onSessionExpired: () => void; onLogout: () => Promise<void>; bootstrapToken?: string }) {
   const { t, preferences } = state
   const [items, setItems] = useState<Equipment[]>([])
+  const [stats, setStats] = useState<EquipmentStats | null>(null)
+  const [statsLoading, setStatsLoading] = useState(true)
+  const [statsError, setStatsError] = useState<unknown>(null)
   const [detail, setDetail] = useState<{ equipment: Equipment; history: EquipmentHistory[] } | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<unknown>(null)
@@ -56,12 +60,23 @@ export function EquipmentWorkspace({ id, session, state, navigate, onSessionChan
 
   useEffect(() => {
     let active = true
-    if (!session.user) { setItems([]); setDetail(null); setLoading(false); return }
-    setLoading(true); setError(null); setDetail(null)
+    setStats(null); setStatsError(null); setStatsLoading(!id)
+    if (!session.user) { setItems([]); setDetail(null); setLoading(false); setStatsLoading(false); return }
+    setLoading(true); setError(null); setItems([]); setDetail(null)
+    const failed = (reason: unknown, statistics = false) => {
+      if (!active) return
+      if (reason instanceof ApiError && reason.status === 401) {
+        active = false
+        setItems([]); setDetail(null); setStats(null); setLoading(false); setStatsLoading(false)
+        onSessionExpired()
+      } else if (statistics) setStatsError(reason)
+      else setError(reason)
+    }
     const load = id ? api.equipmentDetails(id).then((value) => { if (active) setDetail(value) }) : api.equipment().then((value) => { if (active) setItems(value.equipment) })
-    void load.catch((reason) => { if (active) { if (reason instanceof ApiError && reason.status === 401) { setItems([]); setDetail(null); onSessionExpired() } else setError(reason) } }).finally(() => { if (active) setLoading(false) })
+    void load.catch((reason) => failed(reason)).finally(() => { if (active) setLoading(false) })
+    if (!id) void api.equipmentStats().then((value) => { if (active) setStats(value.stats) }).catch((reason) => failed(reason, true)).finally(() => { if (active) setStatsLoading(false) })
     return () => { active = false }
-  }, [id, revision, session.user?.id])
+  }, [id, revision, session.user?.id, session.user?.company, session.user?.isSuperAdmin])
   useEffect(() => { heading.current?.focus(); setNotice(null) }, [id])
   function openEditor(kind: Editor['kind']) {
     if (!session.user) { onSessionExpired(); return }
@@ -99,6 +114,7 @@ export function EquipmentWorkspace({ id, session, state, navigate, onSessionChan
             <section className="equipment-detail-card"><div className="equipment-detail-heading"><div><span className="equipment-code">{item.serialNumber}</span><h2>{item.name}</h2><p>{[categoryText(item.category, t), item.model].filter(Boolean).join(' · ') || t('尚未填写类别和型号', 'Category and model not recorded')}</p></div><Status value={item.status} t={t} /></div><div className="equipment-detail-actions"><button className="primary" onClick={() => openEditor('assign')}><ClipboardList size={17} />{t('领用登记', 'Register use')}</button>{item.currentUser && <button onClick={() => openEditor('return')}><ArrowLeft size={16} />{t('归还登记', 'Return device')}</button>}<button onClick={() => openEditor('edit')}><Pencil size={16} />{t('编辑信息', 'Edit details')}</button><button onClick={() => setModal('label')}><QrCode size={17} />{t('设备标签', 'Device label')}</button></div><dl className="equipment-facts">{(['company', 'responsiblePerson', 'currentUser', 'location', 'serialNumber', 'category', 'model'] as const).map((field) => <div key={field}><dt>{fieldText(field, t)}</dt><dd>{(field === 'category' ? categoryText(item[field], t) : field === 'location' ? locationText(item[field], t) : item[field]) || (field === 'company' ? t('待分配', 'Unassigned') : t('未填写', 'Not recorded'))}{((field === 'category' && !EQUIPMENT_CATEGORIES.includes(item.category)) || (field === 'location' && !EQUIPMENT_LOCATIONS.includes(item.location))) && <small className="equipment-legacy">{t('旧记录，编辑时请重新选择。', 'Legacy value. Select a supported value when editing.')}</small>}</dd></div>)}<div><dt>{t('最近更新', 'Last updated')}</dt><dd>{formatTime(item.updatedAt, preferences.locale)}</dd></div>{item.legacySerialNumber && <div><dt>{t('原序列号', 'Previous serial number')}</dt><dd>{item.legacySerialNumber}</dd></div>}</dl><EquipmentPhoto equipment={item} t={t} onChanged={photoChanged} onSessionExpired={onSessionExpired} />{item.notes && <div className="equipment-notes"><h3>{t('备注', 'Notes')}</h3><p>{item.notes}</p></div>}</section>
             <section className="equipment-history"><div className="equipment-section-title"><h2>{t('登记记录', 'Registration history')}</h2><span>{t('最近 30 条', 'Latest 30 entries')}</span></div>{detail.history.length ? <ol>{detail.history.map((entry, index) => <li key={`${entry.at}-${index}`}><div><strong>{entry.actorName}</strong><span>{entry.action === 'created' ? t('新增设备', 'Added device') : t('更新登记', 'Updated registration')}</span><time dateTime={entry.at}>{formatTime(entry.at, preferences.locale)}</time></div><ul>{entry.changes.filter((change) => change.field !== 'code' && (change.oldValue !== null || Boolean(change.newValue))).map((change) => <li key={change.field}><span>{fieldText(change.field, t)}</span><span>{historyChangeText(change, t)}</span></li>)}</ul></li>)}</ol> : <p className="muted">{t('暂无登记记录。', 'No registration history yet.')}</p>}</section>
           </> : !error && <>
+            <EquipmentOverview stats={stats} loading={statsLoading} error={statsError} onRetry={() => setRevision((value) => value + 1)} t={t} />
             <form className="equipment-filters has-company-filter" onSubmit={(event) => event.preventDefault()}><label className="equipment-search"><span>{t('搜索设备', 'Search equipment')}</span><div><Search size={18} /><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t('名称、编号、负责人或使用人', 'Name, number, owner or current user')} /></div></label><label>{t('公司', 'Company')}<select name="companyFilter" aria-label={t('筛选公司', 'Filter by company')} value={selectedCompany} disabled={!session.user.isSuperAdmin} onChange={(event) => setCompanyFilter(event.target.value)}>{session.user.isSuperAdmin && <option value="">{t('全部公司', 'All companies')}</option>}{companies.map(company => <option key={company} value={company}>{company} ({items.filter(entry => entry.company === company).length})</option>)}{session.user.isSuperAdmin && <option value="unassigned">{t('待分配公司', 'Unassigned company')} ({items.filter(entry => !entry.company).length})</option>}</select></label><label>{t('状态', 'Status')}<select name="status" value={status} onChange={(event) => setStatus(event.target.value)}><option value="">{t('全部状态', 'All statuses')}</option>{statuses.map((value) => <option key={value} value={value}>{statusText(value, t)}</option>)}</select></label></form>
             <p className="equipment-company-scope">{session.user.isSuperAdmin ? t('你可以管理所有公司；没有设备的公司也会列出。', 'You can manage every company, including those without equipment.') : t(`仅显示${session.user.company || '所属公司'}的设备；公司由超级管理员分配。`, `Showing equipment for ${session.user.company || 'your company'} only. The super administrator assigns your company.`)}</p>
             <div className="equipment-section-title"><h2>{t('设备目录', 'Equipment catalog')}</h2><span>{filtered.length} / {companyItems.length} {t('台设备', 'devices')}</span></div>
@@ -111,6 +127,26 @@ export function EquipmentWorkspace({ id, session, state, navigate, onSessionChan
     {modal === 'editor' && editor && <EquipmentEditor isSuperAdmin={Boolean(session.user?.isSuperAdmin)} ownCompany={session.user.isSuperAdmin ? undefined : session.user.company || undefined} editor={editor} setEditor={setEditor} t={t} onClose={close} onAuthRequired={onSessionExpired} onSaved={(saved) => { setModal(null); setEditor(null); if (id !== saved.id) navigate(`/equipment/${encodeURIComponent(saved.id)}`); else setRevision((value) => value + 1); setNotice('saved') }} />}
     {modal === 'label' && item && <EquipmentLabel equipment={item} t={t} onClose={close} />}
   </>
+}
+
+function EquipmentOverview({ stats, loading, error, onRetry, t }: { stats: EquipmentStats | null; loading: boolean; error: unknown; onRetry: () => void; t: Translate }) {
+  const distributions = stats ? [
+    { dimension: 'company', title: t('公司分布', 'By company'), values: stats.companies.map(({ company, count }) => ({ label: company || t('待分配公司', 'Unassigned company'), count })) },
+    { dimension: 'category', title: t('类别分布', 'By category'), values: stats.categories.map(({ category, count }) => ({ label: categoryText(category, t) || t('未填写', 'Not recorded'), count })) },
+    { dimension: 'location', title: t('位置分布', 'By location'), values: stats.locations.map(({ location, count }) => ({ label: locationText(location, t) || t('未填写', 'Not recorded'), count })) },
+  ] : []
+  return <section className="equipment-overview" aria-labelledby="equipment-overview-title" aria-busy={loading}>
+    <div className="equipment-overview-heading"><h2 id="equipment-overview-title">{t('设备统计', 'Equipment overview')}</h2><p>{t('统计你有权查看的全部设备，不随下方搜索或筛选变化。', 'All equipment you can access. Search and filters below do not change these totals.')}</p></div>
+    {loading ? <p className="loading-inline" role="status">{t('正在读取统计…', 'Loading statistics…')}</p> : error ? <div className="error" role="alert"><span>{t('统计暂时无法读取。', 'Statistics are temporarily unavailable.')} {errorText(error, t)}</span><button onClick={onRetry}>{t('重试统计', 'Retry statistics')}</button></div> : stats && <>
+      <dl className="equipment-overview-metrics">
+        <div data-status="total"><dt>{t('设备总数', 'Total devices')}</dt><dd>{stats.total}<small>{t('台', 'devices')}</small></dd></div>
+        {statuses.map((value) => <div data-status={value} key={value}><dt>{statusText(value, t)}</dt><dd>{stats.statuses[value]}<small>{t('台', 'devices')}</small></dd></div>)}
+      </dl>
+      <details className="equipment-overview-breakdowns"><summary>{t('查看公司、类别与位置分布', 'View breakdowns by company, category and location')}</summary>
+        <div className="equipment-overview-distributions">{distributions.map(({ dimension, title, values }) => <section key={dimension} data-dimension={dimension} aria-label={title}><h3>{title}</h3>{values.length ? <dl>{values.map(({ label, count }, index) => <div key={`${label}-${index}`}><dt>{label}</dt><dd>{count} {t('台', 'devices')}</dd></div>)}</dl> : <p className="equipment-overview-empty">{t('暂无设备', 'No equipment yet')}</p>}</section>)}</div>
+      </details>
+    </>}
+  </section>
 }
 
 function EquipmentEditor({ isSuperAdmin, ownCompany, editor, setEditor, t, onClose, onSaved, onAuthRequired }: { isSuperAdmin: boolean; ownCompany?: string; editor: Editor; setEditor: React.Dispatch<React.SetStateAction<Editor | null>>; t: Translate; onClose: () => void; onSaved: (equipment: Equipment) => void; onAuthRequired: () => void }) {

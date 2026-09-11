@@ -26,6 +26,7 @@ beforeEach(() => {
   window.history.replaceState({}, '', '/equipment'); window.localStorage.clear()
   vi.mocked(QRCode.toDataURL).mockImplementation(() => Promise.resolve('data:image/png;base64,cXItZXhhbXBsZQ=='))
   vi.spyOn(api, 'equipment').mockResolvedValue({ equipment: [equipment] })
+  vi.spyOn(api, 'equipmentStats').mockResolvedValue({ stats: { total: 1, statuses: { available: 1, in_use: 0, maintenance: 0, retired: 0 }, companies: [{ company: 'A公司', count: 1 }], categories: [{ category: '摄像头模组', count: 1 }], locations: [{ location: '上海', count: 1 }] } })
   vi.spyOn(api, 'equipmentDetails').mockResolvedValue({ equipment, history: [] })
 })
 afterEach(() => { act(() => root.unmount()); container.remove(); vi.restoreAllMocks() })

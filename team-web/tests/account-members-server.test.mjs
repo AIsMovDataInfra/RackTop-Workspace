@@ -74,13 +74,13 @@ test('company assignment gates every business path and photo buffering; session,
   const guest = await anonymous();
   const pendingDevice = await call('/api/auth/device-login', { method: 'POST', body: { username: '待分配', password: '密', deviceName: '未分配公司的桌面端' } });
   assert.equal(pendingDevice.status, 200);
-  for (const path of ['/api/resources', '/api/reservations', '/api/equipment', equipment.photo.url]) {
+  for (const path of ['/api/resources', '/api/reservations', '/api/equipment', '/api/equipment/stats', equipment.photo.url]) {
     const denied = await call(path, { token: pendingDevice.body.token });
     assert.equal(denied.status, 403); assert.equal(denied.body.error.code, 'COMPANY_REQUIRED');
   }
   assert.equal(pending.user.company, null); assert.equal(ordinaryAdmin.user.role, 'admin'); assert.equal(ordinaryAdmin.user.isSuperAdmin, false);
   const businessReads = ['/api/resources', `/api/resources/${resource.id}`, '/api/reservations', '/api/reservations?mine=true',
-    '/api/equipment', `/api/equipment/${equipment.id}`, equipment.photo.url];
+    '/api/equipment', '/api/equipment/stats', `/api/equipment/${equipment.id}`, equipment.photo.url];
   for (const session of [pending, ordinaryAdmin]) {
     for (const path of businessReads) {
       const response = await call(path, { session });
@@ -107,7 +107,7 @@ test('company assignment gates every business path and photo buffering; session,
   assert.equal(assigned.status, 200, assigned.text);
   assert.equal((await call('/api/session', { session: pending })).body.user.company, 'A公司');
   assert.equal((await call('/api/resources', { token: pendingDevice.body.token })).status, 200, 'existing device sessions observe company assignment');
-  for (const path of ['/api/resources', '/api/reservations', '/api/equipment']) assert.equal((await call(path, { session: pending })).status, 200, path);
+  for (const path of ['/api/resources', '/api/reservations', '/api/equipment', '/api/equipment/stats']) assert.equal((await call(path, { session: pending })).status, 200, path);
   for (const path of [`/api/equipment/${equipment.id}`, equipment.photo.url]) assert.equal((await call(path, { session: pending })).status, 404, 'Other company records are not accessible');
   assert.deepEqual((await call('/api/resources', { session: pending })).body.resources, []);
   const own = await call('/api/equipment', { method: 'POST', session: pending, body: equipmentDraft({ name: '已分配成员设备' }) });
@@ -115,6 +115,42 @@ test('company assignment gates every business path and photo buffering; session,
   assert.equal((await call('/api/equipment', { method: 'POST', session: pending, body: equipmentDraft({ company: 'B公司' }) })).status, 403);
   const changedPassword = await call('/api/auth/change-password', { method: 'POST', session: ordinaryAdmin, body: { oldPassword: '密', newPassword: '新' } });
   assert.equal(changedPassword.status, 200, 'unassigned users can still change their password');
+});
+
+test('equipment statistics HTTP scopes members and ordinary administrators while super administrators see every company', async t => {
+  const { call, admin, login, register, bootstrapToken } = await fixture(t);
+  const employee = await call('/api/admin/members', { method: 'POST', session: admin,
+    body: { name: '统计成员', password: '密', company: 'A公司' } });
+  assert.equal(employee.status, 201, employee.text);
+  const member = (await login('统计成员', '密')).session;
+  const ordinaryAdmin = await register('统计资源管理员', { bootstrapToken });
+  assert.equal(ordinaryAdmin.user.role, 'admin'); assert.equal(ordinaryAdmin.user.isSuperAdmin, false);
+  const assigned = await call(`/api/admin/members/${ordinaryAdmin.user.id}`, { method: 'PATCH', session: admin,
+    body: { version: 1, company: 'B公司' } });
+  assert.equal(assigned.status, 200, assigned.text);
+  const a = await call('/api/equipment', { method: 'POST', session: member, body: equipmentDraft({ category: '机械臂' }) });
+  assert.equal(a.status, 201, a.text);
+  for (const [company, status] of [['B公司', 'maintenance'], ['C公司', 'retired']]) {
+    const created = await call('/api/equipment', { method: 'POST', session: admin, body: equipmentDraft({ company, status, location: '太仓' }) });
+    assert.equal(created.status, 201, created.text);
+  }
+  const statsFor = async session => {
+    const response = await call('/api/equipment/stats', { session });
+    assert.equal(response.status, 200, response.text); return response.body.stats;
+  };
+  const own = await statsFor(member), managed = await statsFor(ordinaryAdmin), all = await statsFor(admin);
+  assert.equal(own.total, 1); assert.deepEqual(own.companies, [{ company: 'A公司', count: 1 }]);
+  assert.deepEqual(own.categories, [{ category: '机械臂', count: 1 }]); assert.deepEqual(own.locations, [{ location: '上海', count: 1 }]);
+  assert.equal(managed.total, 1); assert.deepEqual(managed.companies, [{ company: 'B公司', count: 1 }]);
+  assert.deepEqual(managed.statuses, { available: 0, in_use: 0, maintenance: 1, retired: 0 });
+  assert.equal(all.total, 3); assert.deepEqual(all.companies, [{ company: 'A公司', count: 1 }, { company: 'B公司', count: 1 }, { company: 'C公司', count: 1 }]);
+  assert.deepEqual(all.statuses, { available: 1, in_use: 0, maintenance: 1, retired: 1 });
+  const moved = await call(`/api/equipment/${a.body.equipment.id}`, { method: 'PATCH', session: admin,
+    body: { version: 1, company: 'B公司', status: 'in_use' } });
+  assert.equal(moved.status, 200, moved.text);
+  assert.equal((await statsFor(member)).total, 0);
+  assert.equal((await statsFor(ordinaryAdmin)).total, 2);
+  assert.equal((await statsFor(admin)).total, 3);
 });
 
 test('real HTTP member administration protects the directory, recovers access and retains reservation/equipment history after deletion', async t => {

@@ -91,11 +91,16 @@ account 模式的普通成员和资源管理员只可读取本公司完整资源
 | 请求 | 输入／返回 |
 | --- | --- |
 | `GET /api/equipment` | `{equipment:Equipment[]}`，只含当前公司可见设备（超管跨公司），包括已退役设备，按更新时间倒序、八位编号排序。 |
+| `GET /api/equipment/stats` | `{stats:EquipmentStats}`，对当前身份可见的全部设备做总体统计，包括已退役设备。 |
 | `POST /api/equipment` | 设备可写字段 → `201 {equipment:Equipment}`。 |
 | `GET /api/equipment/:id` | `{equipment:Equipment,history:EquipmentChange[]}`。 |
 | `PATCH /api/equipment/:id` | `{version,...修改字段}` → `200 {equipment:Equipment}`。 |
 
 `Equipment` 包含 `id,code,serialNumber,legacySerialNumber,name,category,model,company,responsiblePerson,currentUser,location,notes,status,photo,version,createdAt,updatedAt`。时间为 UTC ISO8601；新设备 `version=1`。响应按业务字段投影，不返回创建者、编辑者或历史操作人的账号 ID，不嵌入图片 BLOB。
+
+`EquipmentStats` 为 `{total,statuses,companies,categories,locations}`：`total` 为设备总数；`statuses` 总是包含 `available,in_use,maintenance,retired` 四项整数计数，空库均为 0；其余数组分别为 `{company,count}[]`、`{category,count}[]`、`{location,count}[]`，只返回有设备的分组，按数量降序、名称升序排列，空库为空数组。状态按设备的 `status` 统计，不根据使用人文字推断。
+
+统计接口不支持查询参数，收到搜索、状态、公司或分页参数均返回 `422 INVALID_INPUT`；仅支持 GET，其他方法在身份及写请求校验后返回 405。统计独立于页面列表筛选，直接聚合全部可见台账，并在一个只读事务内读取各维度，返回 `Cache-Control: no-store`。普通成员和资源管理员仅统计本公司，超级管理员统计全部公司及历史 `company:''` 未分配设备，历史类别／位置原值保留；未分配公司成员返回 `403 COMPANY_REQUIRED`，无有效登录返回 401。响应只含数量及公司／类别／位置分组，不包含设备名称、编号、人物、备注、照片或账号字段。
 
 ### 固定编号与旧记录迁移
 

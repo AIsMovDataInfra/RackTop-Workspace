@@ -1,4 +1,4 @@
-import type { BookingDraft, Company, Equipment, EquipmentDraft, EquipmentHistory, Member, Reservation, Resource, ResourceDraft, Session } from './types'
+import type { BookingDraft, Company, Equipment, EquipmentDraft, EquipmentHistory, EquipmentStats, Member, Reservation, Resource, ResourceDraft, Session } from './types'
 
 export class ApiError extends Error {
   constructor(message: string, public status: number, public code: string, public conflicts: Reservation[] = []) { super(message); this.name = 'ApiError' }
@@ -133,6 +133,7 @@ export const api = {
   setEquipmentPhoto: (id: string, version: number, dataUrl: string) => request<{ equipment: Equipment }>(`/equipment/${encodeURIComponent(id)}/photo`, 'POST', { version, dataUrl }),
   deleteEquipmentPhoto: (id: string, version: number) => request<{ equipment: Equipment }>(`/equipment/${encodeURIComponent(id)}/photo`, 'DELETE', { version }),
   equipment: () => request<{ equipment: Equipment[] }>('/equipment'),
+  equipmentStats: () => request<{ stats: EquipmentStats }>('/equipment/stats'),
   equipmentDetails: (id: string) => request<{ equipment: Equipment; history: EquipmentHistory[] }>(`/equipment/${encodeURIComponent(id)}`),
   createEquipment: (draft: EquipmentDraft) => request<{ equipment: Equipment }>('/equipment', 'POST', draft),
   updateEquipment: (id: string, draft: Partial<EquipmentDraft> & { version: number }) => request<{ equipment: Equipment }>(`/equipment/${encodeURIComponent(id)}`, 'PATCH', draft),

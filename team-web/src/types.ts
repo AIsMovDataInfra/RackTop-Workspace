@@ -18,6 +18,13 @@ export interface Session {
 export interface BookingDraft { resourceId: string; scope: 'machine' | 'gpus'; gpuIndices: number[]; startAt: string; endAt: string; purpose: string; gpuIds?: string[]; inventoryVersion?: number; requestId?: string }
 export interface ResourceDraft { company?: Company | ''; companyVersion?: number; cluster: string; name: string; gpuModel: string; gpuCount: number; notes: string; enabled?: boolean }
 export type EquipmentStatus = 'available' | 'in_use' | 'maintenance' | 'retired'
+export interface EquipmentStats {
+  total: number
+  statuses: Record<EquipmentStatus, number>
+  companies: { company: string; count: number }[]
+  categories: { category: string; count: number }[]
+  locations: { location: string; count: number }[]
+}
 export interface EquipmentDraft {
   name: string; category: string; model: string; company: string
   responsiblePerson: string; currentUser: string; location: string; notes: string; status: EquipmentStatus

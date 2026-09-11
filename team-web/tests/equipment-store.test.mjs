@@ -16,13 +16,58 @@ const other = { id: 'real-editor-id', name: '另一位成员', role: 'member', c
 const draft = value => ({ category: '台式主机', location: '上海', ...value });
 const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 2, 0xff, 0xd9]);
 const BASE = Date.parse('2026-09-08T04:00:00Z');
-function fixture(t) {
+function fixture(t, options = {}) {
   const directory = mkdtempSync(join(tmpdir(), 'racktop-equipment-'));
   const dbPath = join(directory, 'team.sqlite');
-  const store = createEquipmentStore({ dbPath, now: () => BASE });
+  const store = createEquipmentStore({ dbPath, now: () => BASE, ...options });
   t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
   return { store, dbPath };
 }
+
+test('equipment statistics count the full ledger and every status without exposing individual records', t => {
+  const { store } = fixture(t);
+  assert.deepEqual(store.stats(), { total: 0, statuses: { available: 0, in_use: 0, maintenance: 0, retired: 0 }, companies: [], categories: [], locations: [] });
+  const statusValues = ['available', 'in_use', 'maintenance', 'retired'];
+  for (let index = 0; index < 1005; index++) {
+    store.create(draft({ name: `私有设备 ${index}`, category: index % 2 ? '台式主机' : '机械臂',
+      location: index % 2 ? '上海' : '太仓', status: statusValues[index % 4], currentUser: '私有使用人', notes: '私有备注' }), index % 2 ? other : member);
+  }
+  const stats = store.stats();
+  assert.deepEqual(stats, {
+    total: 1005, statuses: { available: 252, in_use: 251, maintenance: 251, retired: 251 },
+    companies: [{ company: 'A公司', count: 503 }, { company: 'B公司', count: 502 }],
+    categories: [{ category: '机械臂', count: 503 }, { category: '台式主机', count: 502 }],
+    locations: [{ location: '太仓', count: 503 }, { location: '上海', count: 502 }],
+  });
+  assert.equal(Object.values(stats.statuses).reduce((sum, count) => sum + count, 0), stats.total);
+  for (const groups of [stats.companies, stats.categories, stats.locations]) assert.equal(groups.reduce((sum, group) => sum + group.count, 0), stats.total);
+  for (const privateValue of ['私有设备', '私有使用人', '私有备注', member.id, other.id, 'photo', 'serialNumber']) assert.equal(JSON.stringify(stats).includes(privateValue), false);
+});
+
+test('statistics enforce company scope, include legacy groups for super administrators, and track transfers', t => {
+  const { store, dbPath } = fixture(t, { enforceCompanies: true });
+  const superAdmin = { id: 'super-statistics', name: '超级管理员', role: 'admin', isSuperAdmin: true, company: null };
+  const first = store.create(draft({ name: 'A 公司设备' }), member);
+  store.create(draft({ name: 'B 公司设备', status: 'in_use' }), other);
+  const legacy = store.create(draft({ name: '历史未分配设备', company: '西浦', status: 'retired' }), superAdmin);
+  const db = new DatabaseSync(dbPath); t.after(() => db.close());
+  db.prepare("UPDATE equipment SET company='',category='历史类别',location='旧仓库' WHERE id=?").run(legacy.id);
+  assert.throws(() => store.stats(null), { status: 401, code: 'UNAUTHENTICATED' });
+  for (const role of ['member', 'admin']) assert.throws(() => store.stats({ ...member, role, company: null }), { status: 403, code: 'COMPANY_REQUIRED' });
+  const ownStats = store.stats(member);
+  assert.deepEqual(ownStats, { total: 1, statuses: { available: 1, in_use: 0, maintenance: 0, retired: 0 },
+    companies: [{ company: 'A公司', count: 1 }], categories: [{ category: '台式主机', count: 1 }], locations: [{ location: '上海', count: 1 }] });
+  assert.deepEqual(store.stats({ ...member, role: 'admin' }), ownStats, 'ordinary administrators retain their company scope');
+  const all = store.stats(superAdmin);
+  assert.equal(all.total, 3); assert.deepEqual(all.statuses, { available: 1, in_use: 1, maintenance: 0, retired: 1 });
+  assert.deepEqual(all.companies, [{ company: '', count: 1 }, { company: 'A公司', count: 1 }, { company: 'B公司', count: 1 }]);
+  assert.ok(all.categories.some(group => group.category === '历史类别' && group.count === 1));
+  assert.ok(all.locations.some(group => group.location === '旧仓库' && group.count === 1));
+  store.update(first.id, { version: 1, company: 'B公司', status: 'maintenance' }, superAdmin);
+  assert.equal(store.stats(member).total, 0);
+  assert.equal(store.stats(other).total, 2);
+  assert.deepEqual(store.stats(superAdmin).statuses, { available: 0, in_use: 1, maintenance: 1, retired: 1 });
+});
 
 test('equipment starts empty, persists in the booking database, and projects only public business fields', t => {
   const { store, dbPath } = fixture(t);
