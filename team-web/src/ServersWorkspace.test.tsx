@@ -14,9 +14,14 @@ const expired = vi.fn()
 async function mount(user = session.user!) { await act(async()=>root.render(<ServersWorkspace session={{...session,user}} state={state} navigate={vi.fn()} onLogout={vi.fn()} onSessionChanged={vi.fn()} onSessionExpired={expired}/>)) }
 async function click(label: string) { const button = [...container.querySelectorAll('button')].find(item=>item.textContent === label)!; expect(button,label).toBeDefined(); await act(async()=>button.click()) }
 async function submit() { await act(async()=>container.querySelector('form')!.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}))) }
+async function fill(label: string, value: string) {
+  const input = [...container.querySelectorAll('label')].find(item => item.textContent === label)?.control as HTMLInputElement
+  expect(input, label).toBeDefined()
+  await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value); input.dispatchEvent(new Event('input', { bubbles: true })) })
+}
 beforeEach(()=>{
   container=document.createElement('div');document.body.append(container);root=createRoot(container);expired.mockClear()
-  vi.spyOn(api,'servers').mockResolvedValue({schemaVersion:1,revision:'fixture',servers:[server]})
+  vi.spyOn(api,'servers').mockResolvedValue({schemaVersion:2,revision:'fixture',servers:[server]})
   vi.spyOn(api,'serverMembers').mockResolvedValue({members:[{id:'member-1',name:'已授权成员',username:'member-1'},{id:'member-2',name:'另一成员',username:'member-2'}]})
 })
 afterEach(()=>{act(()=>root.unmount());container.remove();vi.useRealTimers();vi.restoreAllMocks()})
@@ -70,7 +75,7 @@ it('does not let a failed member-directory load silently clear existing grants',
 it('drops the administrator editor and old directory when role or organization changes',async()=>{
   await mount();await click('编辑')
   expect(container.querySelector('[role=dialog]')).not.toBeNull()
-  vi.mocked(api.servers).mockResolvedValue({schemaVersion:1,revision:'empty',servers:[]})
+  vi.mocked(api.servers).mockResolvedValue({schemaVersion:2,revision:'empty',servers:[]})
   await mount({...session.user!,role:'member',isSuperAdmin:false,company:'A公司',companies:['A公司']})
   expect(container.querySelector('[role=dialog]')).toBeNull()
   expect(container.textContent).not.toContain('server.example.test')
@@ -79,12 +84,12 @@ it('drops the administrator editor and old directory when role or organization c
 it('automatically receives updated connection details and revoked access without a manual refresh', async () => {
   vi.useFakeTimers(); vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
   await mount({id:'member-1',name:'成员',role:'member',company:'西浦',companies:['西浦'],isSuperAdmin:false})
-  vi.mocked(api.servers).mockResolvedValue({schemaVersion:1,revision:'updated',servers:[{...server,name:'新的服务器名称',host:'new.example.test',username:'newuser',port:2222,version:4}]})
+  vi.mocked(api.servers).mockResolvedValue({schemaVersion:2,revision:'updated',servers:[{...server,name:'新的服务器名称',host:'new.example.test',username:'newuser',port:2222,version:4}]})
   await act(async () => vi.advanceTimersByTimeAsync(30_000))
   expect(container.textContent).toContain('新的服务器名称')
   expect(container.textContent).toContain('newuser@new.example.test:2222')
   expect(container.textContent).not.toContain('researcher@server.example.test:22')
-  vi.mocked(api.servers).mockResolvedValue({schemaVersion:1,revision:'revoked',servers:[]})
+  vi.mocked(api.servers).mockResolvedValue({schemaVersion:2,revision:'revoked',servers:[]})
   await act(async () => vi.advanceTimersByTimeAsync(30_000))
   expect(container.textContent).toContain('暂无可访问的服务器')
   expect(container.textContent).not.toContain('new.example.test')
@@ -101,7 +106,7 @@ it('refreshes when a member returns to the visible page and coalesces overlappin
   hidden.mockReturnValue(false)
   await act(async () => { document.dispatchEvent(new Event('visibilitychange')); window.dispatchEvent(new Event('focus')) })
   expect(api.servers).toHaveBeenCalledTimes(2)
-  await act(async () => resolve({schemaVersion:1,revision:'return',servers:[{...server,host:'returned.example.test'}]}))
+  await act(async () => resolve({schemaVersion:2,revision:'return',servers:[{...server,host:'returned.example.test'}]}))
   expect(container.textContent).toContain('returned.example.test')
 })
 it('pauses automatic loads during editing so focus changes cannot discard a save', async () => {
@@ -123,7 +128,7 @@ it('does not overwrite a confirmed save with an older in-flight directory read',
   vi.spyOn(api,'updateServer').mockResolvedValue({server:{...server,host:'confirmed.example.test',version:4}})
   await submit()
   expect(container.textContent).toContain('confirmed.example.test')
-  await act(async () => resolve({schemaVersion:1,revision:'stale',servers:[server]}))
+  await act(async () => resolve({schemaVersion:2,revision:'stale',servers:[server]}))
   expect(container.textContent).toContain('confirmed.example.test')
   expect(container.textContent).not.toContain('researcher@server.example.test:22')
   expect([...container.querySelectorAll('button')].find(button => button.textContent === '刷新')?.disabled).toBe(false)
@@ -141,4 +146,45 @@ it('does not restore metadata from a late save after a directory read rejects ac
   expect(container.textContent).not.toContain('late.example.test')
   expect(container.textContent).not.toContain('server.example.test')
   expect(container.querySelector('[role=dialog]')).toBeNull()
+})
+it('lets an administrator set a shared SSH password without putting it into the directory after save', async () => {
+  const password = '  Shared-测试 $password  '
+  const create = vi.spyOn(api, 'createServer').mockResolvedValue({server:{...server,hasPassword:true,credentialRevision:1}})
+  await mount(); await click('添加服务器')
+  await fill('服务器名称', '新服务器'); await fill('主机地址', 'new.example.test'); await fill('SSH 用户名', 'researcher')
+  await fill('共享 SSH 密码', password)
+  expect(container.querySelector<HTMLInputElement>('input[type=password]')?.value).toBe(password)
+  await click('保存')
+  expect(create).toHaveBeenCalledWith(expect.objectContaining({name:'新服务器',host:'new.example.test',password}))
+  expect(container.querySelector('[role=dialog]')).toBeNull()
+  expect(container.textContent).toContain('管理员共享密码')
+  expect(container.innerHTML).not.toContain(password)
+  await click('编辑')
+  expect(container.querySelector<HTMLInputElement>('input[type=password]')?.value).toBe('')
+})
+it('preserves a saved password when blank and removes it only through an explicit choice', async () => {
+  vi.mocked(api.servers).mockResolvedValue({schemaVersion:2,revision:'fixture',servers:[{...server,hasPassword:true,credentialRevision:4}]})
+  const update = vi.spyOn(api,'updateServer').mockResolvedValue({server:{...server,hasPassword:true,credentialRevision:4,version:4}})
+  await mount(); await click('编辑'); await submit()
+  expect(update.mock.calls[0][1]).not.toHaveProperty('password')
+  await click('编辑')
+  const clear = [...container.querySelectorAll('label')].find(item => item.textContent === '清除已保存的共享密码')!.control as HTMLInputElement
+  await act(async () => clear.click())
+  expect(container.querySelector<HTMLInputElement>('input[type=password]')?.disabled).toBe(true)
+  await submit()
+  expect(update.mock.calls[1][1]).toMatchObject({password:null})
+})
+it('keeps target and jump passwords separate and discards an unsaved password on account changes', async () => {
+  vi.mocked(api.servers).mockResolvedValue({schemaVersion:2,revision:'fixture',servers:[{...server,jump:{host:'bridge.example.test',port:22,username:'bridge'},hasPassword:true,hasJumpPassword:true,credentialRevision:3}]})
+  const update = vi.spyOn(api,'updateServer').mockRejectedValue(new ApiError('记录已更新',409,'VERSION_CONFLICT'))
+  await mount(); await click('编辑')
+  await fill('共享 SSH 密码', 'target-new-fixture'); await fill('共享跳板机密码', 'jump-new-fixture')
+  await submit()
+  expect(update).toHaveBeenCalledWith(server.id,expect.objectContaining({password:'target-new-fixture',jumpPassword:'jump-new-fixture'}))
+  expect(container.querySelectorAll('input[type=password]')).toHaveLength(2)
+  await mount({id:'member-1',name:'成员',role:'member',company:'西浦',companies:['西浦'],isSuperAdmin:false})
+  expect(container.querySelector('[role=dialog]')).toBeNull()
+  expect(container.querySelector('input[type=password]')).toBeNull()
+  expect(container.innerHTML).not.toContain('target-new-fixture')
+  expect(container.innerHTML).not.toContain('jump-new-fixture')
 })

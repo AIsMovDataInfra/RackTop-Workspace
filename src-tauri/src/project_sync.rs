@@ -407,28 +407,28 @@ case "$source/" in "$target/"*) printf 'RackTop: 主目录不能位于目标目�
     remote_output(server, password, script, 12).await.map(|_| ())
 }
 
-pub async fn probe(database: &Database, draft: &ProjectDraft) -> Result<Vec<ProjectPathCheck>, String> {
+pub async fn probe(database: &Database, team: &crate::team::TeamManager, draft: &ProjectDraft) -> Result<Vec<ProjectPathCheck>, String> {
     let source = database.get_server(&draft.source_server_id)?;
-    let source_password = database.get_ssh_passwords(&source, false)?;
+    let source_password = team.ssh_passwords(database, &source, false).await?;
     let basename = path_basename(&draft.source_path, &draft.name);
     let mut checks = vec![check_path(&source, source_password.as_ref(), &draft.source_path, &basename).await];
     for target in &draft.targets {
         let server = database.get_server(&target.server_id)?;
-        let password = database.get_ssh_passwords(&server, false)?;
+        let password = team.ssh_passwords(database, &server, false).await?;
         checks.push(check_path(&server, password.as_ref(), &target.path, &basename).await);
     }
     Ok(checks)
 }
 
-pub async fn inspect(database: &Database, project: &Project) -> Result<Project, String> {
+pub async fn inspect(database: &Database, team: &crate::team::TeamManager, project: &Project) -> Result<Project, String> {
     let source = database.get_server(&project.source_server_id)?;
-    let source_password = database.get_ssh_passwords(&source, false)?;
+    let source_password = team.ssh_passwords(database, &source, false).await?;
     let basename = path_basename(&project.source_path, &project.name);
     let source_check = check_path(&source, source_password.as_ref(), &project.source_path, &basename).await;
     let mut targets = Vec::new();
     for target in &project.targets {
         let server = database.get_server(&target.server_id)?;
-        let password = database.get_ssh_passwords(&server, false)?;
+        let password = team.ssh_passwords(database, &server, false).await?;
         let check = check_path(&server, password.as_ref(), &target.path, &basename).await;
         let source_unchanged_since_sync = target.synced_source_size_bytes == Some(source_check.size_bytes)
             && target.synced_source_file_count == Some(source_check.file_count)
@@ -470,9 +470,9 @@ fn targets_after_source_check(project: &Project, source_check: &ProjectPathCheck
     }).collect()
 }
 
-pub async fn inspect_source(database: &Database, project: &Project) -> Result<Project, String> {
+pub async fn inspect_source(database: &Database, team: &crate::team::TeamManager, project: &Project) -> Result<Project, String> {
     let source = database.get_server(&project.source_server_id)?;
-    let source_password = database.get_ssh_passwords(&source, false)?;
+    let source_password = team.ssh_passwords(database, &source, false).await?;
     let basename = path_basename(&project.source_path, &project.name);
     let source_check = check_path(&source, source_password.as_ref(), &project.source_path, &basename).await;
     let targets = targets_after_source_check(project, &source_check);
@@ -481,7 +481,7 @@ pub async fn inspect_source(database: &Database, project: &Project) -> Result<Pr
     database.update_project_checks(&project.id, source_check.exists, source_check.is_directory, source_check.size_bytes, source_check.file_count, source_check.modified_at, &targets, status, error)
 }
 
-pub async fn sync(database: &Database, project: &Project, target_server_id: &str, force: bool) -> Result<ProjectSyncResult, String> {
+pub async fn sync(database: &Database, team: &crate::team::TeamManager, project: &Project, target_server_id: &str, force: bool) -> Result<ProjectSyncResult, String> {
     let target = project.targets.iter().find(|target| target.server_id == target_server_id).ok_or("目标服务器不属于此项目")?;
     if target.status == "conflict" && !force {
         return Err("目标内容已在上次同步后修改，需要确认后才能覆盖同名内容".into());
@@ -493,8 +493,8 @@ pub async fn sync(database: &Database, project: &Project, target_server_id: &str
 
     let operation = async {
         let source = database.get_server(&project.source_server_id)?;
-        let source_password = database.get_ssh_passwords(&source, true)?;
-        let target_password = database.get_ssh_passwords(&target_server, true)?;
+        let source_password = team.ssh_passwords(database, &source, true).await?;
+        let target_password = team.ssh_passwords(database, &target_server, true).await?;
         let basename = path_basename(&project.source_path, &project.name);
         let source_check = check_path(&source, source_password.as_ref(), &project.source_path, &basename).await;
         if !source_check.exists { return Err(source_check.error.unwrap_or_else(|| "主目录不存在".into())); }
@@ -620,7 +620,7 @@ pub async fn sync(database: &Database, project: &Project, target_server_id: &str
 
     match operation {
         Ok((transferred, source_size_bytes, source_file_count, source_modified_at)) => {
-            let verify_password = database.get_ssh_passwords(&target_server, false)?;
+            let verify_password = team.ssh_passwords(database, &target_server, false).await?;
             let target_check = check_path(&target_server, verify_password.as_ref(), &target.path, &path_basename(&target.path, &project.name)).await;
             if target_check.error.is_some() || !target_check.exists {
                 let error = target_check.error.unwrap_or_else(|| "同步完成后无法验证目标目录".into());
@@ -836,6 +836,7 @@ mod tests {
         let source_path = format!("/tmp/racktop-sync-source-{suffix}");
         let target_path = format!("/tmp/racktop-sync-target-{suffix}");
         let database_dir = tempfile::tempdir().unwrap();
+        let team = std::sync::Arc::new(crate::team::TeamManager::new(database_dir.path()).unwrap());
         let database = Database::open(&database_dir.path().join("integration.sqlite")).unwrap();
         let source = database.save_server(integration_server_draft("Integration source", &source_address)).unwrap();
         let target = database.save_server(integration_server_draft("Integration target", &target_address)).unwrap();
@@ -846,18 +847,18 @@ mod tests {
                 id: None, name: "SSH integration".into(), kind: "project".into(), source_server_id: source.id.clone(), source_path: source_path.clone(),
                 dataset_ids: vec![], model_ids: vec![], targets: vec![ProjectTargetDraft { server_id: target.id.clone(), path: target_path.clone() }],
             })?;
-            let inspected = super::inspect(&database, &project).await?;
+            let inspected = super::inspect(&database, &team, &project).await?;
             if inspected.targets[0].status != "missing" { return Err(format!("expected missing target, got {}", inspected.targets[0].status)); }
-            super::sync(&database, &inspected, &target.id, false).await?;
+            super::sync(&database, &team, &inspected, &target.id, false).await?;
             let first = super::remote_output(&target, None, format!("cat {path}/model.txt", path = shell_quote(&target_path)), 15).await?;
             if first != "source-v1" { return Err(format!("unexpected first copy: {first:?}")); }
 
             super::remote_output(&target, None, format!("printf 'target-change' > {path}/model.txt; printf 'remove-me' > {path}/target-only.txt", path = shell_quote(&target_path)), 15).await?;
             let current = database.get_project(&project.id)?;
-            let conflicted = super::inspect(&database, &current).await?;
+            let conflicted = super::inspect(&database, &team, &current).await?;
             if conflicted.targets[0].status != "conflict" { return Err(format!("expected conflict, got {}", conflicted.targets[0].status)); }
-            if super::sync(&database, &conflicted, &target.id, false).await.is_ok() { return Err("conflicting target was overwritten without confirmation".into()); }
-            super::sync(&database, &conflicted, &target.id, true).await?;
+            if super::sync(&database, &team, &conflicted, &target.id, false).await.is_ok() { return Err("conflicting target was overwritten without confirmation".into()); }
+            super::sync(&database, &team, &conflicted, &target.id, true).await?;
             let published = super::remote_output(&target, None, format!("cat {path}/model.txt; test ! -e {path}/target-only.txt", path = shell_quote(&target_path)), 15).await?;
             if published != "source-v1" { return Err(format!("unexpected exact copy: {published:?}")); }
             Ok(())
@@ -877,6 +878,7 @@ mod tests {
         let source_path = format!("/tmp/racktop-sync-resume-source-{suffix}.bin");
         let target_path = format!("/tmp/racktop-sync-resume-target-{suffix}.bin");
         let database_dir = tempfile::tempdir().unwrap();
+        let team = std::sync::Arc::new(crate::team::TeamManager::new(database_dir.path()).unwrap());
         let database = std::sync::Arc::new(Database::open(&database_dir.path().join("resume.sqlite")).unwrap());
         let source = database.save_server(integration_server_draft("Resume source", &source_address)).unwrap();
         let target = database.save_server(integration_server_draft("Resume target", &target_address)).unwrap();
@@ -888,11 +890,12 @@ mod tests {
                 id: None, name: "Resume integration".into(), kind: "project".into(), source_server_id: source.id.clone(), source_path: source_path.clone(),
                 dataset_ids: vec![], model_ids: vec![], targets: vec![ProjectTargetDraft { server_id: target.id.clone(), path: target_path.clone() }],
             })?;
-            let inspected = super::inspect(&database, &project).await?;
+            let inspected = super::inspect(&database, &team, &project).await?;
             let project_id = inspected.id.clone();
             let target_id = target.id.clone();
             let database_for_sync = database.clone();
-            let task = tokio::spawn(async move { super::sync(&database_for_sync, &inspected, &target_id, false).await });
+            let team_for_sync = team.clone();
+            let task = tokio::spawn(async move { super::sync(&database_for_sync, &team_for_sync, &inspected, &target_id, false).await });
             let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
             let partial_bytes = loop {
                 if let Some(progress) = super::list_progress().into_iter().find(|item| item.project_id == project_id && item.target_server_id == target.id) {
@@ -914,7 +917,7 @@ mod tests {
             let stored: u64 = super::remote_output(&target, None, format!("stat -c '%s' {}", shell_quote(&part_path)), 15).await?.trim().parse().map_err(|error| format!("无法读取断点文件：{error}"))?;
             if stored == 0 || stored > partial_bytes { return Err(format!("断点大小异常：stored={stored}, progress={partial_bytes}")); }
 
-            let resumed = super::sync(&database, &paused_project, &target.id, false).await?;
+            let resumed = super::sync(&database, &team, &paused_project, &target.id, false).await?;
             if resumed.transferred_bytes < stored { return Err("续传结果未包含已保存的断点".into()); }
             let target_size = super::remote_output(&target, None, format!("stat -c '%s' {}; test ! -e {}", shell_quote(&target_path), shell_quote(&part_path)), 15).await?;
             if target_size.trim() != (256_u64 * 1024 * 1024).to_string() { return Err(format!("续传文件大小不正确：{target_size:?}")); }

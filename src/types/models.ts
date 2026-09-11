@@ -13,7 +13,7 @@ export interface ServerNotificationSettings {
 }
 
 export interface Server {
-  managed?: { accountId: string; company: string; remoteId: string; available: boolean; reason: string | null; version: number } | null
+  managed?: { accountId: string; company: string; remoteId: string; available: boolean; reason: string | null; version: number; hasPassword?: boolean; hasJumpPassword?: boolean; credentialRevision?: number } | null
   id: string
   name: string
   location?: string | null

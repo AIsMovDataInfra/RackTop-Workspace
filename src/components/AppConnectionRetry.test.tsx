@@ -125,6 +125,46 @@ describe('managed server authorization changes', () => {
     list.mockResolvedValue([{ ...server, host: 'new.example.test', managed: { ...managed, available: false, reason: '请先配置本机 SSH 认证', version: 2 } }])
     await act(async () => { await managedListeners.get('managed-servers-changed')!({ payload: { affectedIds: [server.id] } }) })
     expect(document.querySelector('.server-form')).toBeNull()
-    expect(container.textContent).toContain('团队服务器配置已变化')
+    expect(container.textContent).toContain('团队服务器资源已变化')
+  })
+  it('ignores a late managed save after revocation instead of restoring access or starting SSH work', async () => {
+    const { container, list, server, collect, configure, sync } = await mount({ ...managed, available: false, reason: '请先配置本机 SSH 认证' })
+    let complete!: (server: Server) => void
+    const save = vi.spyOn(api, 'saveServer').mockImplementation(() => new Promise(resolve => { complete = resolve }))
+    await act(async () => container.querySelector<HTMLButtonElement>('.server-row')!.click())
+    const edit = [...container.querySelectorAll('button')].find(button => button.textContent === '编辑配置')!
+    await act(async () => edit.click())
+    await act(async () => { container.querySelector<HTMLFormElement>('.server-form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })) })
+    expect(save).toHaveBeenCalledOnce()
+    list.mockResolvedValue([{ ...server, status: 'offline', lastError: '团队授权已撤销', managed: { ...managed, available: false, reason: '团队授权已撤销', version: 2 } }])
+    await act(async () => { await managedListeners.get('managed-servers-changed')!({ payload: { affectedIds: [server.id] } }) })
+    const configuredBefore = configure.mock.calls.length, syncedBefore = sync.mock.calls.length
+    await act(async () => { complete({ ...server, managed }); await Promise.resolve() })
+    expect(container.querySelector('.server-form')).toBeNull()
+    expect(container.textContent).toContain('团队授权已撤销')
+    expect(container.textContent).not.toContain('服务器已保存，正在连接')
+    expect(configure).toHaveBeenCalledTimes(configuredBefore)
+    expect(sync).toHaveBeenCalledTimes(syncedBefore)
+    expect(collect).not.toHaveBeenCalled()
+    now += 30 * 60_000
+    await tick(FOREGROUND_STATUS_INTERVAL_MS)
+    expect(collect).not.toHaveBeenCalled()
+  })
+  it('keeps a pending personal-server save when an unrelated managed directory entry changes', async () => {
+    const { container, list, server, collect, configure } = await mount()
+    let complete!: (server: Server) => void
+    const save = vi.spyOn(api, 'saveServer').mockImplementation(() => new Promise(resolve => { complete = resolve }))
+    await act(async () => container.querySelector<HTMLButtonElement>('.server-row')!.click())
+    const edit = [...container.querySelectorAll('button')].find(button => button.textContent === '编辑配置')!
+    await act(async () => edit.click())
+    await act(async () => { container.querySelector<HTMLFormElement>('.server-form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })) })
+    expect(save).toHaveBeenCalledOnce()
+    list.mockResolvedValue([server])
+    await act(async () => { await managedListeners.get('managed-servers-changed')!({ payload: { affectedIds: ['another-managed-id'] } }) })
+    await act(async () => { complete(server); await Promise.resolve() })
+    expect(configure).toHaveBeenCalledWith(server.id)
+    expect(collect).toHaveBeenCalledTimes(2)
+    expect(container.querySelector('.server-form')).toBeNull()
+    expect(container.textContent).toContain('SSH 连接失败')
   })
 })

@@ -38,7 +38,13 @@
 
 成功返回 `200 {servers: ManagedServer[], skipped: number}`，`servers` 只包含本次新增条目，`skipped` 为重复跳过数。一次事务中完成全部校验、去重、创建、授权与审计；任何错误使整批回滚。每组织最多 500 台服务器。去重按同组织的主机地址（忽略大小写）、端口、用户名（区分大小写）及完整跳板机三字段判断，不解析 DNS 别名；批内和已有重复均跳过，不改已有名称、启用状态或授权，重试不会新增相同连接。全部重复时返回空数组和跳过数。
 
-目录读取和后续维护沿用 `GET /api/servers`、`GET /api/servers/members?company=…`、`POST /api/servers`、`PATCH /api/servers/:id`、`PUT /api/servers/:id/grants`。导入不会把 SSH 操作系统权限授予成员，密码、私钥继续由成员在各自电脑上配置。
+目录读取和后续维护沿用 `GET /api/servers`、`GET /api/servers/members?company=…`、`POST /api/servers`、`PATCH /api/servers/:id`、`PUT /api/servers/:id/grants`。导入不会修改 SSH 操作系统权限，也不从配置文件提取密码或私钥。
+
+从 2.7.0 起，新客户端显式使用 `?schema=2` 读取或维护服务器。目录 `schemaVersion=2`，每条新增 `hasPassword`、`hasJumpPassword` 布尔值和 `credentialRevision` 非负整数；不提供此参数时，旧 schema 1 响应字段完全保持原形。`members` 和下述密码领取接口不接受 `schema` 参数。
+
+创建及更新允许 `password?: string|null`、`jumpPassword?: string|null`：省略保留，`null` 清除，非空字符串替换。密码保留空格与 Unicode，最长 4096 UTF-8 字节，不允许 NUL、CR、LF；跳板密码须已有跳板地址。对应地址、端口、用户名变化时清除旧槽，除非同次传入新密码。更新继续要求记录 `version`，密码变化还推进 `credentialRevision`；导入接口继续拒绝密码字段，须导入后编辑。
+
+`POST /api/servers/:id/credentials` 仅接受设备 Bearer 会话与显式 `X-RackTop-Company`，请求体为 `{version,credentialRevision}`；事务内重新检查当前账号、组织、授权、启用状态及两个版本。响应为 `{serverId,company,version,credentialRevision,password:string|null,jumpPassword:string|null}`，`Cache-Control: no-store`。网页会话（包括超管）不得读取此明文接口。版本不符返回 409，权限不符拒绝；没有可用加密密钥或解密失败返回固定的 503 `CREDENTIALS_UNAVAILABLE`，不回传敏感输入。审计只记录动作，不记录密码。
 
 ## 数据结构
 

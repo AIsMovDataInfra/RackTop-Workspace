@@ -116,12 +116,12 @@ export const api = {
   deleteMember: (member: Member) => request<{ ok: true }>(`/admin/members/${encodeURIComponent(member.id)}`, 'DELETE', { version: member.version }),
   demoLogin: (userId: string) => sessionRequest('/auth/demo', 'POST', { userId }),
   logout: async () => { try { await request('/auth/logout', 'POST', {}) } finally { sessionGeneration++; csrfToken = null; companyScope = null } },
-  servers: (company?: Company) => request<{ schemaVersion: 1; revision: string; servers: ManagedServer[] }>(`/servers${company ? `?${new URLSearchParams({ company })}` : ''}`),
-  createServer: (input: ManagedServerDraft) => request<{ server: ManagedServer }>('/servers', 'POST', input),
-  importServers: (input: { company: Company; memberIds: string[]; servers: Omit<ManagedServerDraft, 'company' | 'memberIds'>[] }) => request<{ servers: ManagedServer[]; skipped: number }>('/servers/import', 'POST', input),
-  updateServer: (id: string, input: { version: number } & Partial<Omit<ManagedServerDraft, 'company' | 'memberIds'>>) => request<{ server: ManagedServer }>(`/servers/${encodeURIComponent(id)}`, 'PATCH', input),
+  servers: (company?: Company) => request<{ schemaVersion: 2; revision: string; servers: ManagedServer[] }>(`/servers?${new URLSearchParams({ schema: '2', ...(company ? { company } : {}) })}`),
+  createServer: (input: ManagedServerDraft) => request<{ server: ManagedServer }>('/servers?schema=2', 'POST', input),
+  importServers: (input: { company: Company; memberIds: string[]; servers: Omit<ManagedServerDraft, 'company' | 'memberIds' | 'password' | 'jumpPassword'>[] }) => request<{ servers: ManagedServer[]; skipped: number }>('/servers/import?schema=2', 'POST', input),
+  updateServer: (id: string, input: { version: number } & Partial<Omit<ManagedServerDraft, 'company' | 'memberIds'>>) => request<{ server: ManagedServer }>(`/servers/${encodeURIComponent(id)}?schema=2`, 'PATCH', input),
   serverMembers: (company: Company) => request<{ members: { id: string; name: string; username: string }[] }>(`/servers/members?${new URLSearchParams({ company })}`),
-  grantServer: (id: string, version: number, memberIds: string[]) => request<{ server: ManagedServer }>(`/servers/${encodeURIComponent(id)}/grants`, 'PUT', { version, memberIds }),
+  grantServer: (id: string, version: number, memberIds: string[]) => request<{ server: ManagedServer }>(`/servers/${encodeURIComponent(id)}/grants?schema=2`, 'PUT', { version, memberIds }),
   resources: () => request<{ resources: Resource[] }>('/resources'),
   reservations: (options: { from?: string; to?: string; mine?: boolean } = {}) => {
     const query = new URLSearchParams()

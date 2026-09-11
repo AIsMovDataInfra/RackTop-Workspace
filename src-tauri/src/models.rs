@@ -43,6 +43,15 @@ pub struct ManagedServer {
     pub available: bool,
     pub reason: Option<String>,
     pub version: u64,
+    #[serde(default)]
+    pub has_password: bool,
+    #[serde(default)]
+    pub has_jump_password: bool,
+    #[serde(default)]
+    pub credential_revision: u64,
+    // Native operation snapshots retain the authorization generation; never an IPC input.
+    #[serde(skip)]
+    pub(crate) epoch: i64,
 }
 
 #[derive(Clone, Serialize, Deserialize)]

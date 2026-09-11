@@ -14,6 +14,37 @@ use std::{
 use tauri::{Manager, State};
 
 pub const TEAM_URL: &str = "https://136.0.110.161";
+
+// Intentionally neither Debug nor Serialize: this DTO must never cross IPC or
+// become part of the stored account / ordinary server directory.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SharedCredentials {
+    server_id: String,
+    company: String,
+    version: u64,
+    credential_revision: u64,
+    password: Option<String>,
+    jump_password: Option<String>,
+}
+impl SharedCredentials {
+    fn into_passwords(self, managed: &crate::models::ManagedServer) -> Result<crate::ssh_connection::SshPasswords, String> {
+        let valid = |password: &Option<String>| password.as_ref().is_none_or(|s| !s.is_empty() && s.len() <= 4096 && !s.contains(['\0', '\r', '\n']));
+        if self.server_id != managed.remote_id || self.company != managed.company || self.version != managed.version || self.credential_revision != managed.credential_revision
+            || self.password.is_some() != managed.has_password || self.jump_password.is_some() != managed.has_jump_password || !valid(&self.password) || !valid(&self.jump_password) {
+            return Err("管理员密码响应与当前连接不匹配，请刷新目录".into());
+        }
+        Ok(crate::ssh_connection::SshPasswords { target: self.password, proxy: self.jump_password })
+    }
+}
+
+fn check_credential_session(state: &Stored, managed: &crate::models::ManagedServer) -> Result<(), String> {
+    if !state.matches_session(state) || state.account_id.as_deref() != Some(&managed.account_id)
+        || state.user.as_ref().is_none_or(|user| { let scope = user_scope(user); scope != "*" && scope != managed.company }) {
+        return Err("团队账号或组织已变化，请重新连接".into());
+    }
+    Ok(())
+}
 fn now_ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -284,6 +315,8 @@ pub struct TeamManager {
     client: reqwest::Client,
     app: OnceLock<tauri::AppHandle>,
     directory_lock: tokio::sync::Mutex<()>,
+    #[cfg(any(test, feature = "integration-probe"))]
+    test_url: Option<String>,
 }
 impl TeamManager {
     pub fn new(profile: &Path) -> Result<Self, String> {
@@ -298,6 +331,8 @@ impl TeamManager {
             value: Mutex::new(None),
             app: OnceLock::new(),
             directory_lock: tokio::sync::Mutex::new(()),
+            #[cfg(any(test, feature = "integration-probe"))]
+            test_url: None,
             sync_lock: tokio::sync::Mutex::new(()),
             changes,
             client: reqwest::Client::builder()
@@ -325,6 +360,8 @@ impl TeamManager {
         Ok(guard.as_ref().unwrap().clone())
     }
     fn persist(&self, value: &Stored) -> Result<(), String> {
+        #[cfg(any(test, feature = "integration-probe"))]
+        if self.test_url.is_some() { return Ok(()); } // Loopback fixtures never write an OS keyring, including on HTTP 401.
         let serialized = serde_json::to_string(value).map_err(|_| "无法保存团队设置")?;
         if serialized.len() > 128 * 1024 {
             return Err("团队设置超过大小限制".into());
@@ -408,10 +445,15 @@ impl TeamManager {
         scope: Option<&Stored>,
     ) -> Result<Value, String> {
         // All routes are built here, not supplied by a remote resource or arbitrary WebView URL.
+        #[cfg(any(test, feature = "integration-probe"))]
+        let base = self.test_url.as_deref().unwrap_or(TEAM_URL);
+        #[cfg(not(any(test, feature = "integration-probe")))]
+        let base = TEAM_URL;
         let mut request = self
             .client
-            .request(method, format!("{TEAM_URL}{path}"))
+            .request(method, format!("{base}{path}"))
             .header("Origin", TEAM_URL);
+        if path.ends_with("/credentials") { request = request.header("Cache-Control", "no-store"); }
         if let Some(token) = token {
             request = request.bearer_auth(token);
         }
@@ -435,7 +477,7 @@ impl TeamManager {
             }
             return Err("团队登录已失效，请重新登录".into());
         }
-        let response_limit = if path == "/api/servers" { 16 * 1024 * 1024 } else { 2 * 1024 * 1024 };
+        let response_limit = if path == "/api/servers" || path == "/api/servers?schema=2" { 16 * 1024 * 1024 } else if path.ends_with("/credentials") { 64 * 1024 } else { 2 * 1024 * 1024 };
         if response.content_length().is_some_and(|n| n > response_limit)
         {
             return Err("预约中心响应过大".into());
@@ -701,7 +743,7 @@ impl TeamManager {
             return self.invalidate_directory_for(&expected, "请先选择已分配的组织");
         }
         let result = async {
-            let value = self.request_with_scope(reqwest::Method::GET, "/api/servers", expected.token.as_deref(), None, Some(&expected)).await?;
+            let value = self.request_with_scope(reqwest::Method::GET, "/api/servers?schema=2", expected.token.as_deref(), None, Some(&expected)).await?;
             crate::managed_servers::Directory::parse(value, &scope)
         }.await;
         let directory = match result {
@@ -717,6 +759,44 @@ impl TeamManager {
         };
         crate::managed_servers::directory_changed(app, &ids);
         Ok(())
+    }
+    /// Shared SSH passwords live only in this operation's native memory. Every
+    /// call rechecks live server authorization; there is no disk/keyring cache or
+    /// fallback to a member's old password if the cloud credential is unavailable.
+    pub(crate) async fn ssh_passwords(&self, database: &Database, server: &Server, allow_prompt: bool) -> Result<Option<crate::ssh_connection::SshPasswords>, String> {
+        let Some(managed) = server.managed.as_ref().filter(|m| m.has_password || m.has_jump_password) else {
+            return database.get_ssh_passwords(server, allow_prompt);
+        };
+        let expected = self.read()?;
+        check_credential_session(&expected, managed)?;
+        let operation = async {
+            let path = format!("/api/servers/{}/credentials", managed.remote_id);
+            let value = self.request_with_scope(reqwest::Method::POST, &path, expected.token.as_deref(),
+                Some(json!({"version":managed.version,"credentialRevision":managed.credential_revision})), Some(&expected)).await
+                .map_err(|_| "无法领取管理员密码，请刷新目录或联系管理员")?;
+            // Never expose the response (including error messages) to IPC, logs,
+            // exports, or serde Debug output. Decode only the exact secret DTO.
+            let credentials: SharedCredentials = serde_json::from_value(value).map_err(|_| "管理员密码响应无效，请刷新目录")?;
+            let current = self.read()?;
+            if !current.matches_session(&expected) { return Err("团队账号或组织已变化，请重新连接".into()); }
+            check_credential_session(&current, managed)?;
+            database.check_managed_server(server)?;
+            let actual = database.get_server(&server.id)?;
+            if actual.managed.as_ref().is_none_or(|m| m.version != managed.version) { return Err("组织服务器版本已变化，请重新连接".into()); }
+            let shared = credentials.into_passwords(managed)?;
+            // A local private key / password may still be used for the other hop.
+            // The local reader explicitly skips every shared-password slot.
+            let mut passwords = database.local_ssh_passwords(server, allow_prompt)?.unwrap_or_default();
+            if managed.has_password { passwords.target = shared.target; }
+            if managed.has_jump_password { passwords.proxy = shared.proxy; }
+            Ok(Some(passwords))
+        };
+        let result = crate::managed_servers::authorized(database, &[server], operation).await;
+        if result.is_err() {
+            let ids = database.invalidate_managed_credentials(server)?;
+            if let Some(app) = self.app.get() { crate::managed_servers::changed(app, &ids); }
+        }
+        result
     }
     fn apply_directory_if_current(&self, expected: &Stored, directory: &crate::managed_servers::Directory, database: &Database) -> Result<Vec<String>, String> {
         let account = expected.account_id.as_deref().ok_or("缺少团队账号标识")?;
@@ -766,6 +846,49 @@ impl TeamManager {
 
 // This provisioning entry point exists only in the explicitly built local setup helper.
 // It cannot be called through a Tauri command or the public reservation service.
+#[cfg(feature = "integration-probe")]
+pub async fn exercise_credentials_fixture(endpoint: &str) -> Result<Value, String> {
+    let url = reqwest::Url::parse(endpoint).map_err(|_| "invalid fixture URL")?;
+    if url.scheme() != "http" || url.host_str() != Some("127.0.0.1") || !url.username().is_empty() || url.password().is_some() || url.query().is_some() || url.fragment().is_some() || url.path() != "/" {
+        return Err("credential fixture requires a loopback HTTP origin".into());
+    }
+    if std::env::var_os("RACKTOP_TEST_KNOWN_HOSTS").is_none() { return Err("fixture requires an isolated known_hosts file".into()); }
+    let local = tempfile::tempdir().map_err(|_| "cannot create disposable fixture")?;
+    let database = Database::open(&local.path().join("fixture.sqlite"))?;
+    let mut manager = TeamManager::new(local.path())?;
+    manager.test_url = Some(endpoint.trim_end_matches('/').into());
+    manager.client = reqwest::Client::builder().no_proxy().redirect(reqwest::redirect::Policy::none()).timeout(Duration::from_secs(10)).build().map_err(|_| "cannot initialize fixture client")?;
+    let mut state = Stored::default();
+    let generation = state.begin_login();
+    state.finish_login(generation, "fixture-shared-credentials-token".into(), json!({"id":"fixture-account","name":"Fixture","role":"admin","isSuperAdmin":true,"company":""}), None)?;
+    *manager.value.lock().map_err(|_| "fixture state unavailable")? = Some(state.clone());
+    let value = manager.request_with_scope(reqwest::Method::GET, "/api/servers?schema=2", state.token.as_deref(), None, Some(&state)).await?;
+    let rows = value.get("servers").and_then(Value::as_array).ok_or("fixture directory missing servers")?;
+    if rows.is_empty() || rows.iter().any(|row| {
+        let loopback = |host: Option<&str>| host.is_some_and(|s| matches!(s,"127.0.0.1" | "::1"));
+        !loopback(row.get("host").and_then(Value::as_str)) || row.get("hasPassword") != Some(&json!(true))
+            || (row.get("jump").is_some_and(|v| !v.is_null()) && (!loopback(row.pointer("/jump/host").and_then(Value::as_str)) || row.get("hasJumpPassword") != Some(&json!(true))))
+    }) { return Err("fixture permits only loopback targets with shared passwords for each hop".into()); }
+    let directory = crate::managed_servers::Directory::parse(value, "*")?;
+    database.apply_directory("fixture-account", &directory, crate::managed_servers::now_ms())?;
+    let servers = database.list_servers()?;
+    for server in &servers {
+        // Repeat the actual read to prove that subsequent operations do not use
+        // a persisted or cached shared password. Never print command stderr.
+        for _ in 0..2 {
+            let passwords = manager.ssh_passwords(&database, server, false).await?;
+            crate::managed_servers::authorized(&database, &[server], async {
+                let (mut command, target) = crate::collector::configured_ssh_command(server, passwords.as_ref())?;
+                let output = command.arg(target).arg("printf '__RACKTOP_SHARED_PASSWORD_READY__'").output().await.map_err(|_| "fixture SSH failed")?;
+                if !output.status.success() || output.stdout != b"__RACKTOP_SHARED_PASSWORD_READY__" { return Err("fixture SSH authentication or fixed marker failed".into()); }
+                Ok(())
+            }).await?;
+        }
+    }
+    if !database.session_passwords.lock().map_err(|_| "fixture cache unavailable")?.is_empty() { return Err("shared credentials entered local cache".into()); }
+    Ok(json!({"servers":servers.len(),"sshConnections":servers.len()*2,"sharedPasswordsPersisted":false,"liveCredentialFetchPerOperation":true}))
+}
+
 #[cfg(feature = "integration-probe")]
 pub fn prepare_profile(input: Value) -> Result<usize, String> {
     #[derive(Deserialize)]
@@ -1326,6 +1449,115 @@ mod tests {
         assert_eq!(manager.apply_directory_if_current(&expected, &directory, &db).unwrap().len(),1);
     }
 
+    fn shared_fixture() -> (tempfile::TempDir, Database, TeamManager, Server, Value) {
+        let dir=tempfile::tempdir().unwrap();
+        let db=Database::open(&dir.path().join("shared.sqlite")).unwrap();
+        let mut manager=TeamManager::new(dir.path()).unwrap();
+        manager.client=reqwest::Client::builder().no_proxy().timeout(Duration::from_secs(3)).build().unwrap();
+        let mut state=Stored::default();let generation=state.begin_login();
+        let mut account=user("fixture-account");account["company"]=json!("A公司");
+        state.finish_login(generation,"fixture-shared-token".into(),account,None).unwrap();
+        *manager.value.lock().unwrap()=Some(state);
+        let row=json!({"id":"00000000-0000-4000-8000-000000000001","company":"A公司","name":"Shared","host":"node.example","port":22,"username":"worker","jump":{"host":"jump.example","port":2222,"username":"hop"},"enabled":true,"version":1,"updatedAt":"2026-09-12T01:00:00.000Z","hasPassword":true,"hasJumpPassword":true,"credentialRevision":1});
+        let directory=crate::managed_servers::Directory::parse(json!({"schemaVersion":2,"revision":"a".repeat(64),"servers":[row.clone()]}),"A公司").unwrap();
+        db.apply_directory("fixture-account",&directory,crate::managed_servers::now_ms()).unwrap();
+        let server=db.list_servers().unwrap().pop().unwrap();
+        (dir,db,manager,server,row)
+    }
+
+    fn shared_response(server: &Server) -> Value {
+        let m=server.managed.as_ref().unwrap();
+        json!({"serverId":m.remote_id,"company":m.company,"version":m.version,"credentialRevision":m.credential_revision,"password":"  合成 target 密码  ","jumpPassword":"独立 jump 密码"})
+    }
+
+    // Loopback HTTP bytes exercise the production reqwest path without reading a
+    // real keyring, changing a user profile, or connecting to the team service.
+    fn serve_shared_response(value: Value, status: u16, delay: Duration) -> (String, std::thread::JoinHandle<String>) {
+        use std::io::{Read,Write};
+        let listener=std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url=format!("http://{}",listener.local_addr().unwrap());
+        let handle=std::thread::spawn(move || {
+            listener.set_nonblocking(true).unwrap();
+            let start=std::time::Instant::now();
+            let (mut stream,_)=loop { match listener.accept() { Ok(pair)=>break pair,Err(error) if error.kind()==std::io::ErrorKind::WouldBlock && start.elapsed()<Duration::from_secs(3)=>std::thread::sleep(Duration::from_millis(2)),Err(error)=>panic!("fixture accept: {error}") } };
+            stream.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+            let mut bytes=Vec::new();let mut buffer=[0;2048];
+            loop {
+                let n=stream.read(&mut buffer).unwrap();if n==0 { break; }bytes.extend_from_slice(&buffer[..n]);
+                if let Some(end)=bytes.windows(4).position(|s|s==b"\r\n\r\n") {
+                    let head=String::from_utf8_lossy(&bytes[..end]).to_lowercase();
+                    let length=head.lines().find_map(|line|line.strip_prefix("content-length: ")).and_then(|s|s.parse::<usize>().ok()).unwrap_or(0);
+                    if bytes.len()>=end+4+length { break; }
+                }
+            }
+            std::thread::sleep(delay);
+            let body=value.to_string();let response=format!("HTTP/1.1 {status} Fixture\r\nContent-Type: application/json\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n{body}",body.len());
+            let _=stream.write_all(response.as_bytes());
+            String::from_utf8(bytes).unwrap()
+        });
+        (url,handle)
+    }
+
+    #[tokio::test]
+    async fn shared_credentials_use_live_device_scope_keep_hops_separate_and_never_persist() {
+        let (dir,db,mut manager,server,_)=shared_fixture();
+        for _ in 0..2 {
+            let (url,http)=serve_shared_response(shared_response(&server),200,Duration::ZERO); manager.test_url=Some(url);
+            let passwords=manager.ssh_passwords(&db,&server,false).await.unwrap().unwrap();
+            assert_eq!(passwords.target.as_deref(),Some("  合成 target 密码  "));
+            assert_eq!(passwords.proxy.as_deref(),Some("独立 jump 密码"));
+            let request=http.join().unwrap();
+            assert!(request.starts_with("POST /api/servers/00000000-0000-4000-8000-000000000001/credentials HTTP/1.1"));
+            let head=request.to_lowercase(); assert!(head.contains("authorization: bearer fixture-shared-token"));
+            assert!(head.contains("x-racktop-company: a%e5%85%ac%e5%8f%b8"));assert!(head.contains("cache-control: no-store"));
+            let body:Value=serde_json::from_str(request.split("\r\n\r\n").nth(1).unwrap()).unwrap();assert_eq!(body,json!({"version":1,"credentialRevision":1}));
+            assert!(!format!("{passwords:?}").contains("密码"));
+        }
+        assert!(db.session_passwords.lock().unwrap().is_empty());
+        for entry in std::fs::read_dir(dir.path()).unwrap() {
+            let bytes=std::fs::read(entry.unwrap().path()).unwrap();
+            assert!(!String::from_utf8_lossy(&bytes).contains("合成 target 密码"));
+            assert!(!String::from_utf8_lossy(&bytes).contains("独立 jump 密码"));
+        }
+        assert!(!serde_json::to_string(&db.list_servers().unwrap()).unwrap().contains("合成 target 密码"));
+    }
+
+    #[tokio::test]
+    async fn shared_credential_denial_or_bad_binding_has_no_local_fallback_or_response_leak() {
+        for (field,value,status) in [("error",json!({"message":"SERVER-SECRET-MUST-NOT-LEAK"}),403),("error",json!({"message":"SESSION-SECRET-MUST-NOT-LEAK"}),401),("password",json!("x".repeat(4097)),200),("version",json!(2),200),("credentialRevision",json!(2),200),("company",json!("B公司"),200),("serverId",json!("other"),200),("password",Value::Null,200),("jumpPassword",json!("bad\nsecret"),200)] {
+            let (_dir,db,mut manager,server,_)=shared_fixture();
+            db.session_passwords.lock().unwrap().insert(server.id.clone(),"old-local-password".into());
+            let mut response=shared_response(&server);response[field]=value;
+            let (url,http)=serve_shared_response(response,status,Duration::ZERO);manager.test_url=Some(url);
+            let error=manager.ssh_passwords(&db,&server,false).await.unwrap_err();
+            assert!(!error.contains("SECRET") && !error.contains("secret") && !error.contains("old-local-password"));
+            assert!(db.get_server(&server.id).is_err());assert!(db.session_passwords.lock().unwrap().is_empty());
+            http.join().unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn shared_credential_response_cannot_survive_rotation_scope_change_or_revoke_regrant() {
+        for change in ["scope","rotation","regrant"] {
+            let (_dir,db,mut manager,server,mut row)=shared_fixture();
+            let (url,http)=serve_shared_response(shared_response(&server),200,Duration::from_millis(80));manager.test_url=Some(url);
+            let operation=manager.ssh_passwords(&db,&server,false);
+            let invalidate=async {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+                if change=="scope" {
+                    let mut state=manager.value.lock().unwrap();let state=state.as_mut().unwrap();state.user.as_mut().unwrap()["company"]=json!("B公司");state.advance();
+                } else {
+                    if change=="rotation" { row["version"]=json!(2);row["credentialRevision"]=json!(2); }
+                    else { db.invalidate_managed("fixture revoked").unwrap(); }
+                    let directory=crate::managed_servers::Directory::parse(json!({"schemaVersion":2,"revision":"b".repeat(64),"servers":[row]}),"A公司").unwrap();
+                    db.apply_directory("fixture-account",&directory,crate::managed_servers::now_ms()).unwrap();
+                }
+            };
+            let (result,())=tokio::join!(operation,invalidate);assert!(result.is_err(),"{change}");http.join().unwrap();
+            assert!(db.session_passwords.lock().unwrap().is_empty());
+        }
+    }
+
     #[test]
     fn team_company_assignment_refreshes_identity_and_rejects_stale_results() {
         let mut value = signed_in();
@@ -1397,7 +1629,7 @@ mod tests {
     fn team_inventory_rejects_managed_connections_even_with_cached_hardware_and_an_old_binding() {
         let (mut server,snapshot)=fixture();
         for available in [true,false] {
-            server.managed=Some(crate::models::ManagedServer { account_id:"member-1".into(),company:"A公司".into(),remote_id:"remote".into(),available,reason:None,version:1 });
+            server.managed=Some(crate::models::ManagedServer { account_id:"member-1".into(),company:"A公司".into(),remote_id:"remote".into(),available,reason:None,version:1,has_password:false,has_jump_password:false,credential_revision:0,epoch:0 });
             assert!(inventory_payload(&server,Some(&snapshot),"old-personal-source",Some("old-resource"),1_000_000).unwrap_err().contains("个人连接"));
         }
     }

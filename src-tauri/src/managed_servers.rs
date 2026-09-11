@@ -21,6 +21,12 @@ pub(crate) struct RemoteServer {
     jump: Option<Destination>, enabled: bool, version: u64, updated_at: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     member_ids: Option<Vec<String>>,
+    #[serde(default)]
+    has_password: bool,
+    #[serde(default)]
+    has_jump_password: bool,
+    #[serde(default)]
+    credential_revision: u64,
 }
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -40,11 +46,28 @@ impl RemoteServer {
     fn proxy(&self) -> Option<String> { self.jump.as_ref().map(|jump| format!("{}@{}:{}", jump.username,
         if jump.host.contains(':') { format!("[{}]", jump.host) } else { jump.host.clone() }, jump.port)) }
     fn target_changed(&self, old: &Self) -> bool { self.host != old.host || self.port != old.port || self.username != old.username || self.jump != old.jump }
+    fn credentials_changed(&self, old: &Self) -> bool {
+        self.has_password != old.has_password || self.has_jump_password != old.has_jump_password || self.credential_revision != old.credential_revision
+    }
 }
 impl Directory {
     pub(crate) fn parse(value: serde_json::Value, scope: &str) -> Result<Self, String> {
+        // Defaults only migrate metadata already stored by older clients. On the
+        // wire v2 must explicitly describe both credential sources and revision.
+        let schema = value.get("schemaVersion").and_then(serde_json::Value::as_u64);
+        if let Some(rows) = value.get("servers").and_then(serde_json::Value::as_array) {
+            for row in rows {
+                let keys = ["hasPassword", "hasJumpPassword", "credentialRevision"];
+                if (schema == Some(1) && keys.iter().any(|key| row.get(key).is_some()))
+                    || (schema == Some(2) && (row.get(keys[0]).and_then(serde_json::Value::as_bool).is_none()
+                        || row.get(keys[1]).and_then(serde_json::Value::as_bool).is_none()
+                        || row.get(keys[2]).and_then(serde_json::Value::as_u64).is_none())) {
+                    return Err("组织服务器认证元数据格式无效".into());
+                }
+            }
+        }
         let mut result: Self = serde_json::from_value(value).map_err(|_| "组织服务器目录格式无效")?;
-        if result.schema_version != 1 || result.revision.len() != 64 || !result.revision.bytes().all(|b| b.is_ascii_hexdigit()) || result.servers.len() > 2000 {
+        if !matches!(result.schema_version, 1 | 2) || result.revision.len() != 64 || !result.revision.bytes().all(|b| b.is_ascii_hexdigit()) || result.servers.len() > 2000 {
             return Err("组织服务器目录版本或大小无效".into());
         }
         let mut ids = HashSet::new();
@@ -54,6 +77,9 @@ impl Directory {
                 || !destination(&server.host, server.port, &server.username)
                 || server.jump.as_ref().is_some_and(|jump| !destination(&jump.host, jump.port, &jump.username))
                 || server.version == 0 || server.version > 9_007_199_254_740_991 || !text(&server.updated_at, 64)
+                || server.credential_revision > 9_007_199_254_740_991
+                || ((server.has_password || server.has_jump_password) && server.credential_revision == 0)
+                || (server.has_jump_password && server.jump.is_none())
                 || server.member_ids.as_ref().is_some_and(|ids| ids.len() > 128 || ids.iter().any(|id| uuid::Uuid::parse_str(id).is_err())) {
                 return Err("组织服务器目录包含越权组织、重复记录或无效连接字段".into());
             }
@@ -78,18 +104,26 @@ pub(crate) fn initialize(connection: &Connection) -> Result<(), String> {
 }
 
 pub(crate) fn decorate(connection: &Connection, servers: &mut [Server], now: i64) -> Result<(), String> {
-    let mut query = connection.prepare("SELECT local_id,account_id,company,remote_id,version,authorized_until,configured,reason FROM managed_servers").map_err(|e| e.to_string())?;
+    let mut query = connection.prepare("SELECT local_id,account_id,company,remote_id,version,authorized_until,configured,reason,definition_json,epoch FROM managed_servers").map_err(|e| e.to_string())?;
     let records = query.query_map([], |row| {
         let until: i64 = row.get(5)?;
         let configured: bool = row.get(6)?;
         let reason: Option<String> = row.get(7)?;
+        let encoded: String = row.get(8)?;
+        let definition: RemoteServer = serde_json::from_str(&encoded).map_err(|error| rusqlite::Error::FromSqlConversionFailure(8, rusqlite::types::Type::Text, Box::new(error)))?;
+        let configured = configured || definition.has_password;
         Ok((row.get::<_, String>(0)?, ManagedServer { account_id: row.get(1)?, company: row.get(2)?, remote_id: row.get(3)?, version: row.get(4)?,
+            has_password: definition.has_password, has_jump_password: definition.has_jump_password, credential_revision: definition.credential_revision, epoch: row.get(9)?,
             available: until > now && configured,
             reason: if until <= now { Some(reason.unwrap_or_else(|| EXPIRED.into())) } else if !configured { Some(AUTH_REQUIRED.into()) } else { None } }))
     }).map_err(|e| e.to_string())?.collect::<Result<HashMap<_, _>, _>>().map_err(|e| e.to_string())?;
     for server in servers {
         server.managed = records.get(&server.id).cloned();
         if let Some(managed) = &server.managed {
+            // Effective authentication only. Shared secrets and mode overrides
+            // never replace a member's local credentials on disk.
+            if managed.has_password { server.auth_method = "password".into(); server.identity_file = None; }
+            if managed.has_jump_password { server.proxy_use_password = true; server.save_proxy_password = false; }
             if !managed.available { server.status = "offline".into(); server.last_error = managed.reason.clone(); }
         }
     }
@@ -125,7 +159,7 @@ impl Database {
         for (id, owner, company, remote_id, encoded) in rows {
             let next = directory.servers.iter().find(|s| s.id == remote_id && s.company == company && s.enabled);
             let previous: RemoteServer = serde_json::from_str(&encoded).map_err(|_| "本机组织目录记录损坏")?;
-            if owner != account || next.is_none_or(|s| s.target_changed(&previous)) {
+            if owner != account || next.is_none_or(|s| s.target_changed(&previous) || s.credentials_changed(&previous)) {
                 connection.execute("UPDATE managed_servers SET authorized_until=0,epoch=epoch+1,reason='组织服务器权限或目标已变化，请重新验证' WHERE local_id=?1", [&id]).map_err(|e| e.to_string())?;
                 ids.push(id);
             }
@@ -165,11 +199,13 @@ impl Database {
             let previous = old.iter().find(|(_, owner, company, id, _, _, _)| owner == account && company == &remote.company && id == &remote.id);
             let id = previous.map(|p| p.0.clone()).unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
             let encoded = serde_json::to_string(remote).map_err(|e| e.to_string())?;
-            let mut target_changed = false;
+            let mut reset_local = false;
             if let Some((_, _, _, _, definition, until, _)) = previous {
                 let earlier: RemoteServer = serde_json::from_str(definition).map_err(|_| "本机组织目录记录损坏，原记录已保留")?;
                 if remote.version < earlier.version || (remote.version == earlier.version && remote != &earlier) { return Err("组织目录返回旧版本或冲突记录，请刷新后重试".into()); }
-                target_changed = remote.target_changed(&earlier);
+                if remote.credential_revision < earlier.credential_revision { return Err("组织目录返回旧认证版本，请刷新后重试".into()); }
+                reset_local = remote.target_changed(&earlier) || (earlier.has_password && !remote.has_password) || (earlier.has_jump_password && !remote.has_jump_password);
+                if remote.credentials_changed(&earlier) { reset.push(id.clone()); }
                 if remote != &earlier || (*until > now) != remote.enabled { affected.insert(id.clone()); }
                 transaction.execute("UPDATE servers SET name=?2,host=?3,port=?4,username=?5,proxy_jump=?6 WHERE id=?1", params![id, remote.name, remote.host, remote.port, remote.username, remote.proxy()]).map_err(|e| e.to_string())?;
             } else {
@@ -178,7 +214,7 @@ impl Database {
                     VALUES(?1,?2,?3,?4,?5,?6,'[]',10,90,'sshAgent','unknown',COALESCE((SELECT MAX(sort_order)+1 FROM servers),0))",
                     params![id, remote.name, remote.host, remote.port, remote.username, remote.proxy()]).map_err(|e| e.to_string())?;
             }
-            if target_changed {
+            if reset_local {
                 reset.push(id.clone());
                 transaction.execute("UPDATE servers SET credential_storage_state='none',auth_method='sshAgent',identity_file=NULL,ssh_alias=NULL,proxy_use_password=0,status='unknown',last_error=NULL,last_seen_at=NULL WHERE id=?1", [&id]).map_err(|e| e.to_string())?;
                 transaction.execute("DELETE FROM proxy_credentials WHERE server_id=?1", [&id]).map_err(|e| e.to_string())?;
@@ -186,7 +222,7 @@ impl Database {
             transaction.execute("INSERT INTO managed_servers(local_id,account_id,company,remote_id,definition_json,version,authorized_until,configured,reason)
                 VALUES(?1,?2,?3,?4,?5,?6,?7,0,?8) ON CONFLICT(local_id) DO UPDATE SET definition_json=excluded.definition_json,version=excluded.version,
                 authorized_until=excluded.authorized_until,configured=CASE WHEN ?9 THEN 0 ELSE managed_servers.configured END,reason=excluded.reason",
-                params![id, account, remote.company, remote.id, encoded, remote.version, if remote.enabled { now + LEASE_MS } else { 0 }, if remote.enabled { None } else { Some("此组织服务器已停用") }, target_changed]).map_err(|e| e.to_string())?;
+                params![id, account, remote.company, remote.id, encoded, remote.version, if remote.enabled { now + LEASE_MS } else { 0 }, if remote.enabled { None } else { Some("此组织服务器已停用") }, reset_local]).map_err(|e| e.to_string())?;
         }
         // Clear cached secrets before releasing the transaction / operation gate;
         // old keyring values remain inaccessible because persistence is disabled.
@@ -214,11 +250,21 @@ impl Database {
         Ok(ids)
     }
 
+    pub(crate) fn invalidate_managed_credentials(&self, server: &Server) -> Result<Vec<String>, String> {
+        let Some(managed) = &server.managed else { return Ok(Vec::new()); };
+        let connection = self.connection.lock().map_err(|e| e.to_string())?;
+        let changed = connection.execute("UPDATE managed_servers SET authorized_until=0,epoch=epoch+1,reason='无法领取管理员密码，请联网刷新或联系管理员' WHERE local_id=?1 AND epoch=?2 AND authorized_until>0", params![server.id, managed.epoch]).map_err(|e| e.to_string())?;
+        let ids = if changed > 0 { vec![server.id.clone()] } else { Vec::new() };
+        self.forget_managed_session_credentials(&ids)?;
+        if !ids.is_empty() { self.managed_changes.send_replace(()); }
+        Ok(ids)
+    }
+
     /// The save operation holds managed_gate through keyring/cache changes.
     pub(crate) fn validate_managed_draft(&self, draft: &ServerDraft) -> Result<bool, String> {
         let Some(id) = draft.id.as_deref() else { return Ok(false); };
         let Some(server) = self.list_servers()?.into_iter().find(|s| s.id == id) else { return Ok(false); };
-        if server.managed.is_none() { return Ok(false); }
+        let Some(managed) = &server.managed else { return Ok(false); };
         if draft.name.trim() != server.name || draft.host.trim() != server.host || draft.port != server.port || draft.username.trim() != server.username
             || draft.proxy_jump.as_deref().filter(|s| !s.trim().is_empty()).map(str::trim) != server.proxy_jump.as_deref()
             || draft.ssh_alias.as_deref().is_some_and(|s| !s.trim().is_empty()) || draft.location != server.location || draft.tags != server.tags {
@@ -226,7 +272,13 @@ impl Database {
         }
         if !matches!(draft.auth_method.as_str(), "sshAgent" | "password" | "privateKey") { return Err("组织服务器仅支持本机 SSH Agent、密码或私钥认证".into()); }
         if draft.auth_method == "privateKey" && draft.identity_file.as_deref().is_none_or(|s| s.trim().is_empty()) { return Err("请选择本机 SSH 私钥".into()); }
-        if draft.auth_method == "password" && draft.password.as_deref().is_none_or(str::is_empty) && self.get_password(id, false)?.is_none() { return Err("请重新输入此组织服务器的 SSH 密码".into()); }
+        if managed.has_password && (draft.auth_method != "password" || draft.password.as_deref().is_some_and(|s| !s.is_empty()) || draft.save_password || draft.identity_file.as_deref().is_some_and(|s| !s.is_empty())) {
+            return Err("此服务器使用管理员密码，请在网页由管理员修改".into());
+        }
+        if managed.has_jump_password && (!draft.proxy_use_password || draft.proxy_password.as_deref().is_some_and(|s| !s.is_empty()) || draft.save_proxy_password) {
+            return Err("此跳板机使用管理员密码，请在网页由管理员修改".into());
+        }
+        if !managed.has_password && draft.auth_method == "password" && draft.password.as_deref().is_none_or(str::is_empty) && self.get_password(id, false)?.is_none() { return Err("请重新输入此组织服务器的 SSH 密码".into()); }
         Ok(true)
     }
 
@@ -262,7 +314,8 @@ impl Database {
         if server.managed.is_none() { return Ok(()); }
         let actual = self.get_server(&server.id)?;
         if actual.host != server.host || actual.port != server.port || actual.username != server.username || actual.proxy_jump != server.proxy_jump
-            || actual.auth_method != server.auth_method || actual.identity_file != server.identity_file {
+            || actual.auth_method != server.auth_method || actual.identity_file != server.identity_file || actual.proxy_use_password != server.proxy_use_password
+            || actual.managed.as_ref().zip(server.managed.as_ref()).is_none_or(|(a,b)| a.account_id != b.account_id || a.company != b.company || a.remote_id != b.remote_id || a.epoch != b.epoch || a.credential_revision != b.credential_revision || a.has_password != b.has_password || a.has_jump_password != b.has_jump_password) {
             return Err("组织服务器配置已变化，请重新打开连接".into());
         }
         Ok(())
@@ -310,6 +363,78 @@ mod tests {
     fn database() -> (tempfile::TempDir, Database) { let dir = tempfile::tempdir().unwrap(); let db = Database::open(&dir.path().join("test.sqlite")).unwrap(); (dir,db) }
     fn draft(server: &Server) -> ServerDraft { ServerDraft { id:Some(server.id.clone()),name:server.name.clone(),location:server.location.clone(),host:server.host.clone(),port:server.port,username:server.username.clone(),ssh_alias:None,identity_file:None,proxy_jump:server.proxy_jump.clone(),proxy_use_password:false,tags:server.tags.clone(),sampling_interval_seconds:10,history_retention_days:90,remote_history_enabled:false,auth_method:"sshAgent".into(),password:None,save_password:false,proxy_password:None,save_proxy_password:false } }
     fn configured(db: &Database, row: serde_json::Value) -> Server { db.apply_directory("account-a", &directory(vec![row],"A公司"), now_ms()).unwrap(); let server = db.list_servers().unwrap().pop().unwrap(); db.save_server(draft(&server)).unwrap() }
+
+    fn shared(mut row: serde_json::Value, target: bool, jump: bool, revision: u64) -> Directory {
+        row["hasPassword"] = json!(target); row["hasJumpPassword"] = json!(jump); row["credentialRevision"] = json!(revision);
+        Directory::parse(json!({"schemaVersion":2,"revision":"b".repeat(64),"servers":[row]}),"A公司").unwrap()
+    }
+
+    #[test]
+    fn shared_directory_is_explicit_and_cannot_contain_secret_fields() {
+        let mut row = remote(1, "node.example");
+        assert!(Directory::parse(json!({"schemaVersion":2,"revision":"a".repeat(64),"servers":[row.clone()]}),"A公司").is_err());
+        row["hasPassword"]=json!(true); row["hasJumpPassword"]=json!(false); row["credentialRevision"]=json!(1);
+        assert!(Directory::parse(json!({"schemaVersion":1,"revision":"a".repeat(64),"servers":[row.clone()]}),"A公司").is_err());
+        row["password"]=json!("do-not-persist-fixture");
+        assert!(Directory::parse(json!({"schemaVersion":2,"revision":"a".repeat(64),"servers":[row.clone()]}),"A公司").is_err());
+        row.as_object_mut().unwrap().remove("password"); row["hasJumpPassword"]=json!(true);
+        assert!(Directory::parse(json!({"schemaVersion":2,"revision":"a".repeat(64),"servers":[row]}),"A公司").is_err());
+    }
+
+    #[test]
+    fn shared_password_is_ready_without_local_auth_and_cannot_be_overridden_or_cached() {
+        let (_dir,db)=database(); let mut row=remote(1,"node.example");
+        row["jump"]=json!({"host":"jump.example","port":22,"username":"hop"});
+        db.apply_directory("account-a",&shared(row,true,true,1),now_ms()).unwrap();
+        let server=db.list_servers().unwrap().pop().unwrap();
+        assert!(server.managed.as_ref().unwrap().available); assert_eq!(server.auth_method,"password"); assert!(server.proxy_use_password);
+        assert!(db.get_ssh_passwords(&server,false).is_err());
+        db.session_passwords.lock().unwrap().insert(server.id.clone(),"stale-local-target".into());
+        db.session_passwords.lock().unwrap().insert(format!("proxy:{}",server.id),"stale-local-hop".into());
+        let local=db.local_ssh_passwords(&server,false).unwrap().unwrap(); assert!(local.target.is_none() && local.proxy.is_none());
+        let mut settings=draft(&server); settings.auth_method="password".into(); settings.proxy_use_password=true;
+        db.save_server(settings.clone()).unwrap();
+        assert_eq!(db.connection.lock().unwrap().query_row("SELECT auth_method FROM servers WHERE id=?1",[&server.id],|r|r.get::<_,String>(0)).unwrap(),"sshAgent");
+        settings.password=Some("member-override".into()); assert!(db.save_server(settings.clone()).is_err());
+        settings.password=None; settings.proxy_password=Some("member-hop-override".into()); assert!(db.save_server(settings).is_err());
+    }
+
+    #[tokio::test]
+    async fn shared_password_rotation_cancels_old_operations_and_clear_requires_local_reconfirmation() {
+        let (_dir,db)=database(); let mut row=remote(1,"node.example");
+        db.apply_directory("account-a",&shared(row.clone(),true,false,1),now_ms()).unwrap();
+        let server=db.list_servers().unwrap().pop().unwrap();
+        let old_epoch=db.managed_epoch(&server.id).unwrap();
+        let rotate=async {
+            tokio::task::yield_now().await;
+            row["version"]=json!(2);
+            db.apply_directory("account-a",&shared(row.clone(),true,false,2),now_ms()).unwrap();
+        };
+        let servers=[&server];
+        let operation=authorized(&db,&servers,std::future::pending::<Result<(),String>>());
+        let (result,())=tokio::time::timeout(std::time::Duration::from_secs(1),async{tokio::join!(operation,rotate)}).await.unwrap();
+        assert!(result.is_err()); assert_ne!(db.managed_epoch(&server.id).unwrap(),old_epoch);
+        assert!(db.check_managed_server(&server).is_err());
+        let fresh=db.get_server(&server.id).unwrap(); assert!(fresh.managed.as_ref().unwrap().available);
+        row["version"]=json!(3);
+        db.apply_directory("account-a",&shared(row,false,false,3),now_ms()).unwrap();
+        assert!(db.get_server(&server.id).is_err());
+        let local=db.list_servers().unwrap().pop().unwrap(); assert_eq!(local.auth_method,"sshAgent");
+        assert!(db.save_server(draft(&local)).unwrap().managed.unwrap().available);
+    }
+
+    #[test]
+    fn jump_only_shared_password_preserves_confirmed_local_target_authentication() {
+        let (_dir,db)=database(); let mut row=remote(1,"node.example");
+        row["jump"]=json!({"host":"jump.example","port":22,"username":"hop"});
+        db.apply_directory("account-a",&shared(row.clone(),false,true,1),now_ms()).unwrap();
+        let server=db.list_servers().unwrap().pop().unwrap(); assert!(!server.managed.as_ref().unwrap().available);
+        let mut local=draft(&server);local.proxy_use_password=true;
+        let server=db.save_server(local).unwrap(); assert!(server.managed.as_ref().unwrap().available);
+        row["version"]=json!(2);
+        db.apply_directory("account-a",&shared(row,false,true,2),now_ms()).unwrap();
+        assert!(db.get_server(&server.id).unwrap().managed.unwrap().available);
+    }
 
     #[test]
     fn directory_rejects_unsafe_fields_and_wrong_scope_before_writing() {

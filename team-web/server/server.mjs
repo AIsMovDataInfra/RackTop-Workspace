@@ -9,6 +9,7 @@ import { createNotifier } from './notifier.mjs';
 import { createEquipmentStore } from './equipment-store.mjs';
 import { createWorkspaceStore } from './workspace-store.mjs';
 import { createManagedServerStore } from './managed-server-store.mjs';
+import { parseServerCredentialKey } from './server-credentials.mjs';
 import { validateEquipmentTarget, collectRequestedEquipment } from './equipment-workflow.mjs';
 import { compressEquipmentPhoto, validatePhotoBody } from './equipment-photo.mjs';
 
@@ -32,6 +33,7 @@ export function readConfig(env = process.env) {
     feishuWebhookUrl: env.FEISHU_WEBHOOK_URL || '', feishuWebhookSecret: env.FEISHU_WEBHOOK_SECRET || '',
     notificationsConfigured: Boolean(env.FEISHU_WEBHOOK_URL),
     adminUsername: env.TEAM_ADMIN_USERNAME || '', bootstrapToken: env.TEAM_BOOTSTRAP_TOKEN || '',
+    serverCredentialKey: env.TEAM_SERVER_CREDENTIAL_KEY || '',
     trustProxy: env.TEAM_TRUST_PROXY === 'true', nodeEnv: env.NODE_ENV,
   };
 }
@@ -46,6 +48,7 @@ function validateConfig(config) {
   if (config.mode === 'demo' && (!loopbacks.has(config.host) || !loopbacks.has(publicUrl.hostname))) throw new Error('演示模式只能监听和使用 loopback 地址，不能公开部署');
   if (config.mode === 'feishu' && (publicUrl.protocol !== 'https:' || !config.feishuAppId || !config.feishuAppSecret || !config.feishuTenantKeys?.length)) throw new Error('正式部署必须配置 HTTPS 地址、飞书应用和企业租户白名单');
   if (config.mode === 'account' && publicUrl.protocol !== 'https:' && !loopbacks.has(publicUrl.hostname)) throw new Error('账号登录公网服务必须使用 HTTPS');
+  if (config.mode === 'account') parseServerCredentialKey(config.serverCredentialKey);
   return publicUrl;
 }
 
@@ -66,6 +69,9 @@ function errorResponse(res, error) {
   if (res.headersSent) { res.destroy(); return; }
   const status = Number.isInteger(error?.status) && error.status >= 400 && error.status <= 599 ? error.status : 500;
   const safe = status < 500;
+  if (status === 503 && error.code === 'CREDENTIALS_UNAVAILABLE') {
+    json(res, status, { error: { code: 'CREDENTIALS_UNAVAILABLE', message: '共享密码暂不可用，请联系管理员检查服务配置' } }); return;
+  }
   json(res, status, { error: { code: safe ? (error.code || 'REQUEST_FAILED') : (status === 503 ? 'SERVICE_UNAVAILABLE' : 'INTERNAL_ERROR'), message: safe ? error.message : (status === 503 ? '服务暂时繁忙，请稍后重试' : '服务暂时无法完成请求，请稍后重试'), ...(safe && error.conflicts ? { conflicts: error.conflicts } : {}) } });
 }
 async function readBody(req, limit = 64 * 1024) {
@@ -95,7 +101,7 @@ export function createTeamServer(overrides = {}) {
   const equipmentStore = createEquipmentStore({ dbPath: config.dbPath, now: config.now, enforceCompanies: config.mode === 'account' });
   const workspaceStore = createWorkspaceStore({ dbPath: config.dbPath, now: config.now, resolveMember: id => auth.getMemberIdentity?.(id),
     validateEquipmentTarget, onCollectEquipment: value => collectRequestedEquipment({ ...value, resolveMember: id => auth.getMemberIdentity?.(id) }) });
-  const managedServerStore = config.mode === 'account' ? createManagedServerStore({ dbPath: config.dbPath, now: config.now }) : null;
+  const managedServerStore = config.mode === 'account' ? createManagedServerStore({ dbPath: config.dbPath, now: config.now, serverCredentialKey: config.serverCredentialKey }) : null;
   if (config.mode === 'demo' && config.seedDemo !== false) store.seedDemo();
   let timer, closing = false, notificationRun = null, closeRun = null;
   const handlers = new Set();
@@ -176,24 +182,34 @@ export function createTeamServer(overrides = {}) {
       if (url.pathname === '/api/servers' || url.pathname.startsWith('/api/servers/')) {
         if (!managedServerStore) throw new ApiError(403, 'ACCOUNT_REQUIRED', '请使用团队账号登录服务器目录');
         const canFilter = req.method === 'GET' && ['/api/servers', '/api/servers/members'].includes(url.pathname);
-        if ((url.search && !canFilter) || [...url.searchParams.keys()].some(key => key !== 'company') || url.searchParams.getAll('company').length > 1 || (url.searchParams.has('company') && !ACCOUNT_COMPANIES.includes(url.searchParams.get('company')))) throw new ApiError(422, 'INVALID_INPUT', '服务器查询参数无效');
+        const canSelectSchema = url.pathname !== '/api/servers/members' && !url.pathname.endsWith('/credentials');
+        if ([...url.searchParams.keys()].some(key => !['company', 'schema'].includes(key))
+          || url.searchParams.getAll('company').length > 1 || url.searchParams.getAll('schema').length > 1
+          || (url.searchParams.has('company') && (!canFilter || !ACCOUNT_COMPANIES.includes(url.searchParams.get('company'))))
+          || (url.searchParams.has('schema') && (!canSelectSchema || !['1', '2'].includes(url.searchParams.get('schema'))))) throw new ApiError(422, 'INVALID_INPUT', '服务器查询参数无效');
         const company = url.searchParams.get('company') ?? undefined;
+        const schema = Number(url.searchParams.get('schema') ?? 1);
         if (url.pathname === '/api/servers') {
-          if (req.method === 'GET') { json(res, 200, managedServerStore.list(user, company)); return; }
-          if (req.method === 'POST') { json(res, 201, { server: managedServerStore.create(body, user) }); return; }
+          if (req.method === 'GET') { json(res, 200, managedServerStore.list(user, company, schema)); return; }
+          if (req.method === 'POST') { json(res, 201, { server: managedServerStore.create(body, user, schema) }); return; }
         }
         if (url.pathname === '/api/servers/members' && req.method === 'GET') {
           json(res, 200, { members: managedServerStore.members(user, company) }); return;
         }
         if (url.pathname === '/api/servers/import' && req.method === 'POST') {
-          json(res, 200, managedServerStore.importServers(body, user)); return;
+          json(res, 200, managedServerStore.importServers(body, user, schema)); return;
         }
-        const serverMatch = /^\/api\/servers\/([a-f0-9-]{36})(?:\/(grants))?$/.exec(url.pathname);
+        const serverMatch = /^\/api\/servers\/([a-f0-9-]{36})(?:\/(grants|credentials))?$/.exec(url.pathname);
         if (serverMatch) {
           const [, id, action] = serverMatch;
-          if (!action && req.method === 'GET') { json(res, 200, { server: managedServerStore.get(id, user) }); return; }
-          if (!action && req.method === 'PATCH') { json(res, 200, { server: managedServerStore.update(id, body, user) }); return; }
-          if (action === 'grants' && req.method === 'PUT') { json(res, 200, { server: managedServerStore.grant(id, body, user) }); return; }
+          if (!action && req.method === 'GET') { json(res, 200, { server: managedServerStore.get(id, user, schema) }); return; }
+          if (!action && req.method === 'PATCH') { json(res, 200, { server: managedServerStore.update(id, body, user, schema) }); return; }
+          if (action === 'grants' && req.method === 'PUT') { json(res, 200, { server: managedServerStore.grant(id, body, user, schema) }); return; }
+          if (action === 'credentials' && req.method === 'POST') {
+            if (session.kind !== 'device') throw new ApiError(403, 'DEVICE_REQUIRED', '共享密码仅供已登录的桌面客户端连接使用');
+            if (typeof req.headers['x-racktop-company'] !== 'string') throw new ApiError(409, 'COMPANY_CHANGED', '请刷新当前组织后重试');
+            json(res, 200, managedServerStore.credentials(id, body, user)); return;
+          }
         }
         throw new ApiError(405, 'METHOD_NOT_ALLOWED', '服务器目录不支持此操作');
       }

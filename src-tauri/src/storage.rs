@@ -766,6 +766,9 @@ impl Database {
         let _gate = self.managed_gate.lock().map_err(|e| e.to_string())?;
         let credential_epoch = draft.id.as_deref().map(|id| self.managed_epoch(id)).transpose()?.flatten();
         let managed = self.validate_managed_draft(&draft)?;
+        let sources = if managed { self.list_servers()?.into_iter().find(|s| Some(s.id.as_str()) == draft.id.as_deref()).and_then(|s| s.managed) } else { None };
+        let shared_target = sources.as_ref().is_some_and(|s| s.has_password);
+        let shared_proxy = sources.as_ref().is_some_and(|s| s.has_jump_password);
         if draft.host.trim().is_empty() || draft.username.trim().is_empty() {
             return Err("主机地址和用户名不能为空".into());
         }
@@ -780,7 +783,7 @@ impl Database {
         }
         let id = draft.id.clone().unwrap_or_else(|| Uuid::new_v4().to_string());
         let proxy_jump = draft.proxy_jump.clone().filter(|value| !value.trim().is_empty()).map(|value| value.trim().to_owned());
-        if draft.proxy_use_password {
+        if draft.proxy_use_password && !shared_proxy {
             if !cfg!(any(target_os = "linux", target_os = "macos")) { return Err("独立跳板机密码目前仅支持 Linux 和 macOS 客户端".into()); }
             let proxy = proxy_jump.as_deref().ok_or("请填写跳板机地址")?;
             crate::ssh_connection::parse_jump(proxy)?;
@@ -804,12 +807,15 @@ impl Database {
         connection.execute(
             "INSERT INTO servers (id,name,location,host,port,username,ssh_alias,identity_file,proxy_jump,tags_json,sampling_interval_seconds,history_retention_days,remote_history_enabled,auth_method,status,sort_order,proxy_use_password)
              VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,'unknown',COALESCE((SELECT MAX(sort_order)+1 FROM servers),0),?15)
-             ON CONFLICT(id) DO UPDATE SET name=excluded.name,location=excluded.location,host=excluded.host,port=excluded.port,username=excluded.username,ssh_alias=excluded.ssh_alias,identity_file=excluded.identity_file,proxy_jump=excluded.proxy_jump,tags_json=excluded.tags_json,sampling_interval_seconds=excluded.sampling_interval_seconds,history_retention_days=excluded.history_retention_days,remote_history_enabled=excluded.remote_history_enabled,auth_method=excluded.auth_method,proxy_use_password=excluded.proxy_use_password",
-            params![id, name, blank_to_none(draft.location), draft.host.trim(), draft.port, draft.username.trim(), blank_to_none(draft.ssh_alias), blank_to_none(draft.identity_file), blank_to_none(draft.proxy_jump), tags, draft.sampling_interval_seconds.max(2), draft.history_retention_days.max(1), draft.remote_history_enabled, draft.auth_method, draft.proxy_use_password],
+             ON CONFLICT(id) DO UPDATE SET name=excluded.name,location=excluded.location,host=excluded.host,port=excluded.port,username=excluded.username,ssh_alias=excluded.ssh_alias,identity_file=CASE WHEN ?16 THEN servers.identity_file ELSE excluded.identity_file END,proxy_jump=excluded.proxy_jump,tags_json=excluded.tags_json,sampling_interval_seconds=excluded.sampling_interval_seconds,history_retention_days=excluded.history_retention_days,remote_history_enabled=excluded.remote_history_enabled,auth_method=CASE WHEN ?16 THEN servers.auth_method ELSE excluded.auth_method END,proxy_use_password=CASE WHEN ?17 THEN servers.proxy_use_password ELSE excluded.proxy_use_password END",
+            params![id, name, blank_to_none(draft.location), draft.host.trim(), draft.port, draft.username.trim(), blank_to_none(draft.ssh_alias), blank_to_none(draft.identity_file), blank_to_none(draft.proxy_jump), tags, draft.sampling_interval_seconds.max(2), draft.history_retention_days.max(1), draft.remote_history_enabled, draft.auth_method, draft.proxy_use_password, shared_target, shared_proxy],
         ).map_err(|error| error.to_string())?;
         drop(connection);
 
-        if draft.auth_method == "password" {
+        if shared_target {
+            // This form edits local sampling settings; administrator credentials
+            // are never copied to the session cache or operating system keyring.
+        } else if draft.auth_method == "password" {
             if let Some(password) = draft.password.filter(|value| !value.is_empty()) {
                 self.session_passwords.lock().map_err(|error| error.to_string())?.insert(id.clone(), password.clone());
                 self.credential_errors.lock().map_err(|error| error.to_string())?.remove(&id);
@@ -826,7 +832,7 @@ impl Database {
             self.credential_errors.lock().map_err(|error| error.to_string())?.remove(&id);
             self.set_credential_storage_state(&id, "none")?;
         }
-        self.save_proxy_credentials(&id, proxy_jump.as_deref(), draft.proxy_use_password, draft.proxy_password.as_deref(), draft.save_proxy_password)?;
+        if !shared_proxy { self.save_proxy_credentials(&id, proxy_jump.as_deref(), draft.proxy_use_password, draft.proxy_password.as_deref(), draft.save_proxy_password)?; }
         if managed && self.managed_epoch(&id)? != credential_epoch {
             self.forget_managed_session_credentials(std::slice::from_ref(&id))?;
             return Err("团队权限在保存认证时发生变化，请刷新后重试".into());
@@ -1006,9 +1012,16 @@ impl Database {
     }
 
     pub fn get_ssh_passwords(&self, server: &Server, allow_prompt: bool) -> Result<Option<crate::ssh_connection::SshPasswords>, String> {
+        if server.managed.as_ref().is_some_and(|m| m.has_password || m.has_jump_password) {
+            return Err("管理员密码须在连接前联网验证，请重新发起连接".into());
+        }
+        self.local_ssh_passwords(server, allow_prompt)
+    }
+
+    pub(crate) fn local_ssh_passwords(&self, server: &Server, allow_prompt: bool) -> Result<Option<crate::ssh_connection::SshPasswords>, String> {
         self.with_managed_credentials(server, || {
-            let target = if server.auth_method == "password" { self.get_password(&server.id, allow_prompt)? } else { None };
-            let proxy = if server.proxy_use_password {
+            let target = if server.auth_method == "password" && !server.managed.as_ref().is_some_and(|m| m.has_password) { self.get_password(&server.id, allow_prompt)? } else { None };
+            let proxy = if server.proxy_use_password && !server.managed.as_ref().is_some_and(|m| m.has_jump_password) {
                 self.get_proxy_password(&server.id, server.proxy_jump.as_deref().ok_or("请填写跳板机地址")?, allow_prompt)?
             } else { None };
             Ok(Some(crate::ssh_connection::SshPasswords { target, proxy }))

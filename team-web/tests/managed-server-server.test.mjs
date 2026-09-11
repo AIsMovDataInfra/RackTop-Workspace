@@ -19,15 +19,23 @@ const importRow = (extra = {}) => ({ name: '导入节点', host: 'import.interna
 const importBatch = (servers = [importRow()], extra = {}) => ({ company: 'A公司', memberIds: [], servers, ...extra });
 const catalogState = db => Object.fromEntries(['managed_servers', 'managed_server_grants', 'managed_server_audit']
   .map(table => [table, db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()]));
+const privateState = db => ({ ...catalogState(db), credentials: db.prepare('SELECT * FROM managed_server_credentials ORDER BY server_id,slot').all() });
+const versions = server => ({ version: server.version, credentialRevision: server.credentialRevision });
+async function deviceLogin(call, name, company = 'A公司', password = '密') {
+  const result = await call('/api/auth/device-login', { method: 'POST', body: { username: name, password, deviceName: '共享密码测试设备' } });
+  assert.equal(result.status, 200, result.text);
+  if (result.body.user.company !== company) assert.equal((await call('/api/auth/company', { method: 'POST', token: result.body.token, body: { company } })).status, 200);
+  return { token: result.body.token, headers: { 'x-racktop-company': encodeURIComponent(company ?? '') } };
+}
 
-async function fixture(t, prepare) {
+async function fixture(t, prepare, config = {}) {
   const directory = mkdtempSync(join(tmpdir(), 'racktop-managed-servers-'));
   const dbPath = join(directory, 'team.sqlite'), distPath = join(directory, 'dist');
   mkdirSync(distPath); writeFileSync(join(distPath, 'index.html'), '<!doctype html><title>Server catalog fixture</title>');
   if (prepare) await prepare(dbPath, directory);
   const bootstrapToken = randomBytes(32).toString('base64url'), password = randomBytes(24).toString('base64url');
   const app = createTeamServer({ mode: 'account', host: '127.0.0.1', port: 0, publicUrl: PUBLIC, dbPath, distPath,
-    nodeEnv: 'production', bootstrapToken, now: () => NOW });
+    nodeEnv: 'production', bootstrapToken, now: () => NOW, ...config });
   await app.auth.provisionSuperAdmin({ mode: 'create', password });
   const { port } = await app.start();
   t.after(async () => { await app.close(); rmSync(directory, { recursive: true, force: true }); });
@@ -69,7 +77,7 @@ async function fixture(t, prepare) {
     assert.equal(session.user.role, 'admin'); assert.equal(session.user.isSuperAdmin, false);
     return { member: assigned.body.member, session };
   };
-  return { app, call, admin, add, localAdmin, login, anonymous, dbPath, directory };
+  return { app, call, admin, add, localAdmin, login, anonymous, dbPath, directory, loginAdminDevice: () => deviceLogin(call, 'admin', null, password) };
 }
 
 test('server catalog administrators create, update and explicitly grant metadata with optimistic version checks', async t => {
@@ -192,7 +200,7 @@ test('SSH configuration accepts only structured destinations and rejects credent
   const server = created.body.server, path = `/api/servers/${server.id}`;
   assert.deepEqual(server.jump, { host: 'bastion.internal.example', port: 2200, username: 'jump_user' });
   const invalidFields = [
-    { password: 'synthetic-rejected-password' }, { privateKey: 'synthetic-rejected-key' }, { private_key_path: '/tmp/key' },
+    { password: { invalid: 'synthetic-rejected-password' } }, { privateKey: 'synthetic-rejected-key' }, { private_key_path: '/tmp/key' },
     { privateKeyPath: '/tmp/key' }, { identityFile: '/tmp/key' }, { ssh_config_path: '/tmp/config' },
     { proxyCommand: 'sh -c unwanted' }, { options: ['-oProxyCommand=unwanted'] }, { proxy_jump: 'user@host -oX=y' },
     { host: '-oProxyCommand=unwanted' }, { host: 'user@host' }, { host: 'host;command' }, { host: 'host\nProxyCommand=unwanted' },
@@ -209,7 +217,7 @@ test('SSH configuration accepts only structured destinations and rejects credent
     const rejected = await call('/api/servers', { method: 'POST', session: admin, body: draft(bad) });
     assert.equal(rejected.status, 422, JSON.stringify(bad));
   }
-  for (const bad of [{ password: 'secret' }, { company: 'B公司' }, { memberIds: [] }, { jump: { host: 'jump', port: 22, username: 'user', options: '-J x' } }]) {
+  for (const bad of [{ password: 12 }, { company: 'B公司' }, { memberIds: [] }, { jump: { host: 'jump', port: 22, username: 'user', options: '-J x' } }]) {
     assert.equal((await call(path, { method: 'PATCH', session: admin, body: { version: 1, ...bad } })).status, 422);
   }
   const cleared = await call(path, { method: 'PATCH', session: admin, body: { version: 1, jump: null } });
@@ -518,7 +526,7 @@ test('batch import retains the 64 KiB request limit, 50-row limit and strict rou
 test('company capacity counts only new unique connections, rejects overflow atomically and accepts 50 rows in another company', async t => {
   const { call, admin, dbPath } = await fixture(t);
   const db = new DatabaseSync(dbPath); t.after(() => db.close());
-  const insert = db.prepare('INSERT INTO managed_servers VALUES(?,?,?,?,?,?,?,?,1,?,?)');
+  const insert = db.prepare('INSERT INTO managed_servers (id,company,name,host,port,username,jump_json,enabled,version,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,1,?,?)');
   const at = new Date(NOW).toISOString();
   db.exec('BEGIN');
   for (let i = 0; i < 499; i++) insert.run(randomUUID(), 'A公司', `已有${i}`, `seed-${i}.example`, 22, 'researcher', null, 1, at, at);
@@ -540,4 +548,224 @@ test('company capacity counts only new unique connections, rejects overflow atom
   assert.equal(another.status, 200, another.text); assert.equal(another.body.servers.length, 50); assert.equal(another.body.skipped, 0);
   assert.equal(db.prepare("SELECT COUNT(*) n FROM managed_servers WHERE company='A公司'").get().n, 500);
   assert.equal(db.prepare("SELECT COUNT(*) n FROM managed_servers WHERE company='B公司'").get().n, 50);
+});
+
+test('shared passwords remain encrypted and absent from legacy/schema-2 metadata, and only authorized devices resolve them', async t => {
+  const key = randomBytes(32).toString('base64');
+  const { call, admin, add, localAdmin, dbPath, loginAdminDevice } = await fixture(t, undefined, { serverCredentialKey: key });
+  const maintainer = await localAdmin(), reader = await add('密码授权成员'), peer = await add('密码未授权成员');
+  const outsider = await add('跨组织密码成员', ['B公司']);
+  const password = '  synthetic target 密码 $"\\  ', jumpPassword = 'synthetic jump 密码';
+  const created = await call('/api/servers?schema=2', { method: 'POST', session: maintainer.session,
+    body: draft({ password, jumpPassword, jump: { host: 'jump.example', port: 22, username: 'bridge' }, memberIds: [reader.member.id] }) });
+  assert.equal(created.status, 201, created.text);
+  const server = created.body.server, path = `/api/servers/${server.id}`;
+  assert.equal(server.credentialRevision, 1); assert.equal(server.hasPassword, true); assert.equal(server.hasJumpPassword, true);
+  for (const session of [admin, maintainer.session, reader.session]) {
+    for (const suffix of ['', '?schema=1', '?schema=2']) {
+      for (const route of ['/api/servers', path]) {
+        const response = await call(`${route}${suffix}`, { session });
+        assert.equal(response.status, 200, response.text);
+        assert.equal(response.text.includes(password), false); assert.equal(response.text.includes(jumpPassword), false);
+        assert.equal(response.text.includes('ciphertext'), false); assert.equal(response.text.includes('key_id'), false);
+        const row = response.body.server ?? response.body.servers[0];
+        assert.equal(Object.hasOwn(row, 'hasPassword'), suffix === '?schema=2');
+        assert.equal(Object.hasOwn(row, 'credentialRevision'), suffix === '?schema=2');
+        if (route === '/api/servers') assert.equal(response.body.schemaVersion, suffix === '?schema=2' ? 2 : 1);
+      }
+    }
+    const browserRead = await call(`${path}/credentials`, { method: 'POST', session, body: versions(server) });
+    assert.equal(browserRead.status, 403); assert.equal(browserRead.body.error.code, 'DEVICE_REQUIRED');
+  }
+  const device = await deviceLogin(call, reader.member.name);
+  const response = await call(`${path}/credentials`, { ...device, method: 'POST', body: versions(server) });
+  assert.equal(response.status, 200, response.text); assert.equal(response.headers['cache-control'], 'no-store');
+  assert.deepEqual(response.body, { serverId: server.id, company: 'A公司', ...versions(server), password, jumpPassword });
+  const adminDevice = await deviceLogin(call, maintainer.member.name);
+  assert.equal((await call(`${path}/credentials`, { ...adminDevice, method: 'POST', body: versions(server) })).status, 200);
+  const superDevice = await loginAdminDevice();
+  assert.equal((await call(`${path}/credentials`, { ...superDevice, method: 'POST', body: versions(server) })).status, 200, 'superadmin device uses explicit empty active-company scope');
+  const otherServer = (await call('/api/servers?schema=2', { session: admin, method: 'POST', body: draft({ company: 'B公司', password: 'synthetic-other-company' }) })).body.server;
+  assert.equal((await call(`/api/servers/${otherServer.id}/credentials`, { ...superDevice, method: 'POST', body: versions(otherServer) })).status, 200);
+  assert.equal((await call(`${path}?schema=2`, { session: reader.session, method: 'PATCH', body: { version: 1, password: 'cannot-overwrite' } })).status, 403);
+  assert.equal((await call(`/api/servers/${otherServer.id}?schema=2`, { session: maintainer.session, method: 'PATCH', body: { version: 1, password: 'cannot-cross-company' } })).status, 404);
+  assert.equal((await call(`${path}?schema=2`, { session: admin, headers: { 'x-csrf-token': 'invalid' }, method: 'PATCH', body: { version: 1, password: 'cannot-bypass-csrf' } })).status, 403);
+  for (const member of [peer, outsider]) {
+    const auth = await deviceLogin(call, member.member.name, member.session.user.company);
+    const rejected = await call(`${path}/credentials`, { ...auth, method: 'POST', body: versions(server) });
+    assert.equal(rejected.status, 404, rejected.text); assert.equal(rejected.text.includes(password), false);
+  }
+  assert.equal((await call(`${path}/credentials`, { method: 'POST', body: versions(server) })).status, 401);
+  assert.equal((await call(`${path}/credentials`, { token: device.token, method: 'POST', body: versions(server) })).status, 409, 'legacy device scope is insufficient for secret reads');
+  for (const headers of [{ 'x-racktop-company': encodeURIComponent('B公司') }, { 'x-racktop-company': '%broken' }, { ...device.headers, origin: 'https://evil.example' }]) {
+    assert.notEqual((await call(`${path}/credentials`, { token: device.token, headers, method: 'POST', body: versions(server) })).status, 200);
+  }
+  for (const body of [{ ...versions(server), password: 'reflected-value' }, { version: 1 }, { version: 1, credentialRevision: -1 }]) {
+    assert.equal((await call(`${path}/credentials`, { ...device, method: 'POST', body })).status, 422);
+  }
+  for (const route of [`${path}/credentials?schema=2`, '/api/servers?schema=3', '/api/servers?schema=2&schema=2', '/api/servers/members?schema=2']) {
+    const secret = route.includes('/credentials');
+    assert.equal((await call(route, { ...(secret ? device : { session: admin }), method: secret ? 'POST' : 'GET', body: secret ? versions(server) : undefined })).status, 422);
+  }
+  const db = new DatabaseSync(dbPath); t.after(() => db.close());
+  const rows = db.prepare('SELECT * FROM managed_server_credentials').all();
+  assert.equal(rows.length, 3);
+  for (const row of rows) { assert.equal(row.nonce.length, 12); assert.equal(row.auth_tag.length, 16); assert.equal(row.format_version, 1); }
+  const persisted = JSON.stringify(privateState(db));
+  assert.equal(persisted.includes(password), false); assert.equal(persisted.includes(jumpPassword), false); assert.equal(persisted.includes(key), false);
+  const before = privateState(db);
+  const duplicate = await call('/api/servers/import?schema=2', { method: 'POST', session: admin,
+    body: importBatch([importRow({ host: server.host, jump: server.jump })]) });
+  assert.equal(duplicate.status, 200); assert.equal(duplicate.body.skipped, 1); assert.deepEqual(privateState(db), before, 'duplicate imports retain password and grants');
+});
+
+test('credential rotation is versioned and endpoint changes clear only their matching password atomically', async t => {
+  const { call, admin, add, dbPath } = await fixture(t, undefined, { serverCredentialKey: randomBytes(32).toString('base64') });
+  const reader = await add('轮换成员'), device = await deviceLogin(call, reader.member.name);
+  let server = (await call('/api/servers?schema=2', { method: 'POST', session: admin,
+    body: draft({ password: 'target-one', jumpPassword: 'jump-one', jump: { host: 'jump.example', port: 22, username: 'bridge' }, memberIds: [reader.member.id] }) })).body.server;
+  const path = `/api/servers/${server.id}`, resolve = row => call(`${path}/credentials`, { ...device, method: 'POST', body: versions(row) });
+  const update = async input => {
+    const response = await call(`${path}?schema=2`, { method: 'PATCH', session: admin, body: { version: server.version, ...input } });
+    assert.equal(response.status, 200, response.text); server = response.body.server; return server;
+  };
+  const original = server;
+  await update({ password: 'target-two' });
+  assert.equal(server.credentialRevision, 2); assert.equal((await resolve(original)).status, 409);
+  assert.deepEqual((await resolve(server)).body, { serverId: server.id, company: 'A公司', ...versions(server), password: 'target-two', jumpPassword: 'jump-one' });
+  await update({ name: '更名保留密码' }); assert.equal(server.credentialRevision, 2);
+  assert.equal((await resolve(server)).body.password, 'target-two');
+  const db = new DatabaseSync(dbPath); t.after(() => db.close());
+  let before = privateState(db);
+  const conflict = await call(`${path}?schema=2`, { method: 'PATCH', session: admin, body: { version: 1, password: 'must-not-apply' } });
+  assert.equal(conflict.status, 409); assert.deepEqual(privateState(db), before);
+  for (const field of ['host', 'port', 'username']) {
+    await update({ password: 'target-retained', jumpPassword: 'jump-retained' });
+    let revision = server.credentialRevision;
+    const value = field === 'port' ? server.port + 1 : field === 'host' ? 'target-changed.example' : 'target_changed';
+    await update({ [field]: value });
+    assert.equal(server.credentialRevision, revision + 1); assert.equal(server.hasPassword, false); assert.equal(server.hasJumpPassword, true);
+    assert.equal((await resolve(server)).body.password, null); assert.equal((await resolve(server)).body.jumpPassword, 'jump-retained');
+    await update({ password: 'target-retained', jumpPassword: 'jump-retained' }); revision = server.credentialRevision;
+    const jumpValue = field === 'port' ? server.jump.port + 1 : field === 'host' ? 'jump-changed.example' : 'jump_changed';
+    await update({ jump: { ...server.jump, [field]: jumpValue } });
+    assert.equal(server.credentialRevision, revision + 1); assert.equal(server.hasPassword, true); assert.equal(server.hasJumpPassword, false);
+    assert.equal((await resolve(server)).body.password, 'target-retained'); assert.equal((await resolve(server)).body.jumpPassword, null);
+  }
+  await update({ host: 'explicit-new.example', password: 'new-target', jump: { ...server.jump, host: 'explicit-jump.example' }, jumpPassword: 'new-jump' });
+  assert.equal((await resolve(server)).body.password, 'new-target'); assert.equal((await resolve(server)).body.jumpPassword, 'new-jump');
+  await update({ password: null }); assert.equal(server.hasPassword, false); assert.equal(server.hasJumpPassword, true);
+  await update({ jump: null }); assert.equal(server.hasJumpPassword, false);
+  before = privateState(db);
+  const invalid = await call(`${path}?schema=2`, { method: 'PATCH', session: admin, body: { version: server.version, password: 'must-rollback', jumpPassword: 'no-jump' } });
+  assert.equal(invalid.status, 422); assert.deepEqual(privateState(db), before);
+});
+
+test('device password retrieval immediately rejects revoked grants, disabled resources, organization changes and deleted accounts', async t => {
+  const { call, admin, add } = await fixture(t, undefined, { serverCredentialKey: randomBytes(32).toString('base64') });
+  let member = (await add('可撤销设备成员', ['A公司', '西浦'])).member;
+  const device = await deviceLogin(call, member.name, '西浦');
+  let server = (await call('/api/servers?schema=2', { method: 'POST', session: admin,
+    body: draft({ company: '西浦', password: 'synthetic-revocable', memberIds: [member.id] }) })).body.server;
+  const path = `/api/servers/${server.id}`;
+  const read = () => call(`${path}/credentials`, { ...device, method: 'POST', body: versions(server) });
+  const mutate = async (input, suffix = '') => {
+    const result = await call(`${path}${suffix}?schema=2`, { session: admin, method: suffix ? 'PUT' : 'PATCH', body: { version: server.version, ...input } });
+    assert.equal(result.status, 200, result.text); server = result.body.server;
+  };
+  assert.equal((await read()).status, 200);
+  await mutate({ memberIds: [] }, '/grants'); assert.equal((await read()).status, 404);
+  await mutate({ memberIds: [member.id] }, '/grants'); assert.equal((await read()).status, 200);
+  await mutate({ enabled: false }); assert.equal((await read()).status, 404);
+  await mutate({ enabled: true }); assert.equal((await read()).status, 200);
+  member = (await call(`/api/admin/members/${member.id}`, { session: admin, method: 'PATCH', body: { version: member.version, companies: ['A公司'] } })).body.member;
+  assert.equal((await read()).status, 409, 'old active-company header cannot fall back to another membership');
+  member = (await call(`/api/admin/members/${member.id}`, { session: admin, method: 'PATCH', body: { version: member.version, companies: ['A公司', '西浦'] } })).body.member;
+  assert.equal((await call('/api/auth/company', { token: device.token, method: 'POST', body: { company: '西浦' } })).status, 200);
+  assert.equal((await read()).status, 404, 'rejoining never restores an old server grant');
+  await mutate({ memberIds: [member.id] }, '/grants'); assert.equal((await read()).status, 200);
+  assert.equal((await call('/api/auth/company', { token: device.token, method: 'POST', body: { company: 'A公司' } })).status, 200);
+  assert.equal((await read()).status, 409);
+  assert.equal((await call('/api/auth/company', { token: device.token, method: 'POST', body: { company: '西浦' } })).status, 200);
+  const secondDevice = await deviceLogin(call, member.name, '西浦');
+  assert.equal((await call('/api/auth/device-logout', { ...device, method: 'POST', body: {} })).status, 200);
+  assert.equal((await read()).status, 401);
+  assert.equal((await call(`/api/admin/members/${member.id}`, { session: admin, method: 'DELETE', body: { version: member.version } })).status, 200);
+  assert.equal((await call(`${path}/credentials`, { ...secondDevice, method: 'POST', body: versions(server) })).status, 401);
+});
+
+test('invalid password fields, unconfigured keys and corrupted ciphertext fail without mutations or plaintext error reflections', async t => {
+  const { call, admin, dbPath } = await fixture(t);
+  const server = (await call('/api/servers?schema=2', { session: admin, method: 'POST', body: draft() })).body.server;
+  assert.equal(server.credentialRevision, 0); assert.equal(server.hasPassword, false);
+  const db = new DatabaseSync(dbPath); t.after(() => db.close());
+  const before = privateState(db);
+  for (const value of ['', 123, {}, [], 'bad\nsecret', 'bad\rsecret', 'bad\0secret', '\ud800', '密'.repeat(1366)]) {
+    for (const field of ['password', 'jumpPassword']) {
+      const result = await call(`/api/servers/${server.id}?schema=2`, { session: admin, method: 'PATCH', body: { version: 1, [field]: value } });
+      assert.equal(result.status, 422); assert.deepEqual(privateState(db), before);
+      assert.equal(result.text.includes('bad'), false);
+    }
+  }
+  for (const [path, method, body] of [
+    ['/api/servers?schema=2', 'POST', draft({ password: 'never-written-secret' })],
+    [`/api/servers/${server.id}?schema=2`, 'PATCH', { version: 1, name: 'rollback-name', password: 'never-written-secret' }],
+  ]) {
+    const result = await call(path, { session: admin, method, body });
+    assert.equal(result.status, 503); assert.equal(result.body.error.code, 'CREDENTIALS_UNAVAILABLE');
+    assert.equal(result.text.includes('never-written-secret'), false); assert.deepEqual(privateState(db), before);
+  }
+  for (const extra of [{ password: 'not-imported' }, { jumpPassword: 'not-imported' }]) {
+    assert.equal((await call('/api/servers/import?schema=2', { session: admin, method: 'POST', body: importBatch([importRow(extra)]) })).status, 422);
+    assert.deepEqual(privateState(db), before);
+  }
+  const reader = await fixture(t, undefined, { serverCredentialKey: randomBytes(32).toString('base64') });
+  const member = await reader.add('损坏密文成员'), device = await deviceLogin(reader.call, member.member.name);
+  const encrypted = (await reader.call('/api/servers?schema=2', { session: reader.admin, method: 'POST', body: draft({ password: 'not-reflected-synthetic-password', memberIds: [member.member.id] }) })).body.server;
+  const privateDb = new DatabaseSync(reader.dbPath); t.after(() => privateDb.close());
+  privateDb.prepare("UPDATE managed_server_credentials SET auth_tag=? WHERE slot='target'").run(Buffer.alloc(12));
+  const damaged = privateState(privateDb);
+  const denied = await reader.call(`/api/servers/${encrypted.id}/credentials`, { ...device, method: 'POST', body: versions(encrypted) });
+  assert.equal(denied.status, 503); assert.equal(denied.body.error.code, 'CREDENTIALS_UNAVAILABLE');
+  assert.equal(denied.text.includes('not-reflected'), false); assert.equal(denied.text.includes('authenticate'), false);
+  assert.deepEqual(privateState(privateDb), damaged);
+  assert.equal((await reader.call('/api/servers', { session: member.session })).status, 200, 'metadata remains readable');
+});
+
+test('existing catalog migration preserves every old column and encrypted backups recover only with the matching external key', async t => {
+  const key = randomBytes(32).toString('base64'), oldId = randomUUID();
+  let old;
+  const { call, admin, dbPath, directory } = await fixture(t, async path => {
+    const db = new DatabaseSync(path);
+    db.exec(`CREATE TABLE managed_servers (id TEXT PRIMARY KEY, company TEXT NOT NULL, name TEXT NOT NULL,
+      host TEXT NOT NULL, port INTEGER NOT NULL, username TEXT NOT NULL, jump_json TEXT,
+      enabled INTEGER NOT NULL, version INTEGER NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);`);
+    db.prepare('INSERT INTO managed_servers VALUES(?,?,?,?,?,?,?,?,?,?,?)').run(oldId, 'A公司', '历史节点', 'old.example', 22, 'researcher', null, 1, 7, '2026-01-01', '2026-02-02');
+    old = { ...db.prepare('SELECT * FROM managed_servers').get() }; db.close();
+  }, { serverCredentialKey: key });
+  const db = new DatabaseSync(dbPath); t.after(() => db.close());
+  const migrated = { ...db.prepare('SELECT * FROM managed_servers WHERE id=?').get(oldId) };
+  assert.equal(migrated.credential_revision, 0); delete migrated.credential_revision; assert.deepEqual(migrated, old);
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM managed_server_credentials').get().n, 0);
+  const created = await call('/api/servers?schema=2', { session: admin, method: 'POST', body: draft({ password: 'synthetic-restorable-password' }) });
+  assert.equal(created.status, 201, created.text); const server = created.body.server;
+  const backupPath = join(directory, 'encrypted-backup.sqlite');
+  await backupTeamDatabase(dbPath, backupPath);
+  const restored = new DatabaseSync(backupPath);
+  assert.deepEqual(privateState(restored), privateState(db));
+  assert.equal(restored.prepare('PRAGMA integrity_check').get().integrity_check, 'ok'); assert.deepEqual(restored.prepare('PRAGMA foreign_key_check').all(), []);
+  restored.close();
+  for (const restoredKey of [undefined, randomBytes(32).toString('base64'), key]) {
+    const store = createManagedServerStore({ dbPath: backupPath, serverCredentialKey: restoredKey });
+    try {
+      assert.equal(store.list(admin.user).servers.length, 2);
+      if (restoredKey === key) assert.equal(store.credentials(server.id, versions(server), admin.user).password, 'synthetic-restorable-password');
+      else {
+        assert.throws(() => store.credentials(server.id, versions(server), admin.user), { code: 'CREDENTIALS_UNAVAILABLE' });
+        assert.throws(() => store.update(server.id, { version: server.version, password: 'must-not-destroy-recoverable-secret' }, admin.user), { code: 'CREDENTIALS_UNAVAILABLE' });
+        assert.throws(() => store.update(server.id, { version: server.version, host: 'must-not-rebind.example', password: 'must-not-destroy-recoverable-secret' }, admin.user), { code: 'CREDENTIALS_UNAVAILABLE' });
+      }
+      assert.equal(store.get(oldId, admin.user, 2).credentialRevision, 0, 'repeated initialization is idempotent');
+    } finally { store.close(); }
+  }
 });

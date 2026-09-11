@@ -13,6 +13,12 @@ async fn main() {
         }
         return;
     }
+    if targets.first().map(String::as_str) == Some("--managed-credentials-fixture") {
+        match racktop_lib::team::exercise_credentials_fixture(targets.get(1).map(String::as_str).unwrap_or("")).await {
+            Ok(result) => println!("{result}"), Err(error) => { eprintln!("{error}"); std::process::exit(1); }
+        }
+        return;
+    }
     if let Ok(password) = std::env::var("RACKTOP_ASKPASS_PASSWORD") { print!("{password}"); return; }
     if targets.first().map(String::as_str) == Some("--password-test") {
         if let Err(error) = password_test().await { eprintln!("{error}"); std::process::exit(1); }

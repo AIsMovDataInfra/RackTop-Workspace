@@ -14,7 +14,7 @@ export function WorkModuleFrame({ children, title, subtitle, section, actions, m
   const [settings, setSettings] = useState(false)
   const [loggingOut, setLoggingOut] = useState(false)
   const [logoutError, setLogoutError] = useState<unknown>(null)
-  return <><div className="workspace-shell work-module" inert={Boolean(modal || settings)}>
+  return <><div className={`workspace-shell work-module${section === 'servers' ? ' servers-workspace' : ''}`} inert={Boolean(modal || settings)}>
     <aside className="sidebar"><Brand t={t} /><CompanySwitcher session={session} t={t} onSessionChanged={onSessionChanged}/>
       <nav className="main-nav" aria-label={t('主导航', 'Main navigation')}>
         <button onClick={() => navigate('/')}><LayoutGrid size={18}/>{t('资源看板', 'Resource board')}</button>

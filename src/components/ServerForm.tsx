@@ -31,6 +31,8 @@ interface ServerFormProps {
 }
 
 export function ServerForm({ initial, managed, defaultRemoteHistoryEnabled = true, showGuide = true, onGuideDismiss, onClose, onSave }: ServerFormProps) {
+  const sharedPassword = managed?.hasPassword === true
+  const sharedJumpPassword = managed?.hasJumpPassword === true
   const [draft, setDraft] = useState<ServerDraft>({
     id: initial?.id,
     name: initial?.name ?? '',
@@ -39,17 +41,17 @@ export function ServerForm({ initial, managed, defaultRemoteHistoryEnabled = tru
     port: initial?.port ?? 22,
     username: initial?.username ?? '',
     sshAlias: initial?.sshAlias ?? '',
-    identityFile: initial?.identityFile ?? '',
+    identityFile: sharedPassword ? '' : initial?.identityFile ?? '',
     proxyJump: initial?.proxyJump ?? '',
-    proxyUsePassword: initial?.proxyUsePassword ?? false,
+    proxyUsePassword: sharedJumpPassword || (initial?.proxyUsePassword ?? false),
     proxyPassword: '',
-    saveProxyPassword: initial?.saveProxyPassword ?? false,
+    saveProxyPassword: sharedJumpPassword ? false : initial?.saveProxyPassword ?? false,
     tags: initial?.tags ?? [],
     samplingIntervalSeconds: initial?.samplingIntervalSeconds ?? 2,
     historyRetentionDays: initial?.historyRetentionDays ?? 90,
     remoteHistoryEnabled: initial?.remoteHistoryEnabled ?? defaultRemoteHistoryEnabled,
-    authMethod: initial?.authMethod ?? 'sshAgent',
-    savePassword: initial?.savePassword ?? true,
+    authMethod: sharedPassword ? 'password' : initial?.authMethod ?? 'sshAgent',
+    savePassword: sharedPassword ? false : initial?.savePassword ?? true,
   })
   const [tagText, setTagText] = useState('')
   const [saving, setSaving] = useState(false)
@@ -212,19 +214,22 @@ export function ServerForm({ initial, managed, defaultRemoteHistoryEnabled = tru
       setError('请先复制并执行 SSH 密钥快速配置，完成后再连接。')
       return
     }
-    if (draft.authMethod === 'password' && !passwordAcknowledged) return
-    if (draft.authMethod === 'password' && !initial?.id && !draft.password?.trim()) {
+    if (draft.authMethod === 'password' && !sharedPassword && !passwordAcknowledged) return
+    if (draft.authMethod === 'password' && !sharedPassword && !initial?.id && !draft.password?.trim()) {
       setError('请输入 SSH 密码后再保存服务器。')
       return
     }
-    if (draft.proxyUsePassword && (!draft.proxyJump?.trim() || (!draft.proxyPassword && (!initial?.proxyUsePassword || initial.proxyJump?.trim() !== draft.proxyJump.trim())))) {
+    if (!sharedJumpPassword && draft.proxyUsePassword && (!draft.proxyJump?.trim() || (!draft.proxyPassword && (!initial?.proxyUsePassword || initial.proxyJump?.trim() !== draft.proxyJump.trim())))) {
       setError('请填写跳板机地址，并输入该跳板机的密码。')
       return
     }
     setSaving(true)
     setError(null)
     try {
-      await onSave({ ...draft, name: draft.name || draft.sshAlias || draft.host, tags: [...draft.tags, ...parseServerTags(tagText)] })
+      await onSave({ ...draft, name: draft.name || draft.sshAlias || draft.host, tags: [...draft.tags, ...parseServerTags(tagText)],
+        ...(sharedPassword ? { authMethod:'password', identityFile:'', password:undefined, savePassword:false } : {}),
+        ...(sharedJumpPassword ? { proxyUsePassword:true, proxyPassword:undefined, saveProxyPassword:false } : {}),
+      })
       if (!initial?.id && dismissGuide) onGuideDismiss?.()
     } catch (reason) {
       setError(String(reason))
@@ -268,7 +273,7 @@ export function ServerForm({ initial, managed, defaultRemoteHistoryEnabled = tru
         </header>
         <form onSubmit={submit} className="server-form">
           <div className="server-form__body">
-            {managed && <p className="proxy-auth-hint" role="status">此服务器由{managed.company}统一维护。连接地址自动同步；在这里配置你本机使用的密码或密钥。</p>}
+            {managed && <p className="proxy-auth-hint" role="status">此服务器由{managed.company}统一维护。连接地址自动同步；{sharedPassword ? '目标服务器的密码由管理员提供，连接时自动使用。' : '在这里配置你本机使用的密码或密钥。'}</p>}
             <div className="form-grid form-grid--2">
               <label className={!draft.name.trim() && error ? 'field-error' : undefined}>显示名称<input aria-invalid={!draft.name.trim() && Boolean(error)} value={draft.name} readOnly={!!managed} maxLength={MAX_SERVER_NAME_LENGTH} onChange={(event) => { set('name', event.target.value); if (error) setError(null) }} placeholder="训练服务器 A" />{!draft.name.trim() && error && <small className="field-error__message">服务器名称不能为空</small>}</label>
               <label>服务器位置<input value={draft.location ?? ''} readOnly={!!managed} onChange={(event) => set('location', event.target.value)} placeholder="例如：实验室 301 / R2 机架 / U18" /></label>
@@ -280,7 +285,7 @@ export function ServerForm({ initial, managed, defaultRemoteHistoryEnabled = tru
             </div>
               <fieldset className={!initial?.id && draft.authMethod === 'sshAgent' && error && !sshSetupConfirmed ? 'field-error' : undefined}>
               <legend>认证方式</legend>
-              <div className="segmented segmented--auth">
+              {sharedPassword ? <p className="proxy-auth-hint" role="status">使用管理员共享密码，无需在本机重复填写。修改密码请联系管理员。</p> : <div className="segmented segmented--auth">
                 {([
                   ['sshAgent', 'SSH Agent'],
                   ['privateKey', '私钥'],
@@ -289,12 +294,12 @@ export function ServerForm({ initial, managed, defaultRemoteHistoryEnabled = tru
                 ] as const).filter(([value]) => !managed || value !== 'sshConfig').map(([value, label]) => (
                   <button key={value} type="button" className={draft.authMethod === value ? 'is-selected' : ''} onClick={() => selectAuthMethod(value)}>{label}</button>
                 ))}
-              </div>
+              </div>}
               </fieldset>
-            {draft.authMethod === 'sshConfig' && (
+            {!sharedPassword && draft.authMethod === 'sshConfig' && (
               <label>SSH Config 别名<input value={draft.sshAlias ?? ''} onChange={(event) => set('sshAlias', event.target.value)} placeholder="~/.ssh/config 中的 Host，例如 gpu-a" /></label>
             )}
-            {draft.authMethod === 'privateKey' && (
+            {!sharedPassword && draft.authMethod === 'privateKey' && (
               <>
                 {sshKeyManagerApi.isDesktop && <label>选择已管理的密钥<select aria-label="选择已管理的密钥" disabled={keysLoading} value={availableKeys.some((key) => key.privateKeyPath === draft.identityFile) ? draft.identityFile : ''} onChange={(event) => { if (event.target.value) set('identityFile', event.target.value) }}><option value="">{keysLoading ? '正在读取密钥…' : '手动填写路径，或从列表选择'}</option>{availableKeys.map((key) => <option key={key.id} value={key.privateKeyPath!}>{key.name} · {key.algorithm} · {key.fingerprint.slice(0, 20)}…</option>)}</select></label>}
                 {keysError && <p className="form-error" role="status">{keysError}，也可以手动填写路径。</p>}
@@ -302,7 +307,7 @@ export function ServerForm({ initial, managed, defaultRemoteHistoryEnabled = tru
                 {setupVerification.phase === 'success' && <p className="key-guide__validation key-guide__validation--success" role="status"><Check size={14} />{setupVerification.message}</p>}
               </>
             )}
-            {draft.authMethod === 'password' && (
+            {!sharedPassword && draft.authMethod === 'password' && (
               <div className="security-warning">
                 <AlertTriangle size={20} />
                 <div>
@@ -316,7 +321,7 @@ export function ServerForm({ initial, managed, defaultRemoteHistoryEnabled = tru
                 </div>
               </div>
             )}
-            {draft.authMethod === 'password' && passwordAcknowledged && (
+            {!sharedPassword && draft.authMethod === 'password' && passwordAcknowledged && (
               <div className="form-grid form-grid--2">
                 <label>密码<input type="password" value={draft.password ?? ''} onChange={(event) => set('password', event.target.value)} autoComplete="new-password" /></label>
                 <label className="checkbox-card"><input type="checkbox" checked={draft.savePassword ?? true} onChange={(event) => set('savePassword', event.target.checked)} /><span>保存到系统钥匙串</span></label>
@@ -342,7 +347,8 @@ export function ServerForm({ initial, managed, defaultRemoteHistoryEnabled = tru
               <label>跳板机 ProxyJump<input value={draft.proxyJump ?? ''} readOnly={!!managed} onChange={(event) => setDraft((current) => ({ ...current, proxyJump: event.target.value, proxyPassword: '', proxyUsePassword: event.target.value.trim() ? current.proxyUsePassword : false }))} placeholder="user@jump.example.com:22（可选）" /></label>
               <label>标签<div className="server-tag-input" onClick={(event) => event.currentTarget.querySelector('input')?.focus()}>{draft.tags.map((tag, index) => <span className="server-tag-input__token" key={`${tag}-${index}`}>{tag}</span>)}<input aria-label="添加服务器标签" disabled={!!managed} value={tagText} onChange={(event) => updateTagText(event.target.value)} onBlur={commitTagText} onKeyDown={(event) => { if ((event.key === 'Backspace' || event.key === 'Delete') && editLastTag()) event.preventDefault() }} placeholder={draft.tags.length === 0 ? 'lab, h100' : ''} /></div></label>
             </div>
-            {draft.proxyJump?.trim() && !/Windows|Macintosh/i.test(navigator.userAgent) && (
+            {sharedJumpPassword && <fieldset className="proxy-auth-fields"><legend>跳板机认证</legend><p className="proxy-auth-hint" role="status">使用管理员共享的跳板机密码，无需在本机重复填写。</p></fieldset>}
+            {!sharedJumpPassword && draft.proxyJump?.trim() && !/Windows|Macintosh/i.test(navigator.userAgent) && (
               <fieldset className="proxy-auth-fields">
                 <legend>跳板机认证</legend>
                 <label className="checkbox-row"><input type="checkbox" checked={draft.proxyUsePassword ?? false} onChange={(event) => setDraft((current) => ({ ...current, proxyUsePassword: event.target.checked, proxyPassword: '', saveProxyPassword: event.target.checked ? current.saveProxyPassword : false }))} />跳板机使用独立密码</label>
@@ -361,7 +367,7 @@ export function ServerForm({ initial, managed, defaultRemoteHistoryEnabled = tru
           </div>
           <footer className="sheet__footer">
             <button type="button" className="button button--secondary" onClick={onClose}>取消</button>
-            <button type="submit" className="button button--primary" disabled={saving || (draft.authMethod === 'password' && !passwordAcknowledged) || (!initial?.id && draft.authMethod === 'sshAgent' && !sshSetupConfirmed)}>
+            <button type="submit" className="button button--primary" disabled={saving || (!sharedPassword && draft.authMethod === 'password' && !passwordAcknowledged) || (!initial?.id && draft.authMethod === 'sshAgent' && !sshSetupConfirmed)}>
               <Check size={17} />{saving ? '保存中…' : '保存并连接'}
             </button>
           </footer>

@@ -9,6 +9,7 @@ export function errorText(error: unknown, t: Translate) {
       INVALID_USERNAME: ['请输入用户名', 'Enter a username'],
       INVALID_NAME: ['姓名须为 1–60 个字符。', 'Your name must contain 1–60 characters.'],
       INVALID_PASSWORD: ['请输入密码', 'Enter a password'],
+      CREDENTIALS_UNAVAILABLE: ['共享密码暂不可用，请联系管理员检查服务配置。', 'Shared passwords are temporarily unavailable. Ask the administrator to check the service configuration.'],
       INVALID_COMPANY: ['请选择 A公司、B公司、C公司或西浦。', 'Choose A公司, B公司, C公司 or 西浦.'],
       COMPANY_CHANGED: ['当前组织已变化，正在刷新，请确认当前组织后继续。', 'The active organization changed. Refreshing; check the organization before continuing.'],
       COMPANY_REQUIRED: ['请等待超级管理员分配公司后再使用。', 'Wait for the super administrator to assign your company.'],

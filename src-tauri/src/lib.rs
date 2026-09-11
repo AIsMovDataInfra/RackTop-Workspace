@@ -286,10 +286,10 @@ fn reorder_servers(database: State<'_, Database>, server_ids: Vec<String>) -> Re
 }
 
 #[tauri::command]
-fn start_terminal(app: tauri::AppHandle, database: State<'_, Database>, terminals: State<'_, TerminalManager>, server_id: String, columns: u16, rows: u16, gpu_index: Option<u32>, accelerator_vendor: Option<String>) -> Result<String, String> {
+async fn start_terminal(app: tauri::AppHandle, database: State<'_, Database>, team: State<'_, TeamState>, terminals: State<'_, TerminalManager>, server_id: String, columns: u16, rows: u16, gpu_index: Option<u32>, accelerator_vendor: Option<String>) -> Result<String, String> {
     let server = database.get_server(&server_id)?;
     let epoch = database.managed_epoch(&server_id)?;
-    let password = database.get_ssh_passwords(&server, true)?;
+    let password = team.0.ssh_passwords(&database, &server, true).await?;
     let _gate = database.managed_gate.lock().map_err(|e| e.to_string())?;
     database.check_managed_server(&server)?;
     if database.managed_epoch(&server_id)? != epoch { return Err("组织服务器授权已变化，请重新打开终端".into()); }
@@ -373,6 +373,7 @@ fn powershell_encoded_command(value: &str) -> String {
 #[tauri::command]
 async fn verify_ssh_setup(database: State<'_, Database>, draft: ServerDraft) -> Result<(), String> {
     let managed = database.managed_setup(&draft)?;
+    if managed.as_ref().is_some_and(|m| m.has_password || m.has_jump_password) { return Err("管理员已提供 SSH 密码，请保存后直接连接，无需安装本机专用密钥".into()); }
     let setup_draft = draft.clone();
     if draft.host.trim().is_empty() || draft.username.trim().is_empty() {
         return Err("请先填写主机地址和用户名".into());
@@ -418,10 +419,10 @@ async fn verify_ssh_setup(database: State<'_, Database>, draft: ServerDraft) -> 
 }
 
 #[tauri::command]
-async fn collect_server(database: State<'_, Database>, logs: State<'_, InteractionLogStore>, server_id: String, include_processes: bool, include_disks: bool, record_history: bool, allow_credential_prompt: bool) -> Result<Snapshot, String> {
+async fn collect_server(database: State<'_, Database>, team: State<'_, TeamState>, logs: State<'_, InteractionLogStore>, server_id: String, include_processes: bool, include_disks: bool, record_history: bool, allow_credential_prompt: bool) -> Result<Snapshot, String> {
     let server = database.get_server(&server_id)?;
     let log_id = logs.begin(&server, collector::collection_display_command(&server, include_processes, include_disks));
-    let password = match database.get_ssh_passwords(&server, allow_credential_prompt) {
+    let password = match team.0.ssh_passwords(&database, &server, allow_credential_prompt).await {
         Ok(password) => password,
         Err(error) => {
             logs.finish(log_id, 0, 0, Some(error.clone()));
@@ -490,14 +491,14 @@ fn get_usage_distribution(database: State<'_, Database>, server_id: String, from
 }
 
 #[tauri::command]
-async fn configure_remote_history(database: State<'_, Database>, server_id: String) -> Result<(), String> {
+async fn configure_remote_history(database: State<'_, Database>, team: State<'_, TeamState>, server_id: String) -> Result<(), String> {
     let server = database.get_server(&server_id)?;
-    let password = database.get_ssh_passwords(&server, false)?;
+    let password = team.0.ssh_passwords(&database, &server, false).await?;
     managed_servers::authorized(&database, &[&server], remote_history::configure(&server, password.as_ref())).await
 }
 
 #[tauri::command]
-async fn sync_remote_history(database: State<'_, Database>, server_id: String) -> Result<RemoteHistorySyncResult, String> {
+async fn sync_remote_history(database: State<'_, Database>, team: State<'_, TeamState>, server_id: String) -> Result<RemoteHistorySyncResult, String> {
     let server = database.get_server(&server_id)?;
     if !server.remote_history_enabled {
         return Ok(RemoteHistorySyncResult { imported_count: 0, latest_timestamp: server.remote_history_last_sync_at });
@@ -507,7 +508,7 @@ async fn sync_remote_history(database: State<'_, Database>, server_id: String) -
     }
     let now = SystemTime::now().duration_since(UNIX_EPOCH).map_err(|error| error.to_string())?.as_secs() as i64;
     let since = database.remote_history_cursor(&server_id, now)?;
-    let password = database.get_ssh_passwords(&server, false)?;
+    let password = team.0.ssh_passwords(&database, &server, false).await?;
     let fetched_points = managed_servers::authorized(&database, &[&server], remote_history::fetch(&server, password.as_ref(), since)).await?;
     let usage_points = managed_servers::authorized(&database, &[&server], remote_history::fetch_usage(&server, password.as_ref(), since)).await?;
     let points: Vec<_> = fetched_points.iter().filter(|point| point.timestamp >= now - 31 * 86_400 && point.timestamp <= now + 300).cloned().collect();
@@ -576,38 +577,38 @@ fn delete_project(database: State<'_, Database>, project_id: String) -> Result<(
 }
 
 #[tauri::command]
-async fn probe_project_paths(database: State<'_, Database>, draft: ProjectDraft) -> Result<Vec<ProjectPathCheck>, String> {
+async fn probe_project_paths(database: State<'_, Database>, team: State<'_, TeamState>, draft: ProjectDraft) -> Result<Vec<ProjectPathCheck>, String> {
     let servers = std::iter::once(&draft.source_server_id).chain(draft.targets.iter().map(|target| &target.server_id)).map(|id| database.get_server(id)).collect::<Result<Vec<_>, _>>()?;
-    managed_servers::authorized(&database, &servers.iter().collect::<Vec<_>>(), project_sync::probe(&database, &draft)).await
+    managed_servers::authorized(&database, &servers.iter().collect::<Vec<_>>(), project_sync::probe(&database, &team.0, &draft)).await
 }
 
 #[tauri::command]
-async fn suggest_project_paths(database: State<'_, Database>, server_id: String, query: String) -> Result<Vec<String>, String> {
+async fn suggest_project_paths(database: State<'_, Database>, team: State<'_, TeamState>, server_id: String, query: String) -> Result<Vec<String>, String> {
     let server = database.get_server(&server_id)?;
-    let password = database.get_ssh_passwords(&server, false)?;
+    let password = team.0.ssh_passwords(&database, &server, false).await?;
     managed_servers::authorized(&database, &[&server], project_sync::suggest_paths(&server, password.as_ref(), &query)).await
 }
 
 #[tauri::command]
-async fn inspect_project(database: State<'_, Database>, project_id: String) -> Result<Project, String> {
+async fn inspect_project(database: State<'_, Database>, team: State<'_, TeamState>, project_id: String) -> Result<Project, String> {
     let project = database.get_project(&project_id)?;
     let servers = std::iter::once(&project.source_server_id).chain(project.targets.iter().map(|target| &target.server_id)).map(|id| database.get_server(id)).collect::<Result<Vec<_>, _>>()?;
-    managed_servers::authorized(&database, &servers.iter().collect::<Vec<_>>(), project_sync::inspect(&database, &project)).await
+    managed_servers::authorized(&database, &servers.iter().collect::<Vec<_>>(), project_sync::inspect(&database, &team.0, &project)).await
 }
 
 #[tauri::command]
-async fn inspect_project_source(database: State<'_, Database>, project_id: String) -> Result<Project, String> {
+async fn inspect_project_source(database: State<'_, Database>, team: State<'_, TeamState>, project_id: String) -> Result<Project, String> {
     let project = database.get_project(&project_id)?;
     let source = database.get_server(&project.source_server_id)?;
-    managed_servers::authorized(&database, &[&source], project_sync::inspect_source(&database, &project)).await
+    managed_servers::authorized(&database, &[&source], project_sync::inspect_source(&database, &team.0, &project)).await
 }
 
 #[tauri::command]
-async fn sync_project(database: State<'_, Database>, project_id: String, target_server_id: String, force: bool) -> Result<ProjectSyncResult, String> {
+async fn sync_project(database: State<'_, Database>, team: State<'_, TeamState>, project_id: String, target_server_id: String, force: bool) -> Result<ProjectSyncResult, String> {
     let project = database.get_project(&project_id)?;
     let source = database.get_server(&project.source_server_id)?;
     let target = database.get_server(&target_server_id)?;
-    let result = managed_servers::authorized(&database, &[&source, &target], project_sync::sync(&database, &project, &target_server_id, force)).await;
+    let result = managed_servers::authorized(&database, &[&source, &target], project_sync::sync(&database, &team.0, &project, &target_server_id, force)).await;
     if let Err(error) = &result {
         if source.managed.is_some() || target.managed.is_some() { let _ = database.mark_project_sync_failed(&project_id, &target_server_id, error); }
     }
@@ -666,9 +667,9 @@ fn save_settings(database: State<'_, Database>, settings: AppSettings) -> Result
 }
 
 #[tauri::command]
-async fn scan_host_key(database: State<'_, Database>, server_id: String) -> Result<HostKeyInfo, String> {
+async fn scan_host_key(database: State<'_, Database>, team: State<'_, TeamState>, server_id: String) -> Result<HostKeyInfo, String> {
     let server = database.get_server(&server_id)?;
-    let passwords = database.get_ssh_passwords(&server, true)?;
+    let passwords = team.0.ssh_passwords(&database, &server, true).await?;
     managed_servers::authorized(&database, &[&server], host_key::scan_with_passwords(&server, passwords.as_ref())).await
 }
 
@@ -679,39 +680,39 @@ fn trust_host_key(database: State<'_, Database>, info: HostKeyInfo) -> Result<()
 }
 
 #[tauri::command]
-async fn install_nvidia_driver(database: State<'_, Database>, server_id: String, confirmed: bool) -> Result<String, String> {
+async fn install_nvidia_driver(database: State<'_, Database>, team: State<'_, TeamState>, server_id: String, confirmed: bool) -> Result<String, String> {
     if !confirmed { return Err("必须在界面明确确认后才能安装驱动".into()); }
     let server = database.get_server(&server_id)?;
-    let password = database.get_ssh_passwords(&server, true)?;
+    let password = team.0.ssh_passwords(&database, &server, true).await?;
     managed_servers::authorized(&database, &[&server], collector::install_nvidia_driver(&server, password.as_ref())).await
 }
 
 #[tauri::command]
-async fn terminate_process(database: State<'_, Database>, server_id: String, pid: u32, confirmed: bool) -> Result<String, String> {
+async fn terminate_process(database: State<'_, Database>, team: State<'_, TeamState>, server_id: String, pid: u32, confirmed: bool) -> Result<String, String> {
     if !confirmed { return Err("必须在界面完成二次确认后才能结束进程".into()); }
     let server = database.get_server(&server_id)?;
-    let password = database.get_ssh_passwords(&server, true)?;
+    let password = team.0.ssh_passwords(&database, &server, true).await?;
     managed_servers::authorized(&database, &[&server], collector::terminate_process_tree(&server, password.as_ref(), pid)).await
 }
 
 #[tauri::command]
-async fn launch_managed_run(database: State<'_, Database>, server_id: String, run_id: String, working_directory: String, command: String, gpu_indices: Vec<u32>, project_log_path: Option<String>, accelerator_vendor: Option<String>) -> Result<ManagedRunLaunchResult, String> {
+async fn launch_managed_run(database: State<'_, Database>, team: State<'_, TeamState>, server_id: String, run_id: String, working_directory: String, command: String, gpu_indices: Vec<u32>, project_log_path: Option<String>, accelerator_vendor: Option<String>) -> Result<ManagedRunLaunchResult, String> {
     let server = database.get_server(&server_id)?;
-    let password = database.get_ssh_passwords(&server, true)?;
+    let password = team.0.ssh_passwords(&database, &server, true).await?;
     managed_servers::authorized(&database, &[&server], collector::launch_managed_run(&server, password.as_ref(), &run_id, &working_directory, &command, &gpu_indices, project_log_path.as_deref(), accelerator_vendor.as_deref().unwrap_or("nvidia"))).await
 }
 
 #[tauri::command]
-async fn read_managed_run_log(database: State<'_, Database>, server_id: String, run_id: String, lines: u32) -> Result<String, String> {
+async fn read_managed_run_log(database: State<'_, Database>, team: State<'_, TeamState>, server_id: String, run_id: String, lines: u32) -> Result<String, String> {
     let server = database.get_server(&server_id)?;
-    let password = database.get_ssh_passwords(&server, true)?;
+    let password = team.0.ssh_passwords(&database, &server, true).await?;
     managed_servers::authorized(&database, &[&server], collector::read_managed_run_log(&server, password.as_ref(), &run_id, lines)).await
 }
 
 #[tauri::command]
-async fn get_managed_run_status(database: State<'_, Database>, server_id: String, run_id: String, pid: u32) -> Result<ManagedRunRemoteStatus, String> {
+async fn get_managed_run_status(database: State<'_, Database>, team: State<'_, TeamState>, server_id: String, run_id: String, pid: u32) -> Result<ManagedRunRemoteStatus, String> {
     let server = database.get_server(&server_id)?;
-    let password = database.get_ssh_passwords(&server, true)?;
+    let password = team.0.ssh_passwords(&database, &server, true).await?;
     managed_servers::authorized(&database, &[&server], collector::managed_run_status(&server, password.as_ref(), &run_id, pid)).await
 }
 

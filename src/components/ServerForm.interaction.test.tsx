@@ -92,6 +92,33 @@ describe('independent jump password', () => {
 })
 
 describe('centrally managed server authentication', () => {
+  it('uses shared target and jump passwords without prompting or persisting them through the WebView', async () => {
+    const onSave = vi.fn(async () => {})
+    container = document.createElement('div'); document.body.append(container); root = createRoot(container)
+    act(() => root?.render(<ServerForm initial={{ id:'managed-shared',name:'Shared training',host:'node.example.test',port:22,username:'worker',authMethod:'privateKey',identityFile:'~/.ssh/old-local-key',proxyJump:'bridge@jump.example.test:22',savePassword:true,saveProxyPassword:true }}
+      managed={{accountId:'member',company:'A公司',remoteId:'cloud-shared',available:true,reason:null,version:4,hasPassword:true,hasJumpPassword:true,credentialRevision:2}}
+      showGuide={false} onClose={vi.fn()} onSave={onSave}/>))
+    expect(container.textContent).toContain('使用管理员共享密码')
+    expect(container.textContent).toContain('使用管理员共享的跳板机密码')
+    expect(container.textContent).not.toContain('我理解风险并继续使用密码')
+    expect(container.querySelector('input[type=password]')).toBeNull()
+    expect(container.querySelector('.segmented--auth')).toBeNull()
+    expect(container.querySelector<HTMLButtonElement>('button[type=submit]')?.disabled).toBe(false)
+    await act(async () => { container!.querySelector('form')!.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true})) })
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({authMethod:'password',identityFile:'',password:undefined,savePassword:false,proxyUsePassword:true,proxyPassword:undefined,saveProxyPassword:false}))
+  })
+  it('allows a local target key with a centrally supplied jump password', async () => {
+    const onSave = vi.fn(async () => {})
+    container = document.createElement('div'); document.body.append(container); root = createRoot(container)
+    act(() => root?.render(<ServerForm initial={{id:'mixed',name:'Mixed training',host:'node.example.test',port:22,username:'worker',authMethod:'privateKey',identityFile:'~/.ssh/target-key',proxyJump:'bridge@jump.example.test:22'}}
+      managed={{accountId:'member',company:'A公司',remoteId:'cloud-mixed',available:false,reason:'请先配置本机 SSH 认证',version:1,hasPassword:false,hasJumpPassword:true,credentialRevision:1}}
+      showGuide={false} onClose={vi.fn()} onSave={onSave}/>))
+    expect(container.querySelector('input[type=password]')).toBeNull()
+    expect(container.querySelector('.segmented--auth')).not.toBeNull()
+    expect(container.textContent).toContain('使用管理员共享的跳板机密码')
+    await act(async () => { container!.querySelector('form')!.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true})) })
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({authMethod:'privateKey',identityFile:'~/.ssh/target-key',proxyUsePassword:true,proxyPassword:undefined,saveProxyPassword:false}))
+  })
   it('keeps central connection fields read-only while explicitly saving local authentication', async () => {
     const onSave = vi.fn(async () => {})
     container = document.createElement('div'); document.body.append(container); root = createRoot(container)

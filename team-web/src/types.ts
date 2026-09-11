@@ -44,8 +44,10 @@ export interface ManagedServer {
   id: string; company: Company; name: string; host: string; port: number; username: string
   jump: { host: string; port: number; username: string } | null
   enabled: boolean; version: number; updatedAt: string; memberIds?: string[]
+  hasPassword?: boolean; hasJumpPassword?: boolean; credentialRevision?: number
 }
 export interface ManagedServerDraft {
   company?: Company; name: string; host: string; port: number; username: string
   jump?: ManagedServer['jump']; enabled?: boolean; memberIds?: string[]
+  password?: string | null; jumpPassword?: string | null
 }

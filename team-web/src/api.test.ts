@@ -17,6 +17,22 @@ function hangingFetch(signals: AbortSignal[]) {
 }
 
 describe('authenticated reservation API', () => {
+  it('opts into password metadata without fetching stored plaintext passwords in the browser', async () => {
+    acceptSession(accountSession)
+    const fetch = vi.fn().mockImplementation(async () => new Response('{}'))
+    vi.stubGlobal('fetch', fetch)
+    await api.servers('西浦')
+    await api.createServer({name:'Fixture',host:'node.example.test',port:22,username:'worker',password:'fixture-only'})
+    await api.updateServer('server/id',{version:1,password:null})
+    await api.grantServer('server/id',2,['member'])
+    await api.importServers({company:'西浦',memberIds:[],servers:[]})
+    expect(fetch.mock.calls.map(call => call[0])).toEqual([
+      '/api/servers?schema=2&company=%E8%A5%BF%E6%B5%A6', '/api/servers?schema=2',
+      '/api/servers/server%2Fid?schema=2', '/api/servers/server%2Fid/grants?schema=2', '/api/servers/import?schema=2',
+    ])
+    expect(fetch.mock.calls[1][1].headers).toMatchObject({'X-CSRF-Token':'fixture','X-RackTop-Company':encodeURIComponent('A公司')})
+    expect(JSON.parse(fetch.mock.calls[2][1].body)).toEqual({version:1,password:null})
+  })
   it('scopes business reads, writes and photos to the active organization and sends no scope on the switch endpoint', async () => {
     acceptSession(accountSession)
     const switched = { ...accountSession, user: { ...accountSession.user!, company: '西浦' } }

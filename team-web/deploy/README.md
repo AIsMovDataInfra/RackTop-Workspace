@@ -23,6 +23,10 @@
 
 使用 [.env.example](../.env.example) 创建真实环境文件。正式模式设置 `TEAM_AUTH_MODE=account`、`NODE_ENV=production`，仅监听 `127.0.0.1:4318`，`TEAM_PUBLIC_URL` 使用实际 HTTPS 根地址。此项目当前桌面连接地址固定为 `https://136.0.110.161`，换站点需要同步修改并重建桌面应用，不只是修改服务器环境。
 
+2.7.0 的共享 SSH 密码需要独立的 `TEAM_SERVER_CREDENTIAL_KEY`：使用密码学安全随机源生成 32 字节并以标准 base64 编码，只在首次启用时生成。将它保存在发布目录之外的私有环境文件，由 systemd 的独立 `EnvironmentFile` 加载；目录权限 0700、文件 0600，仅服务启动和授权运维可读。不要写入源码、镜像、命令参数或日志，不要在每次部署时重新生成。没有配置密钥时原有功能仍可使用，但共享密码的设置和领取返回 503。
+
+新增 `managed_server_credentials` 保存带认证标签的密文，`managed_servers.credential_revision` 默认 0。升级前保存一致性快照，核对所有旧表原列内容保留；同时在自动快照目录之外保留匹配的独立密钥恢复材料。恢复时使用原密钥，不得为已有密文生成替代密钥；除了数据库完整性验证，还要在独立恢复副本上用恢复密钥完成解密验证。只恢复数据库无法恢复 SSH 密码。系统级灾备需要在另一受控位置保存数据库与密钥材料；同机副本不覆盖整机丢失。
+
 把 [racktop-team.service](racktop-team.service) 放入 systemd 目录并创建对应低权限用户、持久目录。模板从环境文件读取秘密，仅允许写入持久目录；修改路径时也要同步 `WorkingDirectory`、`ExecStart` 和 `ReadWritePaths`。首次安装或更新服务文件后执行 `systemctl daemon-reload`，随后 `systemctl enable --now racktop-team.service`；只更换构建或环境配置时使用 `systemctl restart racktop-team.service`。
 
 Nginx 的 `/` 与 `/api/` 转发到预约服务；`Host` 与公开站点一致，保留请求路径并覆写 `X-Real-IP` 为真实来源地址。仅在可信本地反向代理下设置 `TEAM_TRUST_PROXY=true`。既有共享中继的 `/v1/…`、`/healthz`、WebSocket 升级以及 ACME / HTTPS 证书续期路由必须保留。预约健康检查是 `/api/health`，不要把共享中继健康检查成功当作预约网页已可用。照片经客户端压缩后以 JSON 上传，预约反代 `location /` 的 `client_max_body_size` 设为 `2m`；普通业务请求仍由 Node 限制为 64 KiB，只有照片 POST 允许 2 MiB。设备照片 GET 也需要成员登录，不得配置 Nginx 公开缓存。
