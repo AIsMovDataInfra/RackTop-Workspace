@@ -1,0 +1,26 @@
+.resource-usage { display: grid; gap: 8px; margin: 14px 0; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--canvas); font-size: .78rem; }
+.resource-usage-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.resource-usage-heading > strong { font-weight: 550; }
+.resource-usage-state { padding: 3px 7px; border-radius: 5px; color: var(--muted); background: var(--subtle); white-space: nowrap; }
+.resource-usage--busy .resource-usage-state { color: var(--orange); background: var(--orange-bg); }
+.resource-usage--free .resource-usage-state { color: var(--green); background: var(--green-bg); }
+.resource-usage p { margin: 0; overflow-wrap: anywhere; }
+.resource-usage > small, .resource-usage li small, .resource-usage-advice { color: var(--muted); font-size: .72rem; line-height: 1.6; }
+.resource-usage ul { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.resource-usage li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 9px; padding-top: 6px; border-top: 1px solid var(--border); overflow-wrap: anywhere; }
+.resource-usage li strong { font-weight: 500; }
+.resource-usage li small { flex-basis: 100%; }
+.usage-text--busy { color: var(--orange); }
+.usage-text--free { color: var(--green); }
+.usage-text--unknown { color: var(--muted); }
+.slot-usage-heading { margin: 16px 0 8px; color: var(--muted); font-size: .78rem; font-weight: 550; }
+.resource-hardware { flex-wrap: wrap; }
+.resource-hardware > span { min-width: 0; overflow-wrap: anywhere; }
+.sidebar-cluster-group { display: grid; gap: 4px; margin-top: 12px; }
+.sidebar-cluster-group > .cluster-kind { color: var(--text); font-weight: 550; }
+.sidebar-cluster-group > .cluster-member { padding-left: 25px; }
+.sidebar-cluster-empty { margin: 4px 12px; color: var(--muted); font-size: .72rem; }
+@media (max-width: 700px) {
+  .sidebar-clusters { align-items: flex-start; }
+  .sidebar-cluster-group { flex: none; min-width: 140px; max-width: 220px; margin-top: 0; }
+}

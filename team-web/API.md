@@ -1,8 +1,10 @@
-# AIsMov RackTop 团队工作台 API（2.6.0）
+# AIsMov RackTop 团队工作台 API（2.8.0 待交付源码）
+
+**版本范围：本文说明 2.8.0 待交付源码。2.8.0 尚未发布安装包、部署上线或完成正式验收；当前公开下载仍为 2.7.3 测试版（Pre-release）。以下新功能须在相应桌面与网页交付后使用，历史验收不代表本轮结果。**
 
 接口实现位于 `team-web/server/`，使用 Node.js 24+、单服务进程和本地 SQLite。正式默认模式为 `account`（用户名＋密码），另保留本机 `demo` 与可选 `feishu`。已部署的公网入口是 `https://136.0.110.161`，路径均以根级 `/api` 开始。
 
-本版设备录入、成员公司管理、密码找回、头像、周报与设备申请使用 `account` 模式；`/api/workspace/*` 在其他模式返回 `403 ACCOUNT_REQUIRED`。`demo`／`feishu` 尚未提供公司身份，暂不支持新增设备；已登录用户仍可查看和维护已有设备的其他字段及照片。完整录入验收请使用独立的 `account` 测试库；当前线上账号模式不受此限制。
+本版设备录入、成员公司管理、密码找回、头像与办公设备申请使用 `account` 模式；`/api/workspace/*` 在其他模式返回 `403 ACCOUNT_REQUIRED`。`demo`／`feishu` 尚未提供公司身份，暂不支持新增设备；已登录用户仍可查看和维护已有设备的其他字段及照片。完整录入验收请使用独立的 `account` 测试库；当前线上账号模式不受此限制。
 
 ## 传输、身份与错误
 
@@ -16,7 +18,7 @@
 {"error":{"code":"INVALID_INPUT","message":"输入无效"}}
 ```
 
-状态码：`401` 未登录／登录失效，`403` 来源、CSRF、权限或认领码拒绝，`404` 不存在，`409` 冲突／旧版本，`413` 请求过大，`415` 媒体类型错误，`422` 输入无效，`429` 限流，`503` 暂时繁忙。`RESERVATION_CONFLICT` 可附 `conflicts: Reservation[]`（最多 50 项）。内部异常与上游秘密不会回显。
+状态码：`401` 未登录／登录失效，`403` 来源、CSRF、权限或认领码拒绝，`404` 不存在，`409` 冲突／旧版本，`410` 功能已移除，`413` 请求过大，`415` 媒体类型错误，`422` 输入无效，`429` 限流，`503` 暂时繁忙。`RESERVATION_CONFLICT` 可附 `conflicts: Reservation[]`（最多 50 项）。内部异常与上游秘密不会回显。
 
 时间响应为带时区的 UTC ISO8601，页面展示 Asia/Shanghai。同步采集时间额外接受 Unix 毫秒整数。业务文本、数组与 ID 有各自限制；账号用户名和密码规则见下一节。未知 JSON 字段拒绝。
 
@@ -51,8 +53,10 @@
 - `User`：account 模式返回 `{id,username,name,role:'admin'|'member',isSuperAdmin:boolean,company:Company|null,version:number,avatar:Avatar}`；demo／feishu 仍可省略账号专有字段。`Company` 只能为 `A公司`、`B公司`、`C公司`、`西浦`。普通账号的 null 表示尚未分配；超级管理员固定返回 null，表示跨公司管理且无需公司，历史数据库值不会进入身份投影或权限判断。`role:'admin'` 是资源管理员身份，只有 `isSuperAdmin:true` 才能管理成员。`Avatar` 为 `user|cat|dog|rocket|robot|flower|star|engineer|explorer|rabbit|bird|fish|turtle|squirrel|bug|satellite|planet|moon|sun|computer|circuit|headphones|sprout|gem`，旧记录默认user，原7个ID保持兼容。新增nullable `avatar_choice`用于扩展选择，不重建账号表或改写旧头像；公开User仍只有 `avatar` 字段，优先返回新选择。没有邮箱字段；客户端不能自报 `role`、`isSuperAdmin` 或 `ownerId`。
 - `Member`：仅超级管理员成员接口返回 `{...User,createdAt,recoveryRequestedAt}`；后两项为 UTC ISO8601，尚无找回申请时 `recoveryRequestedAt=null`。只含账号业务信息，不返回密码、密码哈希、会话／设备令牌或内部管理审计记录。
 - `Gpu`：`{id,uuid,index,model,memoryTotalMb}`。`id` 是服务端稳定 ID，`uuid` 是规范化为小写的真实 NVIDIA 完整硬件 UUID，`index` 是当前显示编号；预约不要用编号代替稳定身份。
-- `Resource`：`{id,company,companyVersion,cluster,name,gpuModel,gpuCount,notes,enabled,gpus,inventoryVersion,inventoryState,lastSeenAt,observedAt,status,pendingGpus}`。`company` 为 Company 或旧未分配记录的空串，`companyVersion` 为正整数。清单状态为 `manual|synced|conflict`，在线状态为 `online|offline|unknown`；超过 90 秒的采集显示 unknown。手工资源 `gpus=[]`，CPU 资源 `gpuCount=0`。待确认清单的 GPU 没有已确认的稳定 ID。
+- `Resource`：`{id,company,companyVersion,cluster,name,gpuModel,gpuCount,notes,enabled,gpus,inventoryVersion,inventoryState,lastSeenAt,observedAt,status,pendingGpus,usage}`。`company` 为 Company 或旧未分配记录的空串，`companyVersion` 为正整数。清单状态为 `manual|synced|conflict`，在线状态为 `online|offline|unknown`；超过 90 秒的采集显示 unknown。手工资源 `gpus=[]`，CPU 资源 `gpuCount=0`。待确认清单的 GPU 没有已确认的稳定 ID。
 - `Reservation`：`{id,company,resourceId,resourceName,cluster,ownerId,ownerName,scope,gpuIndices,gpuIds,inventoryVersion,startAt,endAt,purpose,status,createdAt,updatedAt,version,plannedEndAt}`。`scope=machine|gpus`，`status=confirmed|cancelled|completed`。提前结束时保存原结束时间 `plannedEndAt`；没有该值时为 null。界面按时间推导未开始／进行中／已到期。公司、资源名称与集群在预约建立时保存快照，资源后续跨公司调整不会将历史预约移动给新公司。
+
+2.8.0 新增 `Resource.usage = {state,observedAt,gpus}`：`state` 为 `busy|free|unknown`，`observedAt` 为有效摘要采用的 UTC ISO8601 采样时间或 null；`gpus` 每项为 `{id,uuid,index,state,users,utilization,memoryUsedMb}`，利用率为 0–100 百分数、显存为 MiB，无可靠指标时为 null。`users` 是 Linux 系统用户名数组，不是预约人或账号名册。旧响应可缺少 `usage`，客户端须按未知处理，不能推断空闲；过期摘要的用户与指标不可继续作为当前状态展示。
 
 ## 账号与会话
 
@@ -104,11 +108,11 @@ account 模式提供的 `/api/admin/members` 接口仅接受超级管理员身�
 
 account 模式的普通成员和资源管理员只可读取本公司完整资源、排期、设备和照片，包括备注、预约用途与待确认 GPU 清单；直接请求其他公司详情返回 404。公司未知的旧资源或设备只对超管可见，分配后才开放。普通成员可创建自己的预约、维护本公司实物设备；资源创建、修改和同步仅限本公司管理员或超管，预约修改/取消/提前结束仍限本人或本公司管理员。只有超管能跨公司管理及读取成员名册。设备负责人或使用人姓名不是授权依据。
 
-周报还检查作者或指定评审人身份，设备申请读接口仅超管可用，见工作台接口。未分配成员仍可查询 session、退出、选择头像、申请找回及凭当前密码改密，网页等待页每 30 秒或恢复焦点检查分配状态并保留原深链接。客户端遇到 `COMPANY_REQUIRED` 或 `SUPERADMIN_REQUIRED` 时应立即隐藏受限数据并重新查询 session；401 回到登录。身份公司变更由实时会话查询生效，不把旧公司的业务资料继续留在页面中。
+周报 API 已移除，历史记录保留；办公设备申请读接口仍仅超管可用，见下方工作台接口。未分配成员仍可查询 session、退出、选择头像、申请找回及凭当前密码改密，网页等待页每 30 秒或恢复焦点检查分配状态并保留原深链接。客户端遇到 `COMPANY_REQUIRED` 或 `SUPERADMIN_REQUIRED` 时应立即隐藏受限数据并重新查询 session；401 回到登录。身份公司变更由实时会话查询生效，不把旧公司的业务资料继续留在页面中。
 
 预约列表支持 `from`、`to`、`mine`，拒绝重复和未知参数；`mine=true` 仅返回当前账号的预约。缺省窗口为过去 7 天至未来 30 天，最大查询跨度 366 天，最多 1000 条。
 
-## 硬件设备台账
+## 资产设备管理台账
 
 设备台账用于登记实物设备，与算力预约的 `Resource` 分开存储。新库不创建示例设备，也不自动把 SSH 连接转换成实物。设备档案、永久编号分配、修改历史和照片与账号、预约共用 `TEAM_DB_PATH` 指定的 SQLite 文件。
 
@@ -134,7 +138,7 @@ account 模式的普通成员和资源管理员只可读取本公司完整资源
 
 旧记录首次升级按 `created_at`、相同时间下的原行插入顺序分配新编号。原自由填写的序列号原样保存在只读 `legacySerialNumber`，没有旧值时为空串；旧 `code`（`RT-XXXXXXXX`）和 UUID 保留，二维码无需重贴。迁移在事务中执行，失败整体回滚，重启重试不会对已迁移记录重新编号。新界面以 `serialNumber` 为主要编号。
 
-网页标签为“固定资产标识码”表格，含公司名称、资产编号、资产名称、责任人、使用人及稳定二维码，支持完整 SVG、单独二维码下载和打印。修改档案后二维码不变，纸面文字需重新打印。
+网页标签为“固定资产标识码”表格，含公司名称、资产编号、资产名称、责任人、使用人及稳定二维码，通过“打印标签”支持完整 PDF／PNG 导出和打印。修改档案后二维码不变，纸面文字需重新打印。
 
 没有删除设备的接口；停用设备设为 `retired`，原二维码仍可由具备业务访问资格的登录成员读取。设备本体 `PUT`、`DELETE` 返回 405；下方照片子资源支持独立删除。
 
@@ -189,7 +193,7 @@ account 模式的普通成员和资源管理员只可读取本公司完整资源
 | 请求 | 输入／权限 |
 | --- | --- |
 | `GET /api/resources` | `{resources:Resource[]}`；仅具备业务访问资格的成员，返回本公司目录，超管可跨公司查看（包括待分配资源）。 |
-| `POST /api/resources` | 管理员；`{cluster,name,gpuModel,gpuCount,notes?,company?}` → `201 {resource}`，创建手工资源。CPU 数量为 0。 |
+| `POST /api/resources` | 管理员；`{cluster,name,gpuModel,gpuCount,notes?,company?}` → `201 {resource}`，创建手工资源。CPU 使用 `gpuCount:0,gpuModel:""`；GPU 使用 1–64 整数数量和非空型号，类型不另设字段。 |
 | `PATCH /api/resources/:id` | 管理员；`{cluster?,name?,gpuModel?,gpuCount?,notes?,enabled?,acceptInventoryVersion?,company?,companyVersion?}` → `{resource}`。同步资源不能手工改写 GPU 数量和型号。 |
 | `POST /api/resources/sync` | 管理员 Cookie＋CSRF 或管理员设备 Bearer；见下方载荷 → `{resource}`。普通成员设备返回 403。 |
 
@@ -213,13 +217,34 @@ account 资源创建时普通管理员公司由会话确定，不能指定别家
 
 同步已有绑定、显式 resourceId 或相同 GPU UUID 对应的资源时都会核对公司；不能借已知 ID/UUID 跨公司读写。新资源采用操作人的公司，超管无公司时先生成仅超管可见的待分配资源；同步输入不接受 company，分配在网页资源管理中完成。
 
-`sourceId` 是桌面同步来源 ID，`serverId` 是本地连接的稳定 ID，均不能包含 SSH 密码或私钥；`resourceId` 可明确绑定现有资源。桌面仅上传选中的资源清单和连接状态，不上传 SSH 地址、用户名、认证信息或进程列表。同步响应为 `{resource:{...Resource,binding:{sourceId,serverId,authoritative}}}`；`binding` 位于 `resource` 内，供本地保存绑定关系，不出现在常规资源列表。
+`sourceId` 是桌面同步来源 ID，`serverId` 是本地连接的稳定 ID，均不能包含 SSH 密码或私钥；`resourceId` 可明确绑定现有资源。此旧个人硬件清单接口只上传选中的资源清单和连接状态，不上传 SSH 地址、用户名、认证信息或进程列表；2.8.0 的组织 GPU 摘要另走下述 telemetry 接口，会包含 Linux 系统用户名。同步响应为 `{resource:{...Resource,binding:{sourceId,serverId,authoritative}}}`；`binding` 位于 `resource` 内，供本地保存绑定关系，不出现在常规资源列表。
 
 每份清单最多 64 张 GPU，UUID 与编号不可重复；只接受完整且非全零的 NVIDIA `GPU-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`，不支持伪造编号、MIG UUID 或 NPU 编号。服务端格式验证不能证明恶意管理员报告的硬件真实存在，信任边界仍是已授权的管理员设备。
 
 首次绑定要求在线且采集在 90 秒内，不能比服务端时间超前超过 1 分钟。同一完整硬件集可从其他 SSH 账号关联到原资源，别名不能覆盖权威来源；部分清单、多个已有资源混合或错误显式绑定返回 `TOPOLOGY_CONFLICT`。两个账号只能看到同机互不相交的 GPU 集合时，服务无法自动识别物理机相同，应使用能看到完整清单的权威连接。
 
 离线上报保留硬件，只更新连接信息；过期上报不能回滚清单，收到数据的时间不代替采集时间。卡数变化、换卡或缺卡返回 `409 INVENTORY_CHANGED`，同时持久保存 `pendingGpus` 与 `inventoryState=conflict`，原硬件和预约不删除。管理员通过 `PATCH` 的 `acceptInventoryVersion` 确认**当前版本**；只要还有 `confirmed` 且结束时间在未来的预约就拒绝，需先协调、取消或提前结束。已有未来预约的手工资源也不能直接绑定新硬件，因为无法推断历史 GPU 编号对应的真实卡。
+
+### 组织服务器 GPU 占用摘要（2.8.0 源码）
+
+`POST /api/servers/:id/telemetry` 仅 account 模式的管理员设备 Bearer 会话可调用，须正确 Origin 和显式 `X-RackTop-Company`；网页 Cookie 会话返回 `403 DEVICE_REQUIRED`。服务端重新核对当前组织、服务器管理员权限、启用状态和目录版本，普通成员设备不能上报。此路径不接受 `schema` 或其他查询参数，沿用 64 KiB JSON 上限。
+
+请求体为：
+
+```text
+{serverVersion,observedAt,status,inventoryComplete,processQueryOk,gpuUsageValid,
+ gpus:[{uuid,index,name,memoryTotalMb,utilization,memoryUsedMb,users,hasProcesses}]}
+```
+
+- `serverVersion` 为当前目录版本；`observedAt` 为 Unix 毫秒整数，不得超前于服务端超过 60 秒；`status` 仅为 `online|unknown`。三个采样有效性字段和 `hasProcesses` 必须为布尔值。
+- `gpus` 最多 64 张，复用完整 NVIDIA GPU UUID 和硬件清单校验。`utilization` 为 null 或 0–100，`memoryUsedMb` 为 null 或 0 至该卡总显存。`users` 每卡最多 128 项，每项最多 64 字符且不得含控制字符；去重并剔除不可识别用户名占位值，有用户名时 `hasProcesses` 必须为 true。
+- 桌面通过本机已有 SSH 连接采集获授权的组织服务器，约每 30 秒上报。关闭本地历史记录后仍使用内存摘要同步，不为此额外持久化完整 Snapshot。请求不携带 SSH 密码、私钥、完整进程命令行或环境变量；Linux 系统用户名是新摘要明确包含的业务数据，不能替换成预约人。
+
+成功为 `200 {resource: Resource|null}`。首次登记要求最近 90 秒内在线、完整且非空的 GPU 清单；条件不足时可返回 null，不会从空清单自动创建 CPU。完整相同硬件可绑定已有同公司资源并保留其原集群名称；新建组织 GPU 资源默认集群名称为 `GPU集群`。跨公司或不完整拓扑混用会拒绝；绑定后的硬件变更保留旧清单与预约，进入 `409 INVENTORY_CHANGED` 待核验流程。
+
+每卡出现进程、有效系统用户名、非零利用率或非零已用显存中的任一占用证据时为 busy；只有完整一致的硬件清单、进程查询与指标均有效，且所有这些指标明确为零／空时才为 free。其他情况为 unknown；已停用、目录版本失效、过期或清单冲突的观测不能证明空闲。资源整体有任一卡 busy 即为 busy，全部卡 free 才为 free，否则 unknown。采样以观测与接收时间较早者计算，网页达到 90 秒时清空旧 GPU 明细及用户并显示未知；旧服务不返回 usage 时也按未知处理。有占用但无可用用户名时，界面显示“匿名用户”。
+
+GPU/CPU 分类只依据 `gpuCount>0` 或 `gpuCount=0`，保留原集群名；CPU 仅支持整机预约，本轮尚未登记生产 CPU 资源，不承诺全 CPU 实时监控。busy 在界面显示“被占用”，不禁止未来时段预约，预约冲突仍按请求时段检查，不自动启动或停止任务。此接口与客户端上报能力尚待 2.8.0 正式交付，2.7.3 下载包不因此获得该能力。
 
 ## 预约接口与冲突
 
@@ -240,49 +265,21 @@ account 资源创建时普通管理员公司由会话确定，不能指定别家
 
 相邻区间允许；只把 confirmed 纳入占用。创建允许小于 60 秒的当前时间偏差，单次最长 7 天，开始和结束均限未来 90 天内。已经开始的预约不能改变开始时间，只能在未结束时修改未来结束时间。`version` 提供并发修改保护；旧版本、清单变更和已有冲突需要刷新或人工协调。取消／提前结束释放未来排期，不会结束训练进程，预约到期也不能用于判定实际 GPU 空闲。
 
-## 周报与绩效接口
+## 已移除的周报接口
 
-`/api/workspace/*` 仅 account 模式提供；除下述周报统计 GET 接口外，拒绝全部查询参数。使用普通 64 KiB JSON 与同源写入校验。服务端重新解析当前有效成员身份，不能在请求中伪造角色、公司、作者身份或评审权限。工作台记录 ID 为 UUID，写入版本为正整数。
+2.8.0 源码关闭 `/api/workspace/reports` 及全部子路径，包括列表、详情、`statistics`、`reviewer`、`review` 和未知深层路径。通过原有校验后，各方法统一返回 `410`：
 
-`Report` 字段：`{id,authorId,authorName,company,weekStart,todos,nextPlan,status,reviewerId,reviewerName,score,reviewComment,reviewedBy,reviewedName,reviewedAt,submittedAt,version,createdAt,updatedAt}`。`weekStart` 为有效周一 `YYYY-MM-DD`；日期时间为 UTC ISO8601，未设置的评审人、评分与提交/评审时间为 null。`status=draft|submitted`。
-
-`Todo` 为 `{text,completion,unfinishedReason,effect}`：文字去首尾空白，工作内容最多 400 字符，未完成原因与效果各最多 1000；completion 为 0–100 有限数字。每份最多 20 项，nextPlan 最多 4000 字符，正文序列化后最多 60 KiB。提交要求至少一项非空工作、非空下周计划，以及完成度小于 100 的每项都填写未完成原因；草稿允许未填完。
-
-| 请求 | 输入／权限与返回 |
-| --- | --- |
-| `GET /api/workspace/reports` | `{reports:Report[]}`；仅作者、同公司指定评审人可见其对应记录，超管可见全部，普通同事不因 role=admin 获得访问。 |
-| `POST /api/workspace/reports` | `{authorId?,weekStart,todos,nextPlan,status?}` → `201 {report}`；weekStart 可传所选周的任意有效 `YYYY-MM-DD` 日期，服务器以 UTC 纯日期运算归到该周周一；普通成员默认作者为自己、状态 draft，只有超管可指定其他已分配公司成员。超管不能作为作者，返回 `403 SUPERADMIN_REPORT_NOT_REQUIRED`。 |
-| `GET /api/workspace/reports/:id` | `{report,history}`；遵守同一读取权限，草稿也受保护，越权返回 404。 |
-| `PATCH /api/workspace/reports/:id` | `{version,todos?,nextPlan?,status?}` → `{report}`；仅作者或超管，且记录须仍为 draft。 |
-| `POST /api/workspace/reports/:id/reviewer` | `{version,reviewerId}` → `{report}`；reviewerId 为 UUID 或 null，仅超管，非超管评审人须与周报同公司且不能为作者。 |
-| `POST /api/workspace/reports/:id/review` | `{version,score,comment}` → `{report}`；仅指定同公司评审人或超管，对已提交记录手工评分。 |
-
-每位作者每个自然周（周一至周日）唯一，同周不同日期重复创建也返回 `409 REPORT_EXISTS`，旧记录的日期、版本与审计不改写。所选日期对应的周一与周日均须能以四位年份表示，否则返回 422。提交后正文锁定，修改返回 `409 REPORT_LOCKED`；草稿评分返回 `409 REPORT_NOT_SUBMITTED`。评分为 0–100 有限数字，comment 最多 4000 字符，允许空串。换评审人会清空当前评分、评语与评审人记录，历史仍留存；相同评审人重复提交不递增版本。
-
-读权限要求用户当前公司与报告公司一致（超管例外），作者或评审人调离公司即失去旧公司报告访问；公司字段不随账号变更自动改写。写入在事务中校验版本并记录审计，旧版本返回 `409 VERSION_CONFLICT`。`history` 为 `{actorName,action,at,details}[]`，最多 100 项，包含原内容或旧评分，因此同样受报告读取权限约束。
-
-### 超级管理员周报统计
-
-`GET /api/workspace/reports/statistics?weekStart=2026-09-09&company=A公司&memberId=<UUID>` 仅超级管理员可读；普通成员、资源管理员和指定评审人均返回 403，不能通过公司或成员筛选绕过权限。只支持 GET；未知、重复、空值或格式错误的查询参数返回 422。三个参数均可省略：
-
-- `weekStart`：任意有效 `YYYY-MM-DD` 日期，归到所在周的周一至周日。省略时以服务器当前北京时间（`Asia/Shanghai`）所在日期选周，不取访问者设备时区。
-- `company`：四个公司枚举之一，或 `unassigned` 表示待分配；省略则包含全部公司。
-- `memberId`：成员 UUID，省略则包含全部成员。不存在或不匹配当前筛选的 UUID 返回空统计。
-
-返回 `{weekStart,weekEnd,timezone:'Asia/Shanghai',rows,summary}`，其中每行：
-
-```text
-{authorId,name,company,weekStart,weekEnd,status,reportId,
- todoCount,completedCount,unfinishedCount,averageCompletion,score,reviewerName}
+```json
+{"error":{"code":"REPORTS_REMOVED","message":"周报功能已移除，历史资料仍保留"}}
 ```
 
-`status` 为 `missing|draft|submitted|reviewed`：分别表示缺报、草稿、已提交待评分、已评分。`reportId` 缺报时为 null；完成项按 completion=100 计数，其余为未完成项；`averageCompletion` 为本报告各工作项完成度的算术平均，缺报或无工作项的草稿为 null。未评分的 score 为 null，0 分仍是有效已评分；未指定评审人时 reviewerName 为 null。
+Host／Origin、JSON 请求体、身份、业务成员资格和写入 CSRF 校验仍按原顺序执行，不会被 410 短路绕过。匿名为 401，account 未分配公司成员为 `403 COMPANY_REQUIRED`，不合法 Origin／CSRF 仍先拒绝；其他认证模式仍为 `403 ACCOUNT_REQUIRED`。已分配成员、资源管理员、超管及有效设备会话通过原校验后均为 410，不因统计参数而重新开放。HEAD 同为 410 且无响应体，响应禁缓存。
 
-应报名册包含该周结束前已注册的**当前活跃普通账号**，以及该周已有报告的普通历史作者（含补写报告和已删除的历史作者），每位作者一行；超级管理员不参与应报、提交、完成度或评分统计，历史超管周报也被排除。注册时间以北京时间下周一 00:00 为排除边界；此后注册且没有当周报告的成员不算该周应报。待分配公司的普通账号也可列入名册，但仍须先分配公司才能提交周报。已删除作者只在实际有报告的周次保留，不为后续周次制造缺报。已有报告使用报告创建时的姓名、公司快照；缺报行使用当前账号资料。公司筛选遵从行上的公司，不改写历史记录。
+`weekly_reports`、`workspace_audit` 内的历史周报、正文、评分、审计及计数器保留在数据库和一致性备份中；不删除表，也不重新编号。旧字段契约不再作为公开读写或导出 API。历史发布文档中的周报验收只记录当时行为，不代表 2.8.0 仍提供该功能。
 
-`summary` 为 `{expectedCount,submittedCount,unsubmittedCount,reviewedCount,averageCompletion,averageScore}`，全部在公司／成员筛选之后计算。应报数等于行数；已提交数包含 submitted 与 reviewed，未提交数包含 missing 与 draft；已评分数仅 reviewed。汇总完成度只对**已提交报告**的各自平均完成度再按报告等权平均，草稿与缺报不计入；平均分只计算已评分报告，没有已评分报告时为 null。无报告、无评分都不会自动记成 0 分，也不标逾期或自动生成绩效结论。统计只读同一数据库事务快照，不返回账号密码、令牌或其他账号安全字段。
+## 办公设备申请接口
 
-## 设备申请与领取接口
+网页导航为「办公设备申请 / Office equipment requests」，沿用 `/requests` 和 `/api/workspace/requests`。仅 account 模式提供，拒绝查询参数，沿用 64 KiB JSON、当前成员身份和同源写入校验。
 
 `Request` 字段：`{id,applicantId,applicantName,company,category,quantity,purpose,equipmentId,equipmentName,equipmentSerial,status,decisionComment,equipmentUpdated,version,createdAt,updatedAt}`。未关联设备时 equipmentId/name/serial 为 null；status 为 `pending|approved|rejected|collected`。申请公司与原始内容创建后不可通过处理接口修改。
 
@@ -293,7 +290,7 @@ account 资源创建时普通管理员公司由会话确定，不能指定别家
 | `GET /api/workspace/requests/:id` | `{request,history}`，仅超管，提交者也无读权限。 |
 | `PATCH /api/workspace/requests/:id` | `{version,status,comment}` → `{request}`，仅超管；status 只接受 approved、rejected、collected。 |
 
-类别使用设备七类枚举，quantity 为 1–999 整数，purpose 非空且最多 4000 字符。可关联本公司可用设备，设备类别须一致，关联时 quantity 必须为 1；不存在或跨公司返回 `404 EQUIPMENT_NOT_FOUND`。超级管理员无需公司，也不提交自己的设备申请，可直接处理成员申请。
+类别使用设备八类枚举，quantity 为 1–999 整数，purpose 非空且最多 4000 字符。可关联本公司可用设备，设备类别须一致，关联时 quantity 必须为 1；不存在或跨公司返回 `404 EQUIPMENT_NOT_FOUND`。超级管理员无需公司，也不提交自己的设备申请，可直接处理成员申请。
 
 普通成员与资源管理员读取目录/详情或审批返回 `403 SUPERADMIN_REQUIRED`。员工只保存提交编号确认，不能通过编号、筛选参数或本人身份读取正文/处理进度。原始用途、数量、类别和设备绑定不接受 PATCH；comment 为处理备注，最多 4000 字符，可为空。
 
@@ -301,7 +298,7 @@ account 资源创建时普通管理员公司由会话确定，不能指定别家
 
 关联设备首次领取使用**申请事务的同一个 SQLite 连接**：核对申请人仍有效且同公司、设备仍属该公司、类别相同、状态 available 且 currentUser 为空，再更新设备使用人为申请人当前姓名、状态 in_use、设备版本和设备历史，同时更新申请、equipmentUpdated=true 与申请审计，任一失败整体回滚。申请人变更返回 `409 APPLICANT_CHANGED`，设备公司变更返回 `409 EQUIPMENT_CHANGED`，已被使用或类别/状态变化返回 `409 EQUIPMENT_UNAVAILABLE`。
 
-未关联设备的申请仅记录人工处理，equipmentUpdated 保持 false，不自动采购或建设备。直接设备维护/领用接口继续向本公司成员开放，申请功能不构成强制审批拦截。申请 history 与周报同为最多 100 项，只有超管可读。
+未关联设备的申请仅记录人工处理，equipmentUpdated 保持 false，不自动采购或建设备。直接设备维护/领用接口继续向本公司成员开放，申请功能不构成强制审批拦截。申请 history 最多 100 项，只有超管可读；历史周报保留但不再经公开 API 读取。
 
 ## 内部认证契约与可选模式
 
@@ -321,7 +318,7 @@ account 模式配置包含 `publicUrl,host,dbPath,now?,nodeEnv?,adminUsername?,b
 
 ## 网页深链与桌面登录边界
 
-网页首页支持单个 `?resource=<id>` 或 `?reservation=<id>` 参数；ID 限 1–100 个字母、数字、下划线或短横线，重复或不合法参数不作为目标。`resource` 在成员登录并通过公司门禁、资源加载后定位并高亮对应机器，不会自动创建预约；资源已停用或不存在时显示不可用提示。`reservation` 在具备业务访问资格后打开预约详情。设备深链 `/equipment/:id` 也先经过登录和公司门禁，再读取对应档案。
+网页首页支持单个 `?resource=<id>` 或 `?reservation=<id>` 参数；ID 限 1–100 个字母、数字、下划线或短横线，重复或不合法参数不作为目标。`resource` 在成员登录并通过公司门禁、资源加载后定位并高亮对应机器，不会自动创建预约；资源已停用或不存在时显示不可用提示。`reservation` 在具备业务访问资格后打开预约详情。资产设备管理（Asset management）的深链 `/equipment/:id` 也先经过登录和公司门禁，再读取对应档案。旧 `/reports` 及其子路径在新网页通过同样门禁后显示移除说明，可返回资源看板，不再加载报告 API。
 
 访客首先看到登录／注册界面，身份及公司资格有效后才加载资源、排期和设备；深链地址保留，不会把业务数据写进静态登录壳。`/#setup=<一次性码>` 与普通资源深链用途不同：前者只为一次性资源管理员注册提供认领码，读取后移除 fragment，不能用它调用业务 API，也不作为持续登录令牌。
 

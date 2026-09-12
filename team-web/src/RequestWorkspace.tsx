@@ -102,7 +102,7 @@ export function RequestWorkspace(props: WorkModuleProps) {
   if (!user) return null
   const shown = requests.filter(item => !filter || item.status === filter)
   return <>
-    <WorkModuleFrame {...props} section="requests" title={t('设备申请与领取', 'Device requests')} subtitle={t('填写设备需求，交由超级管理员审批与登记领取。', 'Submit equipment needs for the super administrator to review and record collection.')} modal={Boolean(detail)} actions={<button disabled={loading || busy} onClick={() => void load()}><RefreshCw size={16}/>{t('刷新', 'Refresh')}</button>}>
+    <WorkModuleFrame {...props} section="requests" title={t('办公设备申请', 'Office equipment requests')} subtitle={t('填写设备需求，交由超级管理员审批与登记领取。', 'Submit equipment needs for the super administrator to review and record collection.')} modal={Boolean(detail)} actions={<button disabled={loading || busy} onClick={() => void load()}><RefreshCw size={16}/>{t('刷新', 'Refresh')}</button>}>
       {Boolean(error) && <div className="error" role="alert">{errorText(error, t)}</div>}
       {submitted ? <section className="work-success" role="status"><Check size={24}/><h2>{t('申请已提交', 'Request submitted')}</h2><p>{t('超级管理员将查看申请并处理。此页面不提供员工申请历史。', 'The super administrator will review your request. Employee request history is not available on this page.')}</p><button onClick={() => { setSubmitted(false); setFormError(null) }}>{t('继续提交申请', 'Submit another request')}</button></section> : !user.isSuperAdmin && user.company ? <form className="work-record work-request-form" onSubmit={event => { event.preventDefault(); void submit() }}>
         <h2>{t('新申请', 'New request')}</h2><p>{user.name} · {user.company}</p>

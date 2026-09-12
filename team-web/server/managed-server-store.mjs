@@ -176,6 +176,14 @@ export function createManagedServerStore({ dbPath, now = Date.now, serverCredent
   }
   return {
     close() { db.close(); },
+    authorizeTelemetry(id, user, serverVersion) {
+      return transaction(() => {
+        const row = rowFor(id, user, true);
+        version({ version: serverVersion }, row);
+        if (!row.enabled) throw new ApiError(409, 'SERVER_DISABLED', '服务器已停用，不能上报遥测');
+        return { id: row.id, company: row.company, name: row.name, version: row.version, enabled: true };
+      }, false);
+    },
     list(user, company, schema = 1) {
       return transaction(() => {
         actor(user, company ?? (user?.isSuperAdmin ? undefined : user?.company));

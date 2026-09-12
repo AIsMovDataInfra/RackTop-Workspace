@@ -1,14 +1,14 @@
 import { Brand } from './Brand'
 import { CompanySwitcher } from './CompanySwitcher'
 import { useState, type ReactNode } from 'react'
-import { ClipboardList, FileText, LayoutGrid, LogOut, Package, Server, Settings, Users } from 'lucide-react'
+import { ClipboardList, LayoutGrid, LogOut, Package, Server, Settings, Users } from 'lucide-react'
 import { SettingsDialog } from './SettingsDialog'
 import { MemberAvatar } from './MemberAvatar'
 import { errorText } from './errors'
 import type { WorkModuleProps } from './workspace-types'
 import './work-modules.css'
 
-export function WorkModuleFrame({ children, title, subtitle, section, actions, modal, ...props }: WorkModuleProps & { children: ReactNode; title: string; subtitle: string; section: 'reports' | 'requests' | 'servers'; actions?: ReactNode; modal?: boolean }) {
+export function WorkModuleFrame({ children, title, subtitle, section, actions, modal, ...props }: WorkModuleProps & { children: ReactNode; title: string; subtitle: string; section?: 'requests' | 'servers'; actions?: ReactNode; modal?: boolean }) {
   const { session, state, navigate, onLogout, onSessionChanged } = props
   const { t } = state
   const [settings, setSettings] = useState(false)
@@ -19,9 +19,8 @@ export function WorkModuleFrame({ children, title, subtitle, section, actions, m
       <nav className="main-nav" aria-label={t('主导航', 'Main navigation')}>
         <button onClick={() => navigate('/')}><LayoutGrid size={18}/>{t('资源看板', 'Resource board')}</button>
         <button className={section === 'servers' ? 'is-active' : ''} aria-current={section === 'servers' ? 'page' : undefined} onClick={() => navigate('/servers')}><Server size={18}/>{t('服务器资源', 'Server resources')}</button>
-        <button onClick={() => navigate('/equipment')}><Package size={18}/>{t('设备管理', 'Equipment')}</button>
-        <button className={section === 'requests' ? 'is-active' : ''} aria-current={section === 'requests' ? 'page' : undefined} onClick={() => navigate('/requests')}><ClipboardList size={18}/>{t('设备申请与领取', 'Device requests')}</button>
-        <button className={section === 'reports' ? 'is-active' : ''} aria-current={section === 'reports' ? 'page' : undefined} onClick={() => navigate('/reports')}><FileText size={18}/>{t('周报与绩效', 'Weekly reports')}</button>
+        <button onClick={() => navigate('/equipment')}><Package size={18}/>{t('资产设备管理', 'Asset management')}</button>
+        <button className={section === 'requests' ? 'is-active' : ''} aria-current={section === 'requests' ? 'page' : undefined} onClick={() => navigate('/requests')}><ClipboardList size={18}/>{t('办公设备申请', 'Office equipment requests')}</button>
         {session.user?.isSuperAdmin && <button onClick={() => navigate('/members')}><Users size={18}/>{t('成员管理', 'Members')}</button>}
       </nav>
       <div className="sidebar-bottom"><button className="sidebar-settings" onClick={() => setSettings(true)}><Settings size={17}/>{t('设置', 'Settings')}</button><div className="profile"><MemberAvatar avatar={session.user?.avatar}/><div><strong>{session.user?.name}</strong><small>{session.user?.isSuperAdmin ? t('超级管理员', 'Super administrator') : session.user?.company || t('团队成员', 'Team member')}</small></div><button className="icon-button" aria-label={t('退出登录', 'Sign out')} disabled={loggingOut} onClick={async () => { setLoggingOut(true); setLogoutError(null); try { await onLogout() } catch (reason) { setLogoutError(reason) } finally { setLoggingOut(false) } }}><LogOut size={16}/></button></div></div>

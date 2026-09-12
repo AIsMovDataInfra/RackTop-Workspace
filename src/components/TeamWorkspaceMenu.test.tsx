@@ -13,12 +13,12 @@ async function mount() {
   return {container,open}
 }
 describe('team workspace sidebar',()=>{
-  it('opens by mouse hover, exposes the five exact destinations, and closes outside',async()=>{
+  it('opens by mouse hover, exposes the four current destinations without weekly reports, and closes outside',async()=>{
     const {container,open}=await mount()
     const group=container.firstElementChild!
     await act(async()=>group.dispatchEvent(new MouseEvent('mouseover',{bubbles:true})))
-    expect(container.querySelector('nav')?.textContent).toBe('设备管理服务器资源周报与绩效算力预约设备申请与领取')
-    for (const [label,path] of [['设备管理','/equipment'],['服务器资源','/servers'],['周报与绩效','/reports'],['算力预约','/'],['设备申请与领取','/requests']]) {
+    expect(container.querySelector('nav')?.textContent).toBe('资产设备管理服务器资源算力预约办公设备申请')
+    for (const [label,path] of [['资产设备管理','/equipment'],['服务器资源','/servers'],['算力预约','/'],['办公设备申请','/requests']]) {
       await act(async()=>container.querySelector<HTMLButtonElement>('[aria-label="展开团队工作台"]')!.click())
       const item=[...container.querySelectorAll<HTMLButtonElement>('nav button')].find(button=>button.textContent===label)!
       await act(async()=>item.click())
@@ -35,9 +35,9 @@ describe('team workspace sidebar',()=>{
     await act(async()=>trigger.focus())
     expect(container.querySelector('nav')).not.toBeNull()
     await act(async()=>trigger.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true})))
-    expect(document.activeElement?.textContent).toBe('设备管理')
+    expect(document.activeElement?.textContent).toBe('资产设备管理')
     await act(async()=>document.activeElement!.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowUp',bubbles:true})))
-    expect(document.activeElement?.textContent).toBe('设备申请与领取')
+    expect(document.activeElement?.textContent).toBe('办公设备申请')
     await act(async()=>document.activeElement!.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true})))
     expect(document.activeElement).toBe(trigger)
     expect(container.querySelector('nav')).toBeNull()

@@ -1,12 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
-import { Building2, CalendarDays, ChevronRight, ClipboardList, FileText, HardDrive, Server } from 'lucide-react'
+import { Building2, CalendarDays, ChevronRight, ClipboardList, HardDrive, Server } from 'lucide-react'
 
 const links = [
-  { path: '/equipment', label: '设备管理', icon: HardDrive },
+  { path: '/equipment', label: '资产设备管理', icon: HardDrive },
   { path: '/servers', label: '服务器资源', icon: Server },
-  { path: '/reports', label: '周报与绩效', icon: FileText },
   { path: '/', label: '算力预约', icon: CalendarDays },
-  { path: '/requests', label: '设备申请与领取', icon: ClipboardList },
+  { path: '/requests', label: '办公设备申请', icon: ClipboardList },
 ] as const
 
 export function TeamWorkspaceMenu({ onOpen }: { onOpen: (path: typeof links[number]['path']) => void }) {

@@ -65,6 +65,13 @@ struct ScopedBindings {
     source_id: String,
     bindings: BTreeMap<String, Binding>,
 }
+#[derive(Clone)]
+struct UsageSample {
+    generation: u64,
+    remote_id: String,
+    company: String,
+    body: Value,
+}
 // Credentials, account identity and selections remain in the OS keyring, never in a WebView DTO.
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -88,6 +95,10 @@ struct Stored {
     login_pending: bool,
     #[serde(skip)]
     scope_pending: bool,
+    #[serde(skip)]
+    usage_sync: BTreeMap<String, Binding>,
+    #[serde(skip)]
+    usage_samples: BTreeMap<String, UsageSample>,
 }
 impl Default for Stored {
     fn default() -> Self {
@@ -104,6 +115,8 @@ impl Default for Stored {
             generation: 0,
             login_pending: false,
             scope_pending: false,
+            usage_sync: BTreeMap::new(),
+            usage_samples: BTreeMap::new(),
         }
     }
 }
@@ -125,6 +138,16 @@ impl Stored {
     }
     fn advance(&mut self) {
         self.generation = self.generation.wrapping_add(1);
+        self.usage_sync.clear();
+        self.usage_samples.clear();
+    }
+    fn cached_usage(&self, server: &Server, timestamp: i64) -> Option<&Value> {
+        let managed = server.managed.as_ref().filter(|managed| managed.available)?;
+        if !self.is_admin() || check_credential_session(self, managed).is_err() { return None; }
+        let sample = self.usage_samples.get(&server.id)?;
+        (sample.generation == self.generation && sample.remote_id == managed.remote_id
+            && sample.company == managed.company && sample.body["serverVersion"].as_u64() == Some(managed.version)
+            && usage_sample_is_fresh(&sample.body, timestamp)).then_some(&sample.body)
     }
     fn begin_login(&mut self) -> u64 {
         self.advance();
@@ -302,7 +325,7 @@ impl Stored {
         Ok(self.bindings.len())
     }
     fn public_status(&self) -> Value {
-        json!({"url":TEAM_URL,"authenticated":self.token.is_some(),"user":if self.token.is_some() {self.user.as_ref()} else {None},"expiresAt":self.expires_at,"bindings":self.bindings})
+        json!({"url":TEAM_URL,"authenticated":self.token.is_some(),"user":if self.token.is_some() {self.user.as_ref()} else {None},"expiresAt":self.expires_at,"bindings":self.bindings,"usageSync":self.usage_sync})
     }
 }
 
@@ -656,6 +679,38 @@ impl TeamManager {
         }
         self.status()
     }
+    pub(crate) fn usage_generation(&self, server: &Server) -> Option<u64> {
+        let managed = server.managed.as_ref().filter(|managed| managed.available)?;
+        let state = self.read().ok()?;
+        (state.is_admin() && check_credential_session(&state, managed).is_ok()).then_some(state.generation)
+    }
+    pub(crate) fn record_usage(&self, generation: Option<u64>, server: &Server, snapshot: &Snapshot) {
+        let Some(generation) = generation else { return; };
+        let Some(managed) = server.managed.as_ref().filter(|managed| managed.available) else { return; };
+        if snapshot.managed_server_version != Some(managed.version) { return; }
+        let timestamp = now_ms();
+        let Ok(body) = managed_telemetry_payload(server, Some(snapshot), timestamp) else { return; };
+        // This path deliberately never persists a Snapshot or a keyring update.
+        let _ = self.update(false, |state| {
+            if state.generation != generation || !state.is_admin() || check_credential_session(state, managed).is_err() {
+                return Ok(());
+            }
+            state.usage_samples.retain(|_, sample| usage_sample_is_fresh(&sample.body, timestamp));
+            if state.usage_samples.get(&server.id).is_some_and(|previous|
+                previous.body["serverVersion"].as_u64() > body["serverVersion"].as_u64()
+                    || (previous.body["serverVersion"] == body["serverVersion"]
+                        && previous.body["observedAt"].as_i64() > body["observedAt"].as_i64())) { return Ok(()); }
+            if state.usage_samples.len() >= 256 && !state.usage_samples.contains_key(&server.id) {
+                if let Some(oldest) = state.usage_samples.iter().min_by_key(|(_, sample)| sample.body["observedAt"].as_i64()).map(|(id, _)| id.clone()) {
+                    state.usage_samples.remove(&oldest);
+                }
+            }
+            state.usage_samples.insert(server.id.clone(), UsageSample {
+                generation, remote_id: managed.remote_id.clone(), company: managed.company.clone(), body,
+            });
+            Ok(())
+        });
+    }
     async fn sync(&self, servers: Vec<Server>, snapshots: Vec<Snapshot>) -> Result<Value, String> {
         let Ok(_lock) = self.sync_lock.try_lock() else {
             return self.status();
@@ -715,6 +770,36 @@ impl TeamManager {
                         }
                         Err(error) => current.error = Some(error),
                     }
+                }
+                Ok(())
+            })?;
+        }
+        // Managed connections already carry administrator authorization and are
+        // not personal inventory bindings. Publish only a bounded usage summary.
+        for server in servers.iter().filter(|server| server.managed.is_some()) {
+            let mut changes = self.changes.subscribe();
+            let current = self.read()?;
+            if !current.matches_session(&state) || !current.is_admin() { break; }
+            let managed = server.managed.as_ref().unwrap();
+            if !managed.available || check_credential_session(&current, managed).is_err() { continue; }
+            let operation = async {
+                let timestamp = now_ms();
+                let body = current.cached_usage(server, timestamp)
+                    .map(|body| Ok(body.clone()))
+                    .unwrap_or_else(|| managed_telemetry_payload(server, snapshots.iter().find(|s| s.server_id == server.id), timestamp))?;
+                self.request_with_scope(reqwest::Method::POST,
+                    &format!("/api/servers/{}/telemetry", managed.remote_id), Some(token), Some(body), Some(&state)).await
+            };
+            let result = tokio::select! { biased; _ = changes.changed() => break, result = operation => result };
+            self.update(false, |value| {
+                if !value.matches_session(&state) || !value.is_admin() { return Ok(()); }
+                let binding = value.usage_sync.entry(server.id.clone()).or_default();
+                match result {
+                    Ok(response) => {
+                        binding.resource_id = response.pointer("/resource/id").and_then(Value::as_str).map(str::to_owned);
+                        binding.last_synced_at = Some(now_ms()); binding.error = None;
+                    }
+                    Err(error) => binding.error = Some(error),
                 }
                 Ok(())
             })?;
@@ -1012,6 +1097,63 @@ fn user_has_company_access(user: &Value) -> bool {
         }
 }
 
+fn usage_sample_is_fresh(body: &Value, now: i64) -> bool {
+    body["observedAt"].as_i64().is_some_and(|observed| observed >= 0
+        && observed <= now.saturating_add(60_000) && now.saturating_sub(observed) <= 90_000)
+}
+
+pub fn managed_telemetry_payload(server: &Server, snapshot: Option<&Snapshot>, now: i64) -> Result<Value, String> {
+    let managed = server.managed.as_ref().filter(|managed| managed.available)
+        .ok_or("此服务器没有有效的组织授权")?;
+    if uuid::Uuid::parse_str(&managed.remote_id).is_err() { return Err("组织服务器标识无效".into()); }
+    let snapshot = snapshot.ok_or("尚无采样，请先连接此服务器")?;
+    if snapshot.server_id != server.id { return Err("采样与服务器不匹配".into()); }
+    let observed_at = snapshot.timestamp.checked_mul(1000).filter(|time| *time >= 0)
+        .ok_or("采样时间无效")?;
+    if observed_at > now.saturating_add(60_000) { return Err("采样时间超前，请检查电脑时钟".into()); }
+    let mut body = json!({"serverVersion":managed.version,"observedAt":observed_at,"status":"unknown",
+        "inventoryComplete":false,"gpuUsageValid":false,"processQueryOk":false,"gpus":[]});
+    if snapshot.managed_server_version != Some(managed.version)
+        || snapshot.accelerator_vendor != "nvidia" || snapshot.nvidia_smi != "available"
+        || !matches!(snapshot.status.as_str(), "online" | "warning") || now.saturating_sub(observed_at) > 90_000
+        || snapshot.gpus.is_empty() { return Ok(body); }
+    // Reuse strict full NVIDIA UUID/topology validation without admitting the
+    // managed connection into the separate personal-inventory sync path.
+    let mut hardware_server = server.clone(); hardware_server.managed = None;
+    let hardware = inventory_payload(&hardware_server, Some(snapshot), "", Some("existing"), now)?;
+    let mut all_metrics_valid = snapshot.gpu_usage_valid;
+    let mut user_bytes_left = 8192usize;
+    let gpus: Vec<Value> = snapshot.gpus.iter().zip(hardware["gpus"].as_array().unwrap()).map(|(gpu, identity)| {
+        let utilization = (gpu.utilization.is_finite() && (0.0..=100.0).contains(&gpu.utilization)).then_some(gpu.utilization);
+        let memory = (gpu.memory_used_mb.is_finite() && (0.0..=gpu.memory_total_mb).contains(&gpu.memory_used_mb)).then_some(gpu.memory_used_mb);
+        all_metrics_valid &= utilization.is_some() && memory.is_some();
+        let processes: Vec<_> = snapshot.processes.iter().filter(|process| process.gpu_uuid.eq_ignore_ascii_case(&gpu.uuid)).collect();
+        let users: BTreeSet<_> = processes.iter().filter_map(|process| {
+            let name = process.username.trim();
+            (!name.is_empty() && name.len() <= 64 && !name.chars().any(char::is_control)
+                && !matches!(name.to_ascii_lowercase().as_str(), "unknown" | "(unknown)" | "[unknown]" | "<unknown>" | "n/a" | "?"))
+                .then_some(name.to_owned())
+        }).collect();
+        // Bound the summary independently of the number of remote processes.
+        // If names cannot fit, hasProcesses still preserves known occupancy.
+        let users: Vec<_> = users.into_iter().take(128).filter(|name| {
+            if name.len() > user_bytes_left { return false; }
+            user_bytes_left -= name.len(); true
+        }).collect();
+        let mut value = identity.clone();
+        if gpu.name.is_empty() || gpu.name.chars().count() > 100 { all_metrics_valid = false; }
+        value["name"] = json!(gpu.name.chars().take(100).collect::<String>());
+
+        value["utilization"] = json!(utilization); value["memoryUsedMb"] = json!(memory);
+        value["hasProcesses"] = json!(!processes.is_empty()); value["users"] = json!(users);
+        value
+    }).collect();
+    body["status"] = json!("online"); body["inventoryComplete"] = json!(all_metrics_valid);
+    body["gpuUsageValid"] = json!(all_metrics_valid); body["processQueryOk"] = json!(snapshot.gpu_process_query_ok);
+    body["gpus"] = json!(gpus);
+    Ok(body)
+}
+
 pub fn inventory_payload(
     server: &Server,
     snapshot: Option<&Snapshot>,
@@ -1227,6 +1369,9 @@ mod tests {
             processes: vec![],
             cpu_processes: vec![],
             processes_sampled: true,
+            gpu_usage_valid: true,
+            gpu_process_query_ok: true,
+            managed_server_version: None,
             nvidia_smi: "available".into(),
             nvidia_message: Some("private-driver-diagnostic".into()),
         };
@@ -1468,6 +1613,143 @@ mod tests {
     fn shared_response(server: &Server) -> Value {
         let m=server.managed.as_ref().unwrap();
         json!({"serverId":m.remote_id,"company":m.company,"version":m.version,"credentialRevision":m.credential_revision,"password":"  合成 target 密码  ","jumpPassword":"独立 jump 密码"})
+    }
+
+    #[test]
+    fn managed_usage_projects_only_hardware_activity_and_system_users() {
+        let (_dir, _db, _manager, server, _) = shared_fixture();
+        let (_, mut snapshot) = fixture(); snapshot.server_id = server.id.clone(); snapshot.managed_server_version = Some(1);
+        snapshot.gpus[0].utilization = 70.0; snapshot.gpus[0].memory_used_mb = 512.0;
+        snapshot.processes.push(crate::models::ProcessMetric {
+            gpu_uuid: snapshot.gpus[0].uuid.clone(), gpu_index: 0, pid: 987654, parent_pid: 654321,
+            username: "root".into(), command: "private-command --private-token".into(),
+            memory_used_mb: 512.0, sm_utilization: None, cpu_percent: 1.0, elapsed: "private-elapsed".into(),
+            is_current_user: false, is_group_leader: true,
+        });
+        let value = managed_telemetry_payload(&server, Some(&snapshot), 1_000_000).unwrap();
+        assert_eq!(value["serverVersion"], 1); assert_eq!(value["gpus"][0]["users"], json!(["root"]));
+        assert_eq!(value["gpus"][0]["hasProcesses"], true); assert_eq!(value["gpus"][0]["utilization"], 70.0);
+        assert_eq!(value["processQueryOk"], true); assert_eq!(value["gpuUsageValid"], true);
+        assert_eq!(value["inventoryComplete"], true);
+        let text = value.to_string();
+        for secret in ["private-", "node.example", "jump.example", "worker", "987654", "654321", "hasPassword", "accountId"] { assert!(!text.contains(secret), "{secret}"); }
+        snapshot.processes[0].username = "unknown".into();
+        let unknown = managed_telemetry_payload(&server, Some(&snapshot), 1_000_000).unwrap();
+        assert_eq!(unknown["gpus"][0]["users"], json!([])); assert_eq!(unknown["gpus"][0]["hasProcesses"], true);
+    }
+
+    #[test]
+    fn managed_usage_rejects_bad_identity_and_keeps_stale_or_failed_queries_unknown() {
+        let (_dir, _db, _manager, mut server, _) = shared_fixture();
+        let (_, mut snapshot) = fixture(); snapshot.server_id = server.id.clone(); snapshot.managed_server_version = Some(1);
+        for change in ["stale", "driver", "empty", "vendor", "offline", "legacy", "changed-server"] {
+            let mut sample = snapshot.clone();
+            match change { "stale" => sample.timestamp = 900, "driver" => sample.nvidia_smi = "unavailable".into(),
+                "empty" => sample.gpus.clear(), "vendor" => sample.accelerator_vendor = "npu".into(),
+                "legacy" => sample.managed_server_version = None, "changed-server" => sample.managed_server_version = Some(2),
+                _ => sample.status = "offline".into() }
+            let value = managed_telemetry_payload(&server, Some(&sample), 1_000_000).unwrap();
+            assert_eq!(value["status"], "unknown", "{change}"); assert_eq!(value["gpus"], json!([]));
+        }
+        snapshot.gpu_process_query_ok = false; snapshot.gpu_usage_valid = false;
+        let value = managed_telemetry_payload(&server, Some(&snapshot), 1_000_000).unwrap();
+        assert_eq!(value["processQueryOk"], false); assert_eq!(value["gpuUsageValid"], false);
+        assert_eq!(value["inventoryComplete"], false);
+        snapshot.gpu_usage_valid = true; snapshot.gpus[0].utilization = f64::NAN;
+        let value = managed_telemetry_payload(&server, Some(&snapshot), 1_000_000).unwrap();
+        assert_eq!(value["gpuUsageValid"], false); assert!(value["gpus"][0]["utilization"].is_null());
+        snapshot.timestamp = 1061; assert!(managed_telemetry_payload(&server, Some(&snapshot), 1_000_000).is_err());
+        snapshot.timestamp = 1000; snapshot.server_id = "wrong-connection".into();
+        assert!(managed_telemetry_payload(&server, Some(&snapshot), 1_000_000).is_err());
+        snapshot.server_id = server.id.clone(); server.managed.as_mut().unwrap().available = false;
+        assert!(managed_telemetry_payload(&server, Some(&snapshot), 1_000_000).is_err());
+    }
+
+    #[tokio::test]
+    async fn managed_usage_uses_admin_device_scope_without_personal_binding_or_persistence() {
+        let (_dir, _db, mut manager, server, _) = shared_fixture();
+        let (_, mut snapshot) = fixture(); snapshot.server_id = server.id.clone(); snapshot.managed_server_version = Some(1); snapshot.timestamp = now_ms() / 1000;
+        let (url, http) = serve_shared_response(json!({"resource":{"id":"00000000-0000-4000-8000-000000000099"}}), 200, Duration::ZERO);
+        manager.test_url = Some(url);
+        let status = manager.sync(vec![server.clone()], vec![snapshot.clone()]).await.unwrap();
+        let request = http.join().unwrap();
+        assert!(request.starts_with("POST /api/servers/00000000-0000-4000-8000-000000000001/telemetry HTTP/1.1"));
+        assert!(request.to_lowercase().contains("authorization: bearer fixture-shared-token"));
+        assert!(request.to_lowercase().contains("x-racktop-company: a%e5%85%ac%e5%8f%b8"));
+        assert!(status["bindings"].as_object().unwrap().is_empty());
+        assert_eq!(status["usageSync"][&server.id]["resourceId"], "00000000-0000-4000-8000-000000000099");
+        let stored = manager.read().unwrap(); assert!(!serde_json::to_string(&stored).unwrap().contains("usageSync"));
+        manager.value.lock().unwrap().as_mut().unwrap().user.as_mut().unwrap()["role"] = json!("member");
+        manager.value.lock().unwrap().as_mut().unwrap().advance();
+        let status = manager.sync(vec![server], vec![snapshot]).await.unwrap();
+        assert!(status["usageSync"].as_object().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn managed_usage_live_samples_publish_without_snapshot_history() {
+        for (record_history, history_enabled) in [(false, true), (true, false)] {
+            let (_dir, db, mut manager, server, _) = shared_fixture();
+            let mut settings = db.get_settings().unwrap(); settings.history_enabled = history_enabled;
+            db.save_settings(&settings).unwrap();
+            let (_, mut snapshot) = fixture(); snapshot.server_id = server.id.clone();
+            snapshot.managed_server_version = Some(1); snapshot.timestamp = now_ms() / 1000;
+            snapshot.gpus[0].utilization = 71.0;
+            manager.record_usage(manager.usage_generation(&server), &server, &snapshot);
+            if record_history { db.save_snapshot(&snapshot).unwrap(); }
+            assert!(db.list_latest_snapshots().unwrap().is_empty());
+            let (url, http) = serve_shared_response(json!({"resource":null}), 200, Duration::ZERO);
+            manager.test_url = Some(url);
+            // The old persisted-snapshot route has no sample in either setting.
+            manager.sync(vec![server.clone()], db.list_latest_snapshots().unwrap()).await.unwrap();
+            let request = http.join().unwrap();
+            let body: Value = serde_json::from_str(request.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+            assert_eq!(body["status"], "online"); assert_eq!(body["gpus"][0]["utilization"], 71.0);
+            assert_eq!(body["serverVersion"], 1);
+            for secret in ["private-", "node.example", "jump.example", "worker"] { assert!(!body.to_string().contains(secret)); }
+            let state = manager.read().unwrap();
+            assert!(state.usage_samples.contains_key(&server.id));
+            let persisted = serde_json::to_value(&state).unwrap();
+            assert!(persisted.get("usageSamples").is_none());
+            assert!(serde_json::from_value::<Stored>(persisted).unwrap().usage_samples.is_empty());
+        }
+    }
+
+    #[test]
+    fn managed_usage_live_samples_reject_old_sessions_versions_and_stale_data() {
+        let (_dir, _db, manager, mut server, _) = shared_fixture();
+        let (_, mut snapshot) = fixture(); snapshot.server_id = server.id.clone();
+        snapshot.managed_server_version = Some(1); snapshot.timestamp = now_ms() / 1000;
+        let generation = manager.usage_generation(&server);
+        manager.record_usage(generation, &server, &snapshot);
+        assert!(manager.read().unwrap().cached_usage(&server, now_ms()).is_some());
+        assert!(manager.read().unwrap().cached_usage(&server, now_ms() + 91_000).is_none());
+        server.managed.as_mut().unwrap().version = 2;
+        assert!(manager.read().unwrap().cached_usage(&server, now_ms()).is_none());
+        snapshot.managed_server_version = Some(2);
+        manager.record_usage(generation, &server, &snapshot);
+        assert_eq!(manager.read().unwrap().cached_usage(&server, now_ms()).unwrap()["serverVersion"], 2);
+        let mut older_server = server.clone(); older_server.managed.as_mut().unwrap().version = 1;
+        let mut older_snapshot = snapshot.clone(); older_snapshot.managed_server_version = Some(1);
+        manager.record_usage(generation, &older_server, &older_snapshot);
+        assert_eq!(manager.read().unwrap().cached_usage(&server, now_ms()).unwrap()["serverVersion"], 2);
+        manager.value.lock().unwrap().as_mut().unwrap().advance();
+        manager.record_usage(generation, &server, &snapshot);
+        assert!(manager.read().unwrap().usage_samples.is_empty());
+        let generation = manager.usage_generation(&server);
+        manager.record_usage(generation, &server, &snapshot);
+        let mut previous = manager.read().unwrap();
+        previous.generation = previous.generation.wrapping_add(1);
+        assert!(previous.cached_usage(&server, now_ms()).is_none());
+        let mut changed_scope = manager.read().unwrap();
+        changed_scope.user.as_mut().unwrap()["company"] = json!("西浦");
+        assert!(changed_scope.cached_usage(&server, now_ms()).is_none());
+        let mut member = manager.read().unwrap();
+        member.user.as_mut().unwrap()["role"] = json!("member");
+        assert!(member.cached_usage(&server, now_ms()).is_none());
+        manager.value.lock().unwrap().as_mut().unwrap().clear_login();
+        manager.record_usage(generation, &server, &snapshot);
+        assert!(manager.read().unwrap().usage_samples.is_empty());
+        assert!(manager.usage_generation(&server).is_none());
     }
 
     // Loopback HTTP bytes exercise the production reqwest path without reading a

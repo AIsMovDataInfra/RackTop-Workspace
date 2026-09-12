@@ -5,8 +5,9 @@ export interface TeamStatus {
   url: string; authenticated: boolean
   user: { id: string; name: string; username: string; role: 'admin' | 'member'; company?: TeamCompany | null; companies?: TeamCompany[]; isSuperAdmin?: boolean; version?: number; avatar?: string } | null
   bindings: Record<string, { resourceId: string | null; lastSyncedAt: number | null; error: string | null }>
+  usageSync?: Record<string, { resourceId: string | null; lastSyncedAt: number | null; error: string | null }>
 }
-export interface TeamResource { id: string; name: string; cluster: string; gpuModel: string; gpuCount: number; status: string; lastSeenAt: string | null; inventoryState: string; enabled: boolean }
+export interface TeamResource { id: string; name: string; cluster: string; gpuModel: string; gpuCount: number; status: string; lastSeenAt: string | null; inventoryState: string; enabled: boolean; usage?: { state: 'busy' | 'free' | 'unknown'; observedAt: string | null } }
 export interface TeamReservation { id: string; resourceId: string; resourceName: string; ownerName: string; scope: string; gpuIndices: number[]; startAt: string; endAt: string; status: string }
 export interface TeamData { resources: TeamResource[]; reservations: TeamReservation[] }
 async function call<T>(name: string, args?: Record<string, unknown>): Promise<T> {

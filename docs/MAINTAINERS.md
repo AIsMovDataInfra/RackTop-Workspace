@@ -42,7 +42,7 @@ npm run team:build
 cargo test --locked --manifest-path src-tauri/Cargo.toml
 ```
 
-按实际改动选择检查，并进行需要的平台运行验证。版本号同步 npm、Cargo 和 Tauri；详细记录追加至 [VERSION_INFOS.md](VERSION_INFOS.md)，用户摘要写入 [Version_overview.md](Version_overview.md)。历史 `VERIFICATION*.md` 保留实际验收范围，不能用旧版记录代替本轮检查。
+按实际改动选择检查，并进行需要的平台运行验证。六处应用版本字段必须一致：`package.json.version`、`package-lock.json.version`、`package-lock.json.packages[""].version`、`src-tauri/Cargo.toml` 的 `[package].version`、`src-tauri/Cargo.lock` 中同名应用包的版本、`src-tauri/tauri.conf.json.version`。只更新应用版本，不重算依赖版本；详细记录追加至 [VERSION_INFOS.md](VERSION_INFOS.md)，用户摘要写入 [Version_overview.md](Version_overview.md)。历史 `VERIFICATION*.md` 保留实际验收范围，不能用旧版记录代替本轮检查。
 
 `.github/workflows/build.yml` 构建 Linux DEB、Flatpak 及两种 Mac 包；`team-web.yml` 验证并打包团队网页。由 `scripts/publish-workspace-update.py` 核验版本标签、安装包、许可证、源码、摘要和签名后发布，并最后推进更新清单。
 
@@ -51,6 +51,32 @@ cargo test --locked --manifest-path src-tauri/Cargo.toml
 **当前分发为 [2.7.3 测试版（Pre-release）](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/tag/v2.7.3)。** 发布顺序为：完成全部平台验证 → 归并源码 → 固定版本标签 → 上传并验证全部附件 → 推进更新清单 → 发布安装脚本及下载页面。下载页提供统一在线安装器及四个平台安装入口。新 Ubuntu 20.04 离线套件的根目录为 `RackTop_2.7.3_flatpak_offline`，内置 `install.sh` 进行用户级安装；保留已有系统级安装应使用统一在线安装器。后续页面的阶段文字仍须以实际公开下载和安装验证为准。
 
 SSH 连接和文件传输继续通过成员本机网络直连目标服务器。2.7.3 的客户端加固减少密码意外暴露，但不能阻止获授权成员主动取得密码。
+
+## 2.8.0 待发布内容与兼容性
+
+当前源码版本为 **2.8.0，待发布、待最终验证**；上方安装流程及公开下载仍为 2.7.3。正式包发布、验签和公开下载核验完成后，再更新用户下载链接及发布记录。
+
+- 团队导航使用「资产设备管理」和「办公设备申请」，移除周报前台入口；已登录用户打开旧 `/reports` 链接可看到移除说明。周报 API 保留既有鉴权并返回 `410 REPORTS_REMOVED`，历史周报表、内容及相关审计保留，部署不得清表。旧客户端的周报入口可能仍存在，需要升级后同步移除。
+- GPU / CPU 集群按实际 GPU 数量分类，保留原集群名称。CPU 入口和整机预约已准备，当前尚未登记 CPU 资源；本轮不提供通用 CPU 实时占用采集。
+- 管理员使用 2.8.0 桌面登录团队并连接获授权的服务器后，桌面通过本机网络 SSH 采集 NVIDIA GPU 观测，约每 30 秒向云端同步摘要。托管采集需要同版本团队服务支持 `/api/servers/:id/telemetry`；旧 2.7.3 客户端不能提供该摘要。个人硬件同步与托管采集分开，成员账号不得上传托管摘要。实时摘要保存在内存中，关闭本地历史记录也能同步，不额外持久化完整采样。
+- 云端新增托管资源绑定和占用摘要表，保留现有资源、预约及硬件身份。完整硬件观测才能首次建立 GPU 资源；失败采样不会创建假的 CPU 资源，硬件变化或归属冲突须由管理员核验。
+- 没有足以判断占用或空闲的有效证据，或观测超过 90 秒有效期时，显示占用未知，不将旧数据视为空闲；部分查询失败但仍有占用证据时可显示被占用。占用用户名来自服务器 Linux 系统账号，与预约人分开；已知忙碌但无用户名显示「匿名用户」。摘要只用于协作判断，预约不停止实际任务，当前忙碌不禁止未来时段预约。
+
+先部署经验证的团队服务，再让管理员使用正式 2.8.0 桌面采集；仅上线网页不能让旧桌面产生新摘要。服务更新需备份外置数据库，并核对历史周报、资产、申请、预约、硬件绑定及权限保留。安装包继续覆盖 Ubuntu 20.04 Flatpak（含离线套件）、Ubuntu 22.04 DEB 和两种 Mac；本轮平台安装、资料保留及真实端到端结果必须单独记录，不能套用 2.7.3 的验收。
+
+### 正式构建入口
+
+在六字段一致、功能与数据保留检查通过、最终提交已集成至 `main` 后，使用该提交创建尚不存在的不可变 `v2.8.0` 标签并推送。标签触发 [build.yml](../.github/workflows/build.yml) 的 Linux 与两种 Mac 正式构建；三者全部成功后才由发布 job 调用 [publish-workspace-update.py](../scripts/publish-workspace-update.py)。不要移动标签或手动提前推进 `updater`。
+
+团队服务使用独立的 [team-web.yml](../.github/workflows/team-web.yml) 手动构建入口；Actions 产物只是部署包，构建成功不代表生产服务已更新。以下命令以已审核的最终 `main` 提交为前提；构建后还应核对 run 的 `headSha` 与最终提交相同：
+
+```bash
+racktop-gh workflow run team-web.yml --repo AIsMovDataInfra/RackTop-Workspace --ref main
+racktop-gh run list --repo AIsMovDataInfra/RackTop-Workspace --workflow team-web.yml --limit 5
+racktop-gh run list --repo AIsMovDataInfra/RackTop-Workspace --workflow build.yml --limit 5
+```
+
+正式 Release 后，核对附件、四个更新目标的签名、对应源码与许可证，再准备新版本的下载镜像与页面。2.7.3 的既有冻结策略和验收记录不能直接当作 2.8.0 发布依据；只有公开地址的实际内容与新产物吻合后，才把当前下载版本改为 2.8.0。
 
 ## 数据与来源
 

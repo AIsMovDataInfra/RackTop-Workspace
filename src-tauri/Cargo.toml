@@ -1,6 +1,6 @@
 [package]
 name = "racktop"
-version = "2.7.3"
+version = "2.8.0"
 description = "Live GPU & CPU monitoring for every server"
 # Original author: Tongzh-SEU and upstream contributors; see ../NOTICE.md.
 # Linux bundle.publisher supplies the Debian maintainer separately.

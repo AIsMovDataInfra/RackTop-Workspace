@@ -1742,6 +1742,7 @@ mod tests {
     fn snapshot(server_id: &str, timestamp: i64) -> Snapshot {
         Snapshot {
             server_id: server_id.into(),
+            managed_server_version: None,
             hostname: "gpu-test".into(),
             username: "test".into(),
             os_id: "ubuntu".into(),
@@ -1755,6 +1756,8 @@ mod tests {
             processes: Vec::new(),
             cpu_processes: Vec::new(),
             processes_sampled: true,
+            gpu_usage_valid: false,
+            gpu_process_query_ok: false,
             nvidia_smi: "available".into(),
             nvidia_message: None,
         }

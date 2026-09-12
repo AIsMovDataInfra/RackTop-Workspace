@@ -182,7 +182,7 @@ export function createTeamServer(overrides = {}) {
       if (url.pathname === '/api/servers' || url.pathname.startsWith('/api/servers/')) {
         if (!managedServerStore) throw new ApiError(403, 'ACCOUNT_REQUIRED', '请使用团队账号登录服务器目录');
         const canFilter = req.method === 'GET' && ['/api/servers', '/api/servers/members'].includes(url.pathname);
-        const canSelectSchema = url.pathname !== '/api/servers/members' && !url.pathname.endsWith('/credentials');
+        const canSelectSchema = url.pathname !== '/api/servers/members' && !url.pathname.endsWith('/credentials') && !url.pathname.endsWith('/telemetry');
         if ([...url.searchParams.keys()].some(key => !['company', 'schema'].includes(key))
           || url.searchParams.getAll('company').length > 1 || url.searchParams.getAll('schema').length > 1
           || (url.searchParams.has('company') && (!canFilter || !ACCOUNT_COMPANIES.includes(url.searchParams.get('company'))))
@@ -199,12 +199,18 @@ export function createTeamServer(overrides = {}) {
         if (url.pathname === '/api/servers/import' && req.method === 'POST') {
           json(res, 200, managedServerStore.importServers(body, user, schema)); return;
         }
-        const serverMatch = /^\/api\/servers\/([a-f0-9-]{36})(?:\/(grants|credentials))?$/.exec(url.pathname);
+        const serverMatch = /^\/api\/servers\/([a-f0-9-]{36})(?:\/(grants|credentials|telemetry))?$/.exec(url.pathname);
         if (serverMatch) {
           const [, id, action] = serverMatch;
           if (!action && req.method === 'GET') { json(res, 200, { server: managedServerStore.get(id, user, schema) }); return; }
           if (!action && req.method === 'PATCH') { json(res, 200, { server: managedServerStore.update(id, body, user, schema) }); return; }
           if (action === 'grants' && req.method === 'PUT') { json(res, 200, { server: managedServerStore.grant(id, body, user, schema) }); return; }
+          if (action === 'telemetry' && req.method === 'POST') {
+            if (session.kind !== 'device') throw new ApiError(403, 'DEVICE_REQUIRED', '资源遥测仅供已登录的桌面客户端上报');
+            if (typeof req.headers['x-racktop-company'] !== 'string') throw new ApiError(409, 'COMPANY_CHANGED', '请刷新当前组织后重试');
+            const managed = managedServerStore.authorizeTelemetry(id, user, body.serverVersion);
+            json(res, 200, { resource: store.syncManagedTelemetry(body, user, managed) }); return;
+          }
           if (action === 'credentials' && req.method === 'POST') {
             if (session.kind !== 'device') throw new ApiError(403, 'DEVICE_REQUIRED', '共享密码仅供已登录的桌面客户端连接使用');
             if (typeof req.headers['x-racktop-company'] !== 'string') throw new ApiError(409, 'COMPANY_CHANGED', '请刷新当前组织后重试');
@@ -213,30 +219,13 @@ export function createTeamServer(overrides = {}) {
         }
         throw new ApiError(405, 'METHOD_NOT_ALLOWED', '服务器目录不支持此操作');
       }
-      const reportMatch = /^\/api\/workspace\/reports\/([^/]+)(?:\/(reviewer|review))?$/.exec(url.pathname);
       const requestMatch = /^\/api\/workspace\/requests\/([^/]+)$/.exec(url.pathname);
       if (url.pathname.startsWith('/api/workspace/')) {
         if (config.mode !== 'account') throw new ApiError(403, 'ACCOUNT_REQUIRED', '请使用团队账号登录此功能');
-        if (url.pathname === '/api/workspace/reports/statistics') {
-          if (!user.isSuperAdmin) throw new ApiError(403, 'SUPERADMIN_REQUIRED', '仅超级管理员可查看周报统计');
-          if (req.method !== 'GET') throw new ApiError(405, 'METHOD_NOT_ALLOWED', '周报统计仅支持读取');
-          for (const key of url.searchParams.keys()) {
-            if (!['weekStart', 'company', 'memberId'].includes(key) || url.searchParams.getAll(key).length !== 1) throw new ApiError(422, 'INVALID_INPUT', '周报统计查询参数无效');
-          }
-          json(res, 200, workspaceStore.reportStatistics(Object.fromEntries(url.searchParams), user)); return;
+        if (url.pathname === '/api/workspace/reports' || url.pathname.startsWith('/api/workspace/reports/')) {
+          throw new ApiError(410, 'REPORTS_REMOVED', '周报功能已移除，历史资料仍保留');
         }
         if ([...url.searchParams].length) throw new ApiError(422, 'INVALID_INPUT', '工作台接口不支持查询参数');
-        if (url.pathname === '/api/workspace/reports') {
-          if (req.method === 'GET') { json(res, 200, { reports: workspaceStore.listReports(user) }); return; }
-          if (req.method === 'POST') { json(res, 201, { report: workspaceStore.createReport(body, user) }); return; }
-        }
-        if (reportMatch) {
-          const [, id, action] = reportMatch;
-          if (!action && req.method === 'GET') { json(res, 200, workspaceStore.getReport(id, user)); return; }
-          if (!action && req.method === 'PATCH') { json(res, 200, { report: workspaceStore.updateReport(id, body, user) }); return; }
-          if (action === 'reviewer' && req.method === 'POST') { json(res, 200, { report: workspaceStore.assignReviewer(id, body, user) }); return; }
-          if (action === 'review' && req.method === 'POST') { json(res, 200, { report: workspaceStore.reviewReport(id, body, user) }); return; }
-        }
         if (url.pathname === '/api/workspace/requests') {
           if (req.method === 'GET') { json(res, 200, { requests: workspaceStore.listRequests(user) }); return; }
           if (req.method === 'POST') { json(res, 201, workspaceStore.createRequest(body, user)); return; }

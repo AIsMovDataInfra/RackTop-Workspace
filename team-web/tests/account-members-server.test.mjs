@@ -5,8 +5,10 @@ import { randomBytes } from 'node:crypto';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import sharp from 'sharp';
 import { createTeamServer } from '../server/server.mjs';
+import { createWorkspaceStore } from '../server/workspace-store.mjs';
 
 const PUBLIC = 'https://members.example.test';
 const BASE = Date.parse('2026-09-09T04:00:00Z');
@@ -54,7 +56,7 @@ async function fixture(t) {
 const equipmentDraft = (extra = {}) => ({ name: '设备管理隐私验收', category: '摄像头模组', location: '上海', ...extra });
 const resourceDraft = { company: '西浦', name: '预约隐私验收', cluster: '训练集群', gpuModel: 'A100', gpuCount: 1, notes: '已登录成员业务备注' };
 
-test('browser and device organization switches isolate catalogs, reports and stale writes while legacy sessions keep the primary organization', async t => {
+test('browser and device organization switches isolate catalogs and stale writes while legacy sessions keep the primary organization', async t => {
   const { app, call, admin, login } = await fixture(t);
   const added = await call('/api/admin/members', { method: 'POST', session: admin, body: { name: '跨组织成员', password: '密', companies: ['A公司', '西浦'] } });
   assert.equal(added.status, 201, added.text);
@@ -67,9 +69,6 @@ test('browser and device organization switches isolate catalogs, reports and sta
     assert.equal((await call('/api/equipment', { method: 'POST', session: admin, body: equipmentDraft({ company, name: company }) })).status, 201);
     assert.equal((await call('/api/resources', { method: 'POST', session: admin, body: { ...resourceDraft, company, name: company } })).status, 201);
   }
-  const reportInput = { weekStart: '2026-09-07', todos: [], nextPlan: '' };
-  const reportA = await call('/api/workspace/reports', { method: 'POST', session, headers: scoped('A公司'), body: reportInput });
-  assert.equal(reportA.status, 201, reportA.text);
   const switched = await call('/api/auth/company', { method: 'POST', session, headers: scoped('A公司'), body: { company: '西浦' } });
   assert.equal(switched.status, 200, switched.text); assert.equal(switched.body.user.company, '西浦');
   assert.deepEqual(switched.body.user.companies, ['A公司', '西浦']);
@@ -85,12 +84,6 @@ test('browser and device organization switches isolate catalogs, reports and sta
     const result = await call(path, { session, headers: scoped('西浦') });
     assert.equal(result.status, 200, result.text); assert.deepEqual(result.body[key].map(row => row.company), ['西浦']);
   }
-  assert.equal((await call(`/api/workspace/reports/${reportA.body.report.id}`, { session, headers: scoped('西浦') })).status, 404);
-  const reportB = await call('/api/workspace/reports', { method: 'POST', session, headers: scoped('西浦'), body: reportInput });
-  assert.equal(reportB.status, 201, reportB.text); assert.equal(reportB.body.report.company, '西浦');
-  const statistics = await call(`/api/workspace/reports/statistics?weekStart=2026-09-07&memberId=${member.id}`, { session: admin });
-  assert.equal(statistics.status, 200, statistics.text); assert.equal(statistics.body.rows.length, 2);
-  assert.deepEqual(new Set(statistics.body.rows.map(row => row.reportId)), new Set([reportA.body.report.id, reportB.body.report.id]));
   assert.equal((await call('/api/auth/company', { method: 'POST', token: device.token, body: { company: '西浦' } })).status, 200);
   assert.equal((await call('/api/equipment', { token: device.token, headers: scoped('A公司') })).status, 409);
   assert.equal((await call('/api/equipment', { token: device.token, headers: scoped('西浦') })).status, 200);
@@ -110,7 +103,7 @@ test('browser and device organization switches isolate catalogs, reports and sta
   assert.equal((await call('/api/auth/company', { method: 'POST', session: admin, body: { company: 'A公司' } })).status, 403);
 });
 
-test('non-primary membership permits equipment collection and reviewer assignment, and revocation removes both grants', async t => {
+test('non-primary membership permits equipment collection and revoked membership leaves the request and ledger unchanged', async t => {
   const { call, admin, login } = await fixture(t);
   const add = async name => {
     const result = await call('/api/admin/members', { method: 'POST', session: admin, body: { name, password: '密', companies: ['A公司', '西浦'] } });
@@ -119,7 +112,7 @@ test('non-primary membership permits equipment collection and reviewer assignmen
     assert.equal((await call('/api/auth/company', { method: 'POST', session, body: { company: '西浦' } })).status, 200);
     return { member: result.body.member, session };
   };
-  const author = await add('双组织领用人'), reviewer = await add('双组织评审人');
+  const author = await add('双组织领用人');
   const headers = { 'x-racktop-company': encodeURIComponent('西浦') };
   for (const revoke of [false, true]) {
     const equipment = (await call('/api/equipment', { method: 'POST', session: author.session, headers, body: equipmentDraft() })).body.equipment;
@@ -128,24 +121,16 @@ test('non-primary membership permits equipment collection and reviewer assignmen
     assert.equal(created.status, 201, created.text);
     const path = `/api/workspace/requests/${created.body.id}`;
     assert.equal((await call(path, { method: 'PATCH', session: admin, body: { version: 1, status: 'approved', comment: '' } })).status, 200);
+    const beforeRequest = (await call(path, { session: admin })).body;
+    const beforeEquipment = (await call(`/api/equipment/${equipment.id}`, { session: admin })).body;
     if (revoke) assert.equal((await call(`/api/admin/members/${author.member.id}`, { method: 'PATCH', session: admin, body: { version: author.member.version, companies: ['A公司'] } })).status, 200);
     const collected = await call(path, { method: 'PATCH', session: admin, body: { version: 2, status: 'collected', comment: '' } });
     assert.equal(collected.status, revoke ? 409 : 200, collected.text);
-    if (revoke) assert.equal((await call(path, { session: admin })).body.request.status, 'approved');
+    if (revoke) {
+      assert.deepEqual((await call(path, { session: admin })).body, beforeRequest);
+      assert.deepEqual((await call(`/api/equipment/${equipment.id}`, { session: admin })).body, beforeEquipment);
+    }
   }
-  const report = await call('/api/workspace/reports', { method: 'POST', session: admin,
-    body: { authorId: reviewer.member.id, company: '西浦', weekStart: '2026-09-07', todos: [], nextPlan: '' } });
-  assert.equal(report.status, 201, report.text);
-  // Regrant the author's secondary membership, then use it as a reviewer grant.
-  assert.equal((await call(`/api/admin/members/${author.member.id}`, { method: 'PATCH', session: admin, body: { version: author.member.version + 1, companies: ['A公司', '西浦'] } })).status, 200);
-  assert.equal((await call('/api/auth/company', { method: 'POST', session: author.session, body: { company: '西浦' } })).status, 200);
-  const path = `/api/workspace/reports/${report.body.report.id}`;
-  const assigned = await call(`${path}/reviewer`, { method: 'POST', session: admin, body: { version: 1, reviewerId: author.member.id } });
-  assert.equal(assigned.status, 200, assigned.text);
-  assert.equal((await call(path, { session: author.session, headers })).status, 200);
-  assert.equal((await call(`/api/admin/members/${author.member.id}`, { method: 'PATCH', session: admin, body: { version: author.member.version + 2, companies: ['A公司'] } })).status, 200);
-  assert.equal((await call(path, { session: author.session, headers })).status, 409);
-  assert.equal((await call(`${path}/reviewer`, { method: 'POST', session: admin, body: { version: 2, reviewerId: author.member.id } })).status, 422);
 });
 
 async function seedBusiness(call, admin) {
@@ -366,64 +351,99 @@ test('workspace HTTP saves private requests and approved collection atomically u
   const duplicate = await call(`/api/workspace/requests/${id}`, { method: 'PATCH', session: admin, body: { version: 2, status: 'collected', comment: '重试' } });
   assert.equal(duplicate.status, 409);
   assert.equal((await call(`/api/equipment/${equipment.id}`, { session })).body.equipment.version, 2);
-  const report = await call('/api/workspace/reports', { method: 'POST', session, body: { weekStart: '2026-09-07', todos: [{ text: '完成接线', completion: 80, unfinishedReason: '待校准', effect: '已联调' }], nextPlan: '完成校准', status: 'submitted' } });
-  assert.equal(report.status, 201, report.text);
-  assert.equal((await call(`/api/workspace/reports/${report.body.report.id}`, { session })).status, 200);
-  assert.equal((await call('/api/workspace/reports', { session })).body.reports.length, 1);
 });
 
-test('weekly statistics HTTP protects the full roster and retains deleted authors without exposing account secrets', async t => {
-  const { call, admin, login, register, anonymous, bootstrapToken } = await fixture(t);
+function historicalReports(dbPath) {
+  const db = new DatabaseSync(dbPath, { readOnly: true });
+  try {
+    return {
+      schema: db.prepare("SELECT type,name,tbl_name,sql FROM sqlite_schema WHERE tbl_name IN ('weekly_reports','workspace_audit') ORDER BY type,name").all(),
+      reports: db.prepare('SELECT * FROM weekly_reports ORDER BY id').all(),
+      audit: db.prepare('SELECT * FROM workspace_audit ORDER BY id').all(),
+      sequences: db.prepare("SELECT * FROM sqlite_sequence WHERE name IN ('weekly_reports','workspace_audit') ORDER BY name").all(),
+    };
+  } finally { db.close(); }
+}
+const REPORTS_REMOVED = { error: { code: 'REPORTS_REMOVED', message: '周报功能已移除，历史资料仍保留' } };
+const reportMethods = ['GET', 'HEAD', 'OPTIONS', 'TRACE', 'POST', 'PUT', 'PATCH', 'DELETE'];
+const reportBody = method => ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method) ? {} : undefined;
+
+test('all report routes and methods are retired for members, administrators and devices without changing historical reports or audit records', async t => {
+  const { app, call, admin, login, register, bootstrapToken } = await fixture(t);
   const add = async name => {
     const result = await call('/api/admin/members', { method: 'POST', session: admin, body: { name, password: '密', company: 'A公司' } });
     assert.equal(result.status, 201, result.text);
     return { member: result.body.member, session: (await login(name, '密')).session };
   };
-  const author = await add('周报作者'), reviewer = await add('指定评审人');
+  const author = await add('合成周报作者'), reviewer = await add('合成评审人');
   const ordinaryAdmin = await register('资源管理员', { bootstrapToken });
   assert.equal(ordinaryAdmin.user.role, 'admin'); assert.equal(ordinaryAdmin.user.isSuperAdmin, false);
   const assigned = await call(`/api/admin/members/${ordinaryAdmin.user.id}`, { method: 'PATCH', session: admin, body: { version: 1, company: 'B公司' } });
   assert.equal(assigned.status, 200, assigned.text);
-  const pending = await register('尚未分配');
-  const reportInput = { weekStart: '2026-09-09', todos: [{ text: '机械臂联调', completion: 100, unfinishedReason: '', effect: '调试完成' }], nextPlan: '回归测试', status: 'submitted' };
-  const created = await call('/api/workspace/reports', { method: 'POST', session: author.session, body: reportInput });
-  assert.equal(created.status, 201, created.text); assert.equal(created.body.report.weekStart, '2026-09-07');
-  assert.equal((await call('/api/workspace/reports', { method: 'POST', session: author.session, body: { ...reportInput, weekStart: '2026-09-13' } })).status, 409);
-  const id = created.body.report.id;
-  assert.equal((await call(`/api/workspace/reports/${id}/reviewer`, { method: 'POST', session: admin, body: { version: 1, reviewerId: reviewer.member.id } })).status, 200);
-  assert.equal((await call(`/api/workspace/reports/${id}/review`, { method: 'POST', session: reviewer.session, body: { version: 2, score: 0, comment: '人工评分' } })).status, 200);
-  const path = '/api/workspace/reports/statistics';
-  assert.equal((await call(path, { session: await anonymous() })).status, 401);
-  for (const session of [author.session, reviewer.session, ordinaryAdmin]) {
-    for (const query of ['', '?company=A%E5%85%AC%E5%8F%B8', `?memberId=${session.user.id}`, '?secret=1&weekStart=invalid']) {
-      const result = await call(`${path}${query}`, { session });
-      assert.equal(result.status, 403, result.text); assert.equal(result.body.error.code, 'SUPERADMIN_REQUIRED');
-      assert.equal(result.text.includes('周报作者'), false);
+  const device = await call('/api/auth/device-login', { method: 'POST', body: { username: author.member.name, password: '密', deviceName: '周报下线兼容测试' } });
+  assert.equal(device.status, 200, device.text);
+  // Seed only the isolated fixture through the retained store, as if these
+  // submitted and reviewed records existed before the HTTP feature was removed.
+  const store = createWorkspaceStore({ dbPath: app.config.dbPath, now: () => BASE, resolveMember: id => app.auth.getMemberIdentity(id) });
+  let report;
+  try {
+    report = store.createReport({ weekStart: '2026-09-07', todos: [{ text: '合成历史任务', completion: 100, unfinishedReason: '', effect: '合成验收结果' }], nextPlan: '合成下一步', status: 'submitted' }, author.session.user);
+    report = store.assignReviewer(report.id, { version: report.version, reviewerId: reviewer.member.id }, admin.user);
+    report = store.reviewReport(report.id, { version: report.version, score: 0, comment: '合成历史评分' }, reviewer.session.user);
+  } finally { store.close(); }
+  const before = historicalReports(app.config.dbPath);
+  assert.equal(before.reports.length, 1); assert.equal(before.audit.length, 3);
+  const base = '/api/workspace/reports';
+  const paths = [base, `${base}/`, `${base}?weekStart=invalid&unknown=1`, `${base}/statistics`,
+    `${base}/statistics?weekStart=invalid&weekStart=duplicate`, `${base}/${report.id}`, `${base}/${report.id}/reviewer`,
+    `${base}/${report.id}/review`, `${base}/missing-id/unknown/deep`];
+  for (const identity of [{ session: author.session }, { session: admin }, { session: ordinaryAdmin }, { token: device.body.token }]) {
+    for (const path of paths) for (const method of reportMethods) {
+      const result = await call(path, { ...identity, method, body: reportBody(method) });
+      assert.equal(result.status, 410, `${method} ${path}: ${result.text}`);
+      assert.equal(result.headers['cache-control'], 'no-store');
+      assert.match(result.headers['content-type'], /^application\/json/);
+      if (method === 'HEAD') assert.equal(result.bytes.length, 0);
+      else assert.deepEqual(result.body, REPORTS_REMOVED);
     }
   }
-  assert.equal((await call(path, { session: pending })).status, 403);
-  const result = await call(`${path}?weekStart=2026-09-10`, { session: admin });
-  assert.equal(result.status, 200, result.text); assert.equal(result.headers['cache-control'], 'no-store');
-  assert.deepEqual(result.body.summary, { expectedCount: 4, submittedCount: 1, unsubmittedCount: 3, reviewedCount: 1, averageCompletion: 100, averageScore: 0 });
-  assert.equal(result.body.rows.some(row => row.authorId === admin.user.id), false);
-  assert.equal(result.body.rows.find(row => row.authorId === author.member.id).reviewerName, '指定评审人');
-  assert.deepEqual(Object.keys(result.body.rows[0]).sort(), ['authorId', 'name', 'company', 'weekStart', 'weekEnd', 'status', 'reportId', 'todoCount', 'completedCount', 'unfinishedCount', 'averageCompletion', 'score', 'reviewerName'].sort());
-  for (const query of ['?unknown=x', '?weekStart=2026-09-07&weekStart=2026-09-14', '?company=A%E5%85%AC%E5%8F%B8&company=B%E5%85%AC%E5%8F%B8', '?memberId=bad', '?weekStart=', '?company=']) {
-    assert.equal((await call(`${path}${query}`, { session: admin })).status, 422, query);
+  assert.equal((await call(`${base}-archive`, { session: admin })).status, 404, 'only the report subtree is retired');
+  assert.equal((await call('/api/workspace/requests?weekStart=2026-09-07', { session: admin })).status, 422, 'request query rules remain unchanged');
+  assert.deepEqual(historicalReports(app.config.dbPath), before);
+  await app.close();
+  const reopened = createTeamServer(app.config);
+  try {
+    await reopened.start();
+    assert.deepEqual(historicalReports(app.config.dbPath), before, 'service restart preserves historical schema, rows, audit and counters');
+  } finally { await reopened.close(); }
+});
+
+test('retired report routes still enforce authentication, company assignment, Origin and CSRF before reporting removal', async t => {
+  const { call, admin, register, anonymous } = await fixture(t);
+  const pending = await register('尚未分配');
+  const pendingDevice = await call('/api/auth/device-login', { method: 'POST', body: { username: '尚未分配', password: '密', deviceName: '待分配桌面测试' } });
+  assert.equal(pendingDevice.status, 200, pendingDevice.text);
+  const paths = ['/api/workspace/reports', '/api/workspace/reports/statistics?weekStart=invalid', '/api/workspace/reports/id/review'];
+  const identities = [[{}, 401, 'UNAUTHENTICATED'], [{ session: await anonymous() }, 401, 'UNAUTHENTICATED'],
+    [{ token: 'invalid-device-token' }, 401, 'UNAUTHENTICATED'], [{ session: pending }, 403, 'COMPANY_REQUIRED'],
+    [{ token: pendingDevice.body.token }, 403, 'COMPANY_REQUIRED']];
+  for (const path of paths) for (const method of reportMethods) {
+    for (const [identity, status, code] of identities) {
+      const result = await call(path, { ...identity, method, body: reportBody(method) });
+      assert.equal(result.status, status, `${method} ${path}: ${result.text}`);
+      if (method !== 'HEAD') assert.equal(result.body.error.code, code);
+    }
   }
-  assert.equal((await call(path, { method: 'POST', body: {}, session: admin })).status, 405);
-  assert.equal((await call('/api/workspace/reports?weekStart=2026-09-07', { session: admin })).status, 422, 'other workspace routes still reject queries');
-  const company = await call(`${path}?company=${encodeURIComponent('A公司')}&memberId=${author.member.id}`, { session: admin });
-  assert.equal(company.body.rows.length, 1); assert.equal(company.body.rows[0].score, 0);
-  const unassigned = await call(`${path}?company=unassigned`, { session: admin });
-  assert.equal(unassigned.body.rows.length, 1); assert.ok(unassigned.body.rows.every(row => row.company === null));
-  const earlier = await call(`${path}?weekStart=2026-08-31`, { session: admin });
-  assert.equal(earlier.body.rows.length, 0, 'accounts registered later do not acquire missing reports');
-  const removed = await call(`/api/admin/members/${author.member.id}`, { method: 'DELETE', session: admin, body: { version: author.member.version } });
-  assert.equal(removed.status, 200, removed.text);
-  assert.equal((await call(path, { session: author.session })).status, 401, 'deleted sessions cannot access statistics');
-  const historical = await call(`${path}?memberId=${author.member.id}`, { session: admin });
-  assert.equal(historical.body.rows[0].name, '周报作者'); assert.equal(historical.body.rows[0].company, 'A公司');
-  assert.equal(historical.body.summary.reviewedCount, 1); assert.equal(historical.body.summary.expectedCount, 1);
-  assert.equal((await call(`${path}?weekStart=2026-09-14&memberId=${author.member.id}`, { session: admin })).body.rows.length, 0);
+  for (const path of paths) for (const method of ['POST', 'PUT', 'PATCH', 'DELETE']) {
+    for (const [headers, code] of [[{ origin: 'https://untrusted.example' }, 'INVALID_ORIGIN'], [{ origin: '' }, 'INVALID_ORIGIN'],
+      [{ 'x-csrf-token': 'invalid' }, 'CSRF_REJECTED'], [{ 'x-csrf-token': '' }, 'CSRF_REJECTED'],
+      [{ 'sec-fetch-site': 'cross-site' }, 'ORIGIN_REJECTED']]) {
+      const result = await call(path, { method, session: admin, body: {}, headers });
+      assert.equal(result.status, 403, `${method} ${path}: ${result.text}`); assert.equal(result.body.error.code, code);
+    }
+  }
+  const foreignAnonymous = await call(paths[0], { method: 'POST', body: {}, headers: { origin: 'https://untrusted.example' } });
+  assert.equal(foreignAnonymous.status, 403); assert.equal(foreignAnonymous.body.error.code, 'INVALID_ORIGIN', 'Origin validation still precedes authentication');
+  const pendingCsrf = await call(paths[0], { method: 'POST', session: pending, body: {}, headers: { 'x-csrf-token': 'invalid' } });
+  assert.equal(pendingCsrf.status, 403); assert.equal(pendingCsrf.body.error.code, 'COMPANY_REQUIRED', 'company assignment still precedes CSRF validation');
 });

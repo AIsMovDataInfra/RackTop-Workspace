@@ -371,6 +371,8 @@ pub struct SystemMetric {
 #[serde(rename_all = "camelCase")]
 pub struct Snapshot {
     pub server_id: String,
+    #[serde(default)]
+    pub managed_server_version: Option<u64>,
     pub hostname: String,
     pub username: String,
     pub os_id: String,
@@ -388,6 +390,10 @@ pub struct Snapshot {
     pub cpu_processes: Vec<CpuProcessMetric>,
     #[serde(default)]
     pub processes_sampled: bool,
+    #[serde(default)]
+    pub gpu_usage_valid: bool,
+    #[serde(default)]
+    pub gpu_process_query_ok: bool,
     pub nvidia_smi: String,
     pub nvidia_message: Option<String>,
 }

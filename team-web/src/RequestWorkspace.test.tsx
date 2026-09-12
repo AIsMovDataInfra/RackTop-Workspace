@@ -29,6 +29,9 @@ afterEach(() => { act(() => root.unmount()); container.remove(); vi.restoreAllMo
 it('offers only available company equipment, locks linked quantity and confirms submission without fetching employee request history', async () => {
   const create = vi.spyOn(workspaceApi, 'createRequest').mockResolvedValue({ id: request.id, submitted: true })
   await mount(); expect(workspaceApi.requests).not.toHaveBeenCalled(); expect(workspaceApi.deviceRequest).not.toHaveBeenCalled()
+  expect(container.querySelector('h1')?.textContent).toBe('办公设备申请')
+  expect(container.querySelector('nav')?.textContent).toContain('资产设备管理')
+  expect(container.querySelector('nav')?.textContent).not.toContain('周报')
   expect([...container.querySelectorAll<HTMLOptionElement>('[name="equipmentId"] option')].map(item => item.value)).toEqual(['', equipment.id])
   select('equipmentId', equipment.id)
   expect(container.querySelector<HTMLSelectElement>('[name="category"]')!.value).toBe('夹爪'); expect(container.querySelector<HTMLInputElement>('[name="quantity"]')!.disabled).toBe(true)
@@ -49,6 +52,7 @@ it('shows Laptop in English requests while submitting the canonical Chinese cate
   const create = vi.spyOn(workspaceApi, 'createRequest').mockResolvedValue({ id: request.id, submitted: true })
   const render = async (user = author) => act(async () => root.render(<RequestWorkspace session={{ ...session, user }} state={english} navigate={vi.fn()} onLogout={vi.fn()} onSessionChanged={vi.fn()} onSessionExpired={expired}/>))
   await render()
+  expect(container.querySelector('h1')?.textContent).toBe('Office equipment requests')
   const option = [...container.querySelectorAll<HTMLOptionElement>('[name="category"] option')].find(item => item.textContent === 'Laptop')
   expect(option?.value).toBe('笔记本电脑')
   select('category', option!.value); enter('purpose', 'Mobile development'); await submit()

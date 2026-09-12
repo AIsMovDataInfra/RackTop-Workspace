@@ -5,7 +5,10 @@ export type Company = typeof COMPANY_OPTIONS[number]
 export interface User { avatar?: string; id: string; name: string; role: 'admin' | 'member'; username?: string; isSuperAdmin?: boolean; company?: Company | null; companies?: Company[]; version?: number }
 export interface Member extends User { username: string; isSuperAdmin: boolean; company: Company | null; version: number; createdAt: string; recoveryRequestedAt: string | null }
 export interface Gpu { id: string; uuid: string; index: number; model: string; memoryTotalMb: number }
-export interface Resource { id: string; company?: Company | ''; companyVersion?: number; cluster: string; name: string; gpuModel: string; gpuCount: number; notes: string; enabled: boolean; gpus?: Gpu[]; pendingGpus?: Omit<Gpu, 'id'>[] | null; inventoryVersion?: number; inventoryState?: 'manual' | 'synced' | 'conflict'; lastSeenAt?: string | null; observedAt?: string | null; status?: 'online' | 'offline' | 'unknown' }
+export type UsageState = 'busy' | 'free' | 'unknown'
+export interface GpuUsage { id: string; uuid: string; index: number; state: UsageState; users: string[]; utilization: number | null; memoryUsedMb: number | null }
+export interface ResourceUsage { state: UsageState; observedAt: string | null; gpus: GpuUsage[] }
+export interface Resource { id: string; company?: Company | ''; companyVersion?: number; cluster: string; name: string; gpuModel: string; gpuCount: number; notes: string; enabled: boolean; gpus?: Gpu[]; pendingGpus?: Omit<Gpu, 'id'>[] | null; inventoryVersion?: number; inventoryState?: 'manual' | 'synced' | 'conflict'; lastSeenAt?: string | null; observedAt?: string | null; status?: 'online' | 'offline' | 'unknown'; usage?: ResourceUsage }
 export interface Reservation {
   id: string; resourceId: string; resourceName: string; cluster: string; ownerId?: string; ownerName: string
   scope: 'machine' | 'gpus'; gpuIndices: number[]; startAt: string; endAt: string; purpose?: string; gpuIds?: string[]; inventoryVersion?: number

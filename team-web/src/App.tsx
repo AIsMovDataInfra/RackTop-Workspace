@@ -9,7 +9,7 @@ import { SettingsDialog } from './SettingsDialog'
 import { Workspace } from './Workspace'
 import { EquipmentWorkspace } from './EquipmentWorkspace'
 import { MembersWorkspace } from './MembersWorkspace'
-import { WeeklyWorkspace } from './WeeklyWorkspace'
+import { WorkModuleFrame } from './WorkModuleFrame'
 import { ServersWorkspace } from './ServersWorkspace'
 import { RequestWorkspace } from './RequestWorkspace'
 import { PendingMembership } from './PendingMembership'
@@ -64,7 +64,7 @@ export default function App() {
   const scopeKey = `${session?.user?.id || ''}:${session?.user?.company || ''}:${Boolean(session?.user?.isSuperAdmin)}`
   if (pendingCompany && session) return <PendingMembership session={session} state={state} error={error} refreshing={refreshing} onRefresh={() => void load()} onLogout={logout} onSessionChanged={signedIn}/>
   if (session?.user && /^\/servers\/?$/.test(pathname)) return <ServersWorkspace key={scopeKey} session={session} state={state} navigate={navigate} onLogout={logout} onSessionChanged={signedIn} onSessionExpired={sessionExpired}/>
-  if (session?.user && /^\/reports\/?$/.test(pathname)) return <WeeklyWorkspace key={scopeKey} session={session} state={state} navigate={navigate} onLogout={logout} onSessionChanged={signedIn} onSessionExpired={sessionExpired}/>
+  if (session?.user && /^\/reports(?:\/|$)/.test(pathname)) return <WorkModuleFrame key={scopeKey} session={session} state={state} navigate={navigate} onLogout={logout} onSessionChanged={signedIn} onSessionExpired={sessionExpired} title={t('周报功能已移除', 'Weekly reports have been removed')} subtitle={t('历史周报资料继续保留。', 'Historical reports remain stored.')}><button className="primary" onClick={() => navigate('/')}>{t('返回资源看板', 'Return to resource board')}</button></WorkModuleFrame>
   if (session?.user && /^\/requests\/?$/.test(pathname)) return <RequestWorkspace key={scopeKey} session={session} state={state} navigate={navigate} onLogout={logout} onSessionChanged={signedIn} onSessionExpired={sessionExpired}/>
   if (session?.user?.isSuperAdmin && /^\/members\/?$/.test(pathname)) return <MembersWorkspace key={scopeKey} session={session} state={state} navigate={navigate} onLogout={logout} onSessionChanged={signedIn} onSessionExpired={sessionExpired}/>
   if (session?.user && /^\/equipment(?:\/|$)/.test(pathname)) {

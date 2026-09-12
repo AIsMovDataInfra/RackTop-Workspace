@@ -28,6 +28,19 @@ function enter(selector: string, value: string) {
 async function submit() { await act(async () => { container.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })) }) }
 
 describe('reservation interactions', () => {
+  it('permits a future whole-machine booking for a busy CPU resource without carrying a stale GPU selection', async () => {
+    const reserve = vi.spyOn(api, 'reserve').mockResolvedValue({ reservation })
+    const cpu: Resource = { ...resource, gpuCount: 0, gpuModel: '', usage: { state: 'busy', observedAt: new Date().toISOString(), gpus: [] } }
+    await act(async () => root.render(<ReservationDialog resource={cpu} initialGpu={3} start="2030-09-09T10:00" end="2030-09-09T11:00" t={t} locale="zh-CN" onClose={vi.fn()} onSaved={vi.fn()} />))
+    expect(container.querySelector('.resource-usage-state')?.textContent).toBe('被占用')
+    expect(container.textContent).toContain('匿名用户')
+    expect(container.querySelector('input[value="gpus"]')).toBeNull()
+    expect(container.querySelector('.gpu-picker')).toBeNull()
+    enter('textarea', '明天整机计算任务')
+    await submit()
+    expect(reserve).toHaveBeenCalledWith(expect.objectContaining({ resourceId: cpu.id, scope: 'machine', gpuIndices: [], startAt: '2030-09-09T02:00:00.000Z' }))
+  })
+
   it('keeps the full draft when a 409 is returned and shows the conflicting member and slot', async () => {
     const reserve = vi.spyOn(api, 'reserve').mockRejectedValue(new ApiError('GPU 1 已被预约', 409, 'CONFLICT', [reservation]))
     const onSaved = vi.fn()
@@ -93,7 +106,8 @@ describe('reservation interactions', () => {
     const state: PreferencesState = { t, preferences: { locale: 'zh-CN', theme: 'light', largeText: false }, setPreferences: vi.fn() }
     await act(async () => root.render(<Workspace session={session} state={state} onSessionExpired={vi.fn()} onLogout={vi.fn()} />))
     expect(container.querySelector('nav')?.textContent).not.toContain('资源管理')
-    expect(container.textContent).toContain('实际利用率与任务状态未采集')
+    expect(container.querySelector('.resource-usage-state')?.textContent).toBe('未知')
+    expect(container.textContent).toContain('预约不会自动启动或停止任务')
     await click('预约')
     expect(container.querySelector('[role="dialog"]')?.contains(document.activeElement)).toBe(true)
     act(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))

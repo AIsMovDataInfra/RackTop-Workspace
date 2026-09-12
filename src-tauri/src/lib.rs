@@ -422,6 +422,7 @@ async fn verify_ssh_setup(database: State<'_, Database>, draft: ServerDraft) -> 
 #[tauri::command]
 async fn collect_server(database: State<'_, Database>, team: State<'_, TeamState>, logs: State<'_, InteractionLogStore>, server_id: String, include_processes: bool, include_disks: bool, record_history: bool, allow_credential_prompt: bool) -> Result<Snapshot, String> {
     let server = database.get_server(&server_id)?;
+    let usage_generation = team.0.usage_generation(&server);
     let log_id = logs.begin(&server, collector::collection_display_command(&server, include_processes, include_disks));
     let password = match team.0.ssh_passwords(&database, &server, allow_credential_prompt).await {
         Ok(password) => password,
@@ -434,6 +435,7 @@ async fn collect_server(database: State<'_, Database>, team: State<'_, TeamState
         Ok(collected) => {
             let response_bytes = collected.response_bytes;
             let snapshot = collected.snapshot;
+            team.0.record_usage(usage_generation, &server, &snapshot);
             let mut stored_bytes = 0u64;
             let stored = (|| -> Result<(), String> {
                 database.update_status(&server_id, &snapshot.status, snapshot.nvidia_message.as_deref(), Some(snapshot.timestamp))?;

@@ -80,6 +80,7 @@ if [ "${RACKTOP_INCLUDE_DISKS:-1}" = "1" ]; then
 fi;
 printf '__RACKTOP_USERCPU__\n'; ps -u "$(id -un)" -o pcpu= 2>/dev/null | awk -v n="$(getconf _NPROCESSORS_ONLN 2>/dev/null || printf 1)" '{s+=$1} END {printf "%.2f\n", (n>0?s/n:s+0)}';
 printf '__RACKTOP_ACCELERATOR__\n';
+gpu_query_status=failed;
 if command -v nvidia-smi >/dev/null 2>&1; then printf 'nvidia\n'; elif command -v npu-smi >/dev/null 2>&1; then printf 'ascend\n'; elif command -v ppu-smi >/dev/null 2>&1; then printf 'ppu\n'; else printf 'nvidia\n'; fi;
 printf '__RACKTOP_NVIDIA__\n';
 if ! command -v nvidia-smi >/dev/null 2>&1 && command -v npu-smi >/dev/null 2>&1; then
@@ -132,14 +133,18 @@ else
     query_nvidia_gpus() {
       base_query='index,name,uuid,utilization.gpu,utilization.memory,memory.used,memory.total,temperature.gpu,power.draw,power.limit';
       detail_query='clocks.current.sm,clocks.current.memory,pstate,fan.speed';
-      nvidia-smi "$@" --query-gpu="$base_query,$detail_query,clocks_event_reasons.active,ecc.errors.uncorrected.aggregate.total" --format=csv,noheader,nounits 2>/dev/null ||
-        nvidia-smi "$@" --query-gpu="$base_query,$detail_query,clocks_throttle_reasons.active,ecc.errors.uncorrected.aggregate.total" --format=csv,noheader,nounits 2>/dev/null ||
-        nvidia-smi "$@" --query-gpu="$base_query,$detail_query" --format=csv,noheader,nounits 2>/dev/null ||
-        nvidia-smi "$@" --query-gpu="$base_query" --format=csv,noheader,nounits 2>/dev/null ||
-        nvidia-smi "$@" --query-gpu=index,name,uuid,utilization.gpu,utilization.memory,memory.used,memory.total,temperature.gpu,power.draw --format=csv,noheader,nounits 2>/dev/null;
+      for gpu_query in "$base_query,$detail_query,clocks_event_reasons.active,ecc.errors.uncorrected.aggregate.total" \
+        "$base_query,$detail_query,clocks_throttle_reasons.active,ecc.errors.uncorrected.aggregate.total" \
+        "$base_query,$detail_query" "$base_query" \
+        'index,name,uuid,utilization.gpu,utilization.memory,memory.used,memory.total,temperature.gpu,power.draw'; do
+        if nvidia_gpu_rows="$(nvidia-smi "$@" --query-gpu="$gpu_query" --format=csv,noheader,nounits 2>/dev/null)"; then
+          printf '%s\n' "$nvidia_gpu_rows"; return 0;
+        fi;
+      done;
+      return 1;
     }
     if [ "$nvidia_state" = available ]; then
-      query_nvidia_gpus || true;
+      if query_nvidia_gpus; then gpu_query_status=ok; fi;
     else
       printf '%s\n' "$nvidia_list" | sed -n 's/^GPU \([0-9][0-9]*\):.*/\1/p' | while read -r gpu_index; do
         query_nvidia_gpus -i "$gpu_index" || true;
@@ -156,9 +161,12 @@ else
     fi;
   fi;
 fi;
+printf '__RACKTOP_GPUINVENTORY__\n%s\n' "${nvidia_list:-}";
+printf '__RACKTOP_GPUQUERY__\n%s\n' "$gpu_query_status";
 if [ "${RACKTOP_INCLUDE_PROCESSES:-1}" = "1" ]; then
   printf '__RACKTOP_GPUPROC__\n';
   gpu_proc="";
+  gpu_process_query_status=failed;
   if command -v nvidia-smi >/dev/null 2>&1; then
     query_gpu_processes() {
       selector="$1";
@@ -170,8 +178,18 @@ if [ "${RACKTOP_INCLUDE_PROCESSES:-1}" = "1" ]; then
       fi;
       return 1;
     }
-    if ! gpu_proc="$(query_gpu_processes '')"; then
-      gpu_proc="$(printf '%s\n' "$nvidia_list" | sed -n 's/^GPU \([0-9][0-9]*\):.*/\1/p' | while read -r gpu_index; do query_gpu_processes "-i $gpu_index" || true; done)";
+    if gpu_proc="$(query_gpu_processes '')"; then
+      gpu_process_query_status=ok;
+    elif gpu_proc="$(
+      gpu_indices="$(printf '%s\n' "$nvidia_list" | sed -n 's/^GPU \([0-9][0-9]*\):.*/\1/p')";
+      [ -n "$gpu_indices" ] || exit 1;
+      gpu_process_cards_ok=1;
+      for gpu_index in $gpu_indices; do
+        query_gpu_processes "-i $gpu_index" || gpu_process_cards_ok=0;
+      done;
+      [ "$gpu_process_cards_ok" = 1 ];
+    )"; then
+      gpu_process_query_status=ok;
     fi;
     printf '%s\n' "$gpu_proc";
   elif command -v npu-smi >/dev/null 2>&1; then
@@ -189,6 +207,7 @@ if [ "${RACKTOP_INCLUDE_PROCESSES:-1}" = "1" ]; then
     gpu_proc="$(ppu-smi --query-compute-apps=uuid,pid,process_name,used_ppu_memory --format=csv,noheader,nounits 2>/dev/null || true)";
     printf '%s\n' "$gpu_proc";
   fi;
+  printf '__RACKTOP_GPUPROCQUERY__\n%s\n' "$gpu_process_query_status";
   printf '__RACKTOP_GPUPMON__\n';
   if command -v nvidia-smi >/dev/null 2>&1; then nvidia-smi pmon -c 1 -s um 2>/dev/null || true; fi;
   printf '__RACKTOP_PS__\n';
@@ -223,7 +242,7 @@ pub async fn collect_with_password_detailed(server: &Server, password: Option<&c
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
         return Err(classify_ssh_error(&stderr));
     }
-    let snapshot = parse_snapshot(&server.id, &String::from_utf8_lossy(&output.stdout))?;
+    let snapshot = parse_collected_snapshot(server, &String::from_utf8_lossy(&output.stdout))?;
     Ok(CollectionResult { snapshot, response_bytes: output.stdout.len() as u64 })
 }
 
@@ -346,6 +365,12 @@ pub(crate) fn classify_ssh_error(stderr: &str) -> String {
     }
 }
 
+fn parse_collected_snapshot(server: &Server, output: &str) -> Result<Snapshot, String> {
+    let mut snapshot = parse_snapshot(&server.id, output)?;
+    snapshot.managed_server_version = server.managed.as_ref().map(|managed| managed.version);
+    Ok(snapshot)
+}
+
 pub fn parse_snapshot(server_id: &str, output: &str) -> Result<Snapshot, String> {
     let sections = split_sections(output);
     let username = first_line(&sections, "USER").unwrap_or("unknown").to_string();
@@ -386,8 +411,61 @@ pub fn parse_snapshot(server_id: &str, output: &str) -> Result<Snapshot, String>
     let processes = parse_gpu_processes(sections.get("GPUPROC"), &gpus, &ps, &pmon, &username);
     let cpu_processes = parse_cpu_processes(&ps, &processes, &username, uid_min);
     let processes_sampled = sections.contains_key("GPUPROC");
+    let gpu_usage_valid = accelerator_vendor == "nvidia" && nvidia_smi == "available"
+        && query_succeeded(&sections, "GPUQUERY") && gpu_usage_rows_valid(sections.get("GPU"), &gpus)
+        && gpu_inventory_matches(sections.get("GPUINVENTORY"), &gpus);
+    let gpu_process_query_ok = accelerator_vendor == "nvidia" && nvidia_smi == "available"
+        && query_succeeded(&sections, "GPUPROCQUERY") && gpu_process_rows_valid(sections.get("GPUPROC"), &gpus);
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).map_err(|error| error.to_string())?.as_secs() as i64;
-    Ok(Snapshot { server_id: server_id.into(), hostname, username, os_id: os_id.into(), os_name: os_name.into(), timestamp, status: if nvidia_smi == "available" { "online".into() } else { "warning".into() }, accelerator_vendor, system, gpus, disks, processes, cpu_processes, processes_sampled, nvidia_smi, nvidia_message })
+    Ok(Snapshot { server_id: server_id.into(), managed_server_version: None, hostname, username, os_id: os_id.into(), os_name: os_name.into(), timestamp, status: if nvidia_smi == "available" { "online".into() } else { "warning".into() }, accelerator_vendor, system, gpus, disks, processes, cpu_processes, processes_sampled, gpu_usage_valid, gpu_process_query_ok, nvidia_smi, nvidia_message })
+}
+
+fn query_succeeded(sections: &HashMap<String, Vec<String>>, name: &str) -> bool {
+    sections.get(name).is_some_and(|lines| lines.len() == 1 && lines[0] == "ok")
+}
+
+fn finite_nonnegative(value: &str) -> Option<f64> {
+    value.parse::<f64>().ok().filter(|number| number.is_finite() && *number >= 0.0)
+}
+
+fn gpu_inventory_matches(lines: Option<&Vec<String>>, gpus: &[GpuMetric]) -> bool {
+    let Some(lines) = lines else { return false; };
+    if lines.is_empty() || lines.len() != gpus.len() { return false; }
+    let listed = lines.iter().map(|line| {
+        let (index, description) = line.strip_prefix("GPU ")?.split_once(':')?;
+        let (_, uuid) = description.rsplit_once("(UUID: ")?;
+        Some((index.parse::<u32>().ok()?, uuid.strip_suffix(')')?))
+    }).collect::<Option<HashSet<_>>>();
+    listed.is_some_and(|listed| listed.len() == gpus.len()
+        && listed == gpus.iter().map(|gpu| (gpu.index, gpu.uuid.as_str())).collect())
+}
+
+fn gpu_usage_rows_valid(lines: Option<&Vec<String>>, gpus: &[GpuMetric]) -> bool {
+    let Some(lines) = lines else { return false; };
+    if lines.is_empty() || lines.len() != gpus.len()
+        || gpus.iter().map(|gpu| &gpu.uuid).collect::<HashSet<_>>().len() != gpus.len()
+        || gpus.iter().map(|gpu| gpu.index).collect::<HashSet<_>>().len() != gpus.len() {
+        return false;
+    }
+    lines.iter().all(|line| {
+        let fields: Vec<_> = line.split(',').map(str::trim).collect();
+        if fields.len() < 9 || fields[1].is_empty() || !fields[2].starts_with("GPU-") || fields[2].len() <= 4 { return false; }
+        let (Some(utilization), Some(memory_utilization), Some(used), Some(total)) = (
+            finite_nonnegative(fields[3]), finite_nonnegative(fields[4]),
+            finite_nonnegative(fields[5]), finite_nonnegative(fields[6]),
+        ) else { return false; };
+        utilization <= 100.0 && memory_utilization <= 100.0 && total > 0.0 && used <= total
+    })
+}
+
+fn gpu_process_rows_valid(lines: Option<&Vec<String>>, gpus: &[GpuMetric]) -> bool {
+    let Some(lines) = lines else { return false; };
+    lines.iter().all(|line| {
+        let fields: Vec<_> = line.split(',').map(str::trim).collect();
+        fields.len() == 4 && gpus.iter().any(|gpu| gpu.uuid == fields[0])
+            && fields[1].parse::<u32>().is_ok_and(|pid| pid > 0)
+            && !fields[2].is_empty() && finite_nonnegative(fields[3]).is_some()
+    })
 }
 
 fn parse_disk(line: &str) -> Result<DiskMetric, String> {
@@ -776,7 +854,7 @@ else printf 'unknown\n'; fi"#);
 mod tests {
     use super::*;
 
-    const SAMPLE: &str = "__RACKTOP_USER__\ntongzh\n__RACKTOP_UIDMIN__\n1000\n__RACKTOP_HOST__\ngpu-box\n__RACKTOP_OS__\nubuntu|Ubuntu 22.04 LTS\n__RACKTOP_CPUMODEL__\nAMD EPYC 9654 96-Core Processor\n__RACKTOP_CPU1__\ncpu 100 0 20 880 0 0 0\n__RACKTOP_CPU2__\ncpu 120 0 30 950 0 0 0\n__RACKTOP_LOAD__\n0.06 0.11 0.09 1/100 1\n__RACKTOP_MEM__\nMemTotal: 100000 kB\nMemAvailable: 75000 kB\nSwapTotal: 1000 kB\nSwapFree: 900 kB\n__RACKTOP_USERCPU__\n5.50\n__RACKTOP_NVIDIA__\navailable\n__RACKTOP_GPU__\n0, NVIDIA GeForce RTX 4090 D, GPU-abc, 25, 10, 2048, 24564, 48, 110.5\n__RACKTOP_GPUPROC__\nGPU-abc, 4242, python, 2048\n__RACKTOP_GPUPMON__\n# gpu pid type sm mem\n0 4242 C 73 41 - - - - 2048 0 python\n__RACKTOP_PS__\ntongzh 1000 4242 1 4242 12.5 2.0 204800 01:20 python train.py\ntongzh 1000 4343 4242 4242 1.5 1.5 2097152 00:10 python data-loader.py\ntongzh 1000 5000 1 5000 0.8 1.2 1572864 00:30 python cpu-task.py\ntongzh 1000 5500 1 5500 0.9 0.5 1048576 00:20 python small-task.py\ntongzh 1000 5800 1 5800 1.2 1.4 1468006 00:20 /usr/bin/python3 /usr/bin/nvitop\ntongzh 1000 5900 1 5900 1.1 1.5 1572864 00:20 /home/tongzh/.vscode-server/bin/node server-main.js\ntongzh 1000 6000 1 6000 0.7 1.1 1153434 10:00 /usr/lib/systemd/systemd --user\nroot 0 99 1 99 0.2 1.2 1258291 10:00 systemd-worker\n__RACKTOP_END__\n";
+    const SAMPLE: &str = "__RACKTOP_USER__\ntongzh\n__RACKTOP_UIDMIN__\n1000\n__RACKTOP_HOST__\ngpu-box\n__RACKTOP_OS__\nubuntu|Ubuntu 22.04 LTS\n__RACKTOP_CPUMODEL__\nAMD EPYC 9654 96-Core Processor\n__RACKTOP_CPU1__\ncpu 100 0 20 880 0 0 0\n__RACKTOP_CPU2__\ncpu 120 0 30 950 0 0 0\n__RACKTOP_LOAD__\n0.06 0.11 0.09 1/100 1\n__RACKTOP_MEM__\nMemTotal: 100000 kB\nMemAvailable: 75000 kB\nSwapTotal: 1000 kB\nSwapFree: 900 kB\n__RACKTOP_USERCPU__\n5.50\n__RACKTOP_NVIDIA__\navailable\n__RACKTOP_GPU__\n0, NVIDIA GeForce RTX 4090 D, GPU-abc, 25, 10, 2048, 24564, 48, 110.5\n__RACKTOP_GPUINVENTORY__\nGPU 0: NVIDIA GeForce RTX 4090 D (UUID: GPU-abc)\n__RACKTOP_GPUQUERY__\nok\n__RACKTOP_GPUPROC__\nGPU-abc, 4242, python, 2048\n__RACKTOP_GPUPROCQUERY__\nok\n__RACKTOP_GPUPMON__\n# gpu pid type sm mem\n0 4242 C 73 41 - - - - 2048 0 python\n__RACKTOP_PS__\ntongzh 1000 4242 1 4242 12.5 2.0 204800 01:20 python train.py\ntongzh 1000 4343 4242 4242 1.5 1.5 2097152 00:10 python data-loader.py\ntongzh 1000 5000 1 5000 0.8 1.2 1572864 00:30 python cpu-task.py\ntongzh 1000 5500 1 5500 0.9 0.5 1048576 00:20 python small-task.py\ntongzh 1000 5800 1 5800 1.2 1.4 1468006 00:20 /usr/bin/python3 /usr/bin/nvitop\ntongzh 1000 5900 1 5900 1.1 1.5 1572864 00:20 /home/tongzh/.vscode-server/bin/node server-main.js\ntongzh 1000 6000 1 6000 0.7 1.1 1153434 10:00 /usr/lib/systemd/systemd --user\nroot 0 99 1 99 0.2 1.2 1258291 10:00 systemd-worker\n__RACKTOP_END__\n";
 
     #[test]
     fn parses_realistic_snapshot() {
@@ -787,6 +865,8 @@ mod tests {
         assert_eq!(snapshot.gpus.len(), 1);
         assert_eq!(snapshot.processes.len(), 1);
         assert!(snapshot.processes_sampled);
+        assert!(snapshot.gpu_usage_valid);
+        assert!(snapshot.gpu_process_query_ok);
         assert!(snapshot.processes[0].is_current_user);
         assert!(snapshot.processes[0].is_group_leader);
         assert_eq!(snapshot.processes[0].sm_utilization, Some(73.0));
@@ -823,6 +903,8 @@ mod tests {
         let snapshot = parse_snapshot("server-1", &output).unwrap();
         assert_eq!(snapshot.nvidia_smi, "degraded");
         assert_eq!(snapshot.status, "warning");
+        assert!(!snapshot.gpu_usage_valid);
+        assert!(!snapshot.gpu_process_query_ok);
         assert_eq!(snapshot.gpus.len(), 2);
         assert_eq!(snapshot.gpus[0].uuid, "GPU-abc");
         assert_eq!(snapshot.gpus[1].uuid, "unavailable-0000_D1_00_0");
@@ -893,6 +975,7 @@ mod tests {
         let output = format!("{}{}", &SAMPLE[..process_start], &SAMPLE[end..]);
         let snapshot = parse_snapshot("server-1", &output).unwrap();
         assert!(!snapshot.processes_sampled);
+        assert!(!snapshot.gpu_process_query_ok);
         assert!(snapshot.processes.is_empty());
         assert!(snapshot.cpu_processes.is_empty());
     }
@@ -1027,5 +1110,195 @@ mod tests {
         assert_eq!(snapshot.processes[0].username, "unknown");
         assert_eq!(snapshot.processes[0].command, "python");
         assert_eq!(snapshot.processes[0].memory_used_mb, 2048.0);
+        assert!(snapshot.gpu_process_query_ok);
+    }
+
+    #[test]
+    fn empty_gpu_processes_are_trusted_only_after_successful_queries() {
+        let idle = SAMPLE.replace(
+            "GPU-abc, 25, 10, 2048, 24564", "GPU-abc, 0, 0, 0, 24564",
+        ).replace("GPU-abc, 4242, python, 2048\n", "");
+        let snapshot = parse_snapshot("synthetic", &idle).unwrap();
+        assert!(snapshot.gpu_usage_valid && snapshot.gpu_process_query_ok);
+        assert!(snapshot.processes.is_empty());
+        assert_eq!(snapshot.gpus[0].utilization, 0.0);
+        assert_eq!(snapshot.gpus[0].memory_used_mb, 0.0);
+        for marker in ["GPUQUERY", "GPUPROCQUERY"] {
+            let failure = idle.replace(&format!("__RACKTOP_{marker}__\nok"), &format!("__RACKTOP_{marker}__\nfailed"));
+            let snapshot = parse_snapshot("synthetic", &failure).unwrap();
+            assert!(!(snapshot.gpu_usage_valid && snapshot.gpu_process_query_ok));
+            assert!(snapshot.processes.is_empty());
+        }
+    }
+
+    #[test]
+    fn malformed_or_partial_gpu_data_cannot_certify_idle_usage() {
+        for (field, invalid) in [(3, "N/A"), (3, "NaN"), (3, "inf"), (3, "-1"), (3, "101"),
+            (4, "[Not Supported]"), (4, "-1"), (5, "bad"), (5, "NaN"), (5, "-1"),
+            (6, "0"), (6, "100"), (6, "inf"), (0, "invalid"), (2, "")] {
+            let original = "0, NVIDIA GeForce RTX 4090 D, GPU-abc, 25, 10, 2048, 24564, 48, 110.5";
+            let mut fields: Vec<_> = original.split(", ").collect();
+            fields[field] = invalid;
+            let snapshot = parse_snapshot("synthetic", &SAMPLE.replace(original, &fields.join(", "))).unwrap();
+            assert!(!snapshot.gpu_usage_valid, "invalid GPU field {field} must remain unknown");
+        }
+        for extra in ["broken row", "1, GPU Test, GPU-other, NaN, 0, 0, 1000, 0, 0",
+            "0, Duplicate GPU, GPU-abc, 0, 0, 0, 1000, 0, 0"] {
+            let output = SAMPLE.replace("__RACKTOP_GPUINVENTORY__", &format!("{extra}\n__RACKTOP_GPUINVENTORY__"));
+            assert!(!parse_snapshot("synthetic", &output).unwrap().gpu_usage_valid);
+        }
+    }
+
+    #[test]
+    fn malformed_process_rows_do_not_become_a_successful_empty_query() {
+        for row in ["broken row", "GPU-abc, bad, python, 12", "GPU-abc, 0, python, 12",
+            "GPU-unknown, 42, python, 12", "GPU-abc, 42, python, N/A", "GPU-abc, 42, python, NaN",
+            "GPU-abc, 42, python, -1", "GPU-abc, 42, python, 0, extra"] {
+            let output = SAMPLE.replace("GPU-abc, 4242, python, 2048", row);
+            assert!(!parse_snapshot("synthetic", &output).unwrap().gpu_process_query_ok);
+        }
+        let partial = SAMPLE.replace("__RACKTOP_GPUPROCQUERY__", "broken row\n__RACKTOP_GPUPROCQUERY__");
+        let snapshot = parse_snapshot("synthetic", &partial).unwrap();
+        assert!(!snapshot.gpu_process_query_ok);
+        assert_eq!(snapshot.processes[0].pid, 4242);
+    }
+
+    #[test]
+    fn successful_gpu_metrics_must_match_the_complete_listed_inventory() {
+        let listed = "GPU 0: NVIDIA GeForce RTX 4090 D (UUID: GPU-abc)";
+        for replacement in ["".to_owned(), "GPU 1: Synthetic GPU (UUID: GPU-abc)".into(),
+            "GPU 0: Synthetic GPU (UUID: GPU-different)".into(), "malformed inventory".into(),
+            format!("{listed}\nGPU 1: Synthetic GPU (UUID: GPU-other)"),
+            format!("{listed}\n{listed}")] {
+            let snapshot = parse_snapshot("synthetic", &SAMPLE.replace(listed, &replacement)).unwrap();
+            assert!(!snapshot.gpu_usage_valid);
+            assert_eq!(snapshot.gpus.len(), 1);
+            assert_eq!(snapshot.processes[0].pid, 4242);
+        }
+    }
+
+    #[test]
+    fn legacy_snapshots_and_other_accelerators_have_unknown_quality() {
+        let legacy = SAMPLE.replace("__RACKTOP_GPUQUERY__\nok\n", "").replace("__RACKTOP_GPUPROCQUERY__\nok\n", "");
+        let snapshot = parse_snapshot("synthetic", &legacy).unwrap();
+        assert!(snapshot.processes_sampled);
+        assert!(!snapshot.gpu_usage_valid && !snapshot.gpu_process_query_ok);
+        let mut encoded = serde_json::to_value(parse_snapshot("synthetic", SAMPLE).unwrap()).unwrap();
+        encoded.as_object_mut().unwrap().remove("gpuUsageValid");
+        encoded.as_object_mut().unwrap().remove("gpuProcessQueryOk");
+        encoded.as_object_mut().unwrap().remove("managedServerVersion");
+        let decoded: Snapshot = serde_json::from_value(encoded).unwrap();
+        assert!(!decoded.gpu_usage_valid && !decoded.gpu_process_query_ok);
+        assert_eq!(decoded.managed_server_version, None);
+        assert_eq!(decoded.processes.len(), 1);
+        let encoded = serde_json::to_value(parse_snapshot("synthetic", SAMPLE).unwrap()).unwrap();
+        assert_eq!(encoded["gpuUsageValid"], true);
+        assert_eq!(encoded["gpuProcessQueryOk"], true);
+        for vendor in ["ascend", "ppu"] {
+            let output = SAMPLE.replace("__RACKTOP_NVIDIA__", &format!("__RACKTOP_ACCELERATOR__\n{vendor}\n__RACKTOP_NVIDIA__"));
+            let snapshot = parse_snapshot("synthetic", &output).unwrap();
+            assert!(!snapshot.gpu_usage_valid && !snapshot.gpu_process_query_ok);
+        }
+    }
+
+    #[test]
+    fn collected_snapshots_persist_the_connection_version_used_for_sampling() {
+        let mut server = Server {
+            managed: Some(crate::models::ManagedServer { account_id: "synthetic-account".into(),
+                company: "synthetic-company".into(), remote_id: "synthetic-remote".into(),
+                available: true, reason: None, version: 7, has_password: false,
+                has_jump_password: false, credential_revision: 1, epoch: 1 }),
+            id: "synthetic".into(), name: "GPU".into(), location: None, host: "synthetic.invalid".into(), port: 22,
+            username: "test".into(), ssh_alias: None, identity_file: None, proxy_jump: None,
+            proxy_use_password: false, save_proxy_password: false, tags: Vec::new(),
+            sampling_interval_seconds: 2, history_retention_days: 90, remote_history_enabled: false,
+            remote_history_last_sync_at: None, sort_order: 0, auth_method: "sshAgent".into(),
+            status: "unknown".into(), last_error: None, last_seen_at: None,
+        };
+        for output in [SAMPLE.to_owned(), SAMPLE.replace("__RACKTOP_NVIDIA__\navailable", "__RACKTOP_NVIDIA__\nerror")] {
+            let snapshot = parse_collected_snapshot(&server, &output).unwrap();
+            let encoded = serde_json::to_value(&snapshot).unwrap();
+            assert_eq!(encoded["managedServerVersion"], 7);
+            let decoded: Snapshot = serde_json::from_value(encoded).unwrap();
+            assert_eq!(decoded.managed_server_version, Some(7));
+        }
+        let old_snapshot = parse_collected_snapshot(&server, SAMPLE).unwrap();
+        server.managed.as_mut().unwrap().version = 8;
+        assert_eq!(old_snapshot.managed_server_version, Some(7));
+        assert_eq!(parse_collected_snapshot(&server, SAMPLE).unwrap().managed_server_version, Some(8));
+        server.managed = None;
+        assert_eq!(parse_collected_snapshot(&server, SAMPLE).unwrap().managed_server_version, None);
+    }
+
+    #[test]
+    fn root_gpu_processes_remain_visible_for_occupancy() {
+        let output = SAMPLE.replace("tongzh 1000 4242 1 4242", "root 0 4242 1 4242");
+        let snapshot = parse_snapshot("synthetic", &output).unwrap();
+        assert!(snapshot.gpu_process_query_ok);
+        assert_eq!(snapshot.processes[0].username, "root");
+        assert_eq!(snapshot.processes[0].pid, 4242);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn shell_query_status_distinguishes_idle_failure_and_complete_per_card_fallback() {
+        use std::os::unix::fs::PermissionsExt;
+        let fixture = tempfile::tempdir().unwrap();
+        let bin = fixture.path().join("bin");
+        std::fs::create_dir(&bin).unwrap();
+        let smi = bin.join("nvidia-smi");
+        std::fs::write(&smi, r#"#!/bin/sh
+case "$*" in
+  -L) printf 'GPU 0: Synthetic GPU (UUID: GPU-a)\nGPU 1: Synthetic GPU (UUID: GPU-b)\n' ;;
+  *--query-gpu=*)
+    [ "$FIXTURE_GPU_MODE" != failed ] || exit 1
+    if [ "$FIXTURE_GPU_MODE" = partial ]; then
+      printf '0, Synthetic GPU, GPU-a, 0, 0, 0, 1000, 20, 10\n'; exit 0
+    fi
+    case "$FIXTURE_GPU_MODE:$*" in
+      recovering:*power.limit*) printf 'partial output from a failed GPU query\n'; exit 1 ;;
+    esac
+    printf '0, Synthetic GPU, GPU-a, 0, 0, 0, 1000, 20, 10\n1, Synthetic GPU, GPU-b, 0, 0, 0, 1000, 20, 10\n' ;;
+  *--query-compute-apps=*)
+    case "$FIXTURE_PROCESS_MODE:$*" in
+      idle:*) exit 0 ;;
+      recovering:*used_gpu_memory*) printf 'partial output from a failed process query\n'; exit 1 ;;
+      recovering:*) exit 0 ;;
+      complete:-i*) exit 0 ;;
+      partial:-i\ 0*) printf 'GPU-a, 42, synthetic-root-job, 32\n' ;;
+      *) exit 1 ;;
+    esac ;;
+  pmon*) exit 0 ;;
+  *) exit 1 ;;
+esac
+"#).unwrap();
+        std::fs::set_permissions(&smi, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let ps = bin.join("ps");
+        std::fs::write(&ps, "#!/bin/sh\nprintf 'root 0 42 1 42 0 0 32768 00:01 synthetic-root-job\\n'\n").unwrap();
+        std::fs::set_permissions(&ps, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let script = format!("export LANG=C LC_ALL=C; uid_min=1000; {}", &REMOTE_SCRIPT[REMOTE_SCRIPT.find("printf '__RACKTOP_ACCELERATOR__").unwrap()..]);
+        for (gpu_mode, process_mode, expected_usage, expected_processes) in [
+            ("ok", "idle", true, true), ("ok", "failed", true, false),
+            ("ok", "complete", true, true), ("ok", "partial", true, false),
+            ("failed", "idle", false, true),
+            ("partial", "idle", false, true),
+            ("recovering", "recovering", true, true),
+        ] {
+            let output = std::process::Command::new("/bin/sh").arg("-c").arg(&script)
+                .env_clear().env("PATH", format!("{}:/usr/bin:/bin", bin.display())).env("HOME", fixture.path())
+                .env("FIXTURE_GPU_MODE", gpu_mode).env("FIXTURE_PROCESS_MODE", process_mode)
+                .output().unwrap();
+            assert!(output.status.success(), "synthetic collector shell failed");
+            let prefix = &SAMPLE[..SAMPLE.find("__RACKTOP_NVIDIA__").unwrap()];
+            let snapshot = parse_snapshot("synthetic", &format!("{prefix}{}", String::from_utf8_lossy(&output.stdout))).unwrap();
+            assert_eq!(snapshot.gpu_usage_valid, expected_usage, "GPU mode {gpu_mode}");
+            assert_eq!(snapshot.gpu_process_query_ok, expected_processes, "process mode {process_mode}");
+            if process_mode == "partial" {
+                assert_eq!(snapshot.processes.len(), 1);
+                assert_eq!(snapshot.processes[0].username, "root");
+            } else {
+                assert!(snapshot.processes.is_empty());
+            }
+        }
     }
 }

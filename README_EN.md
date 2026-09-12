@@ -27,10 +27,13 @@ Flatpak 2.2.2 needs one upgrade through this installer before in-app updates bec
 
 ## Get started
 
+The team features below describe the **2.8.0 source, which is still being verified and has not been released**. The downloads above remain 2.7.3. See [the upcoming changes](docs/Version_overview.md#280待发布) (Chinese).
+
 - **Manage servers:** Open the desktop app, add an SSH connection, inspect GPU / CPU activity, use terminals, synchronize projects, and manage jobs.
-- **Work with your team:** Sign in to the online workspace, select your current organization, manage equipment and QR labels, reserve compute resources, and write weekly reports.
+- **Work with your team:** Sign in to the online workspace, select your current organization, register assets and print QR labels in **Asset management**, submit **Office equipment requests**, and reserve compute resources.
 - **Team SSH:** Admins maintain server resources, enter existing SSH passwords, and grant access. Members sign in on desktop 2.7.3, select an organization, and connect with the assigned credentials. Local passwords, private keys, and SSH Agent remain available when no shared password is provided. [Instructions](docs/WORKSPACE.md#统一管理-ssh-服务器) (Chinese).
-- **Find instructions:** [Linux](docs/LINUX.md) · [Mac](docs/MACOS.md) · [Equipment](docs/EQUIPMENT.md) · [Resource sharing](docs/SHARING.md).
+- **Resource board (2.8.0, pending release):** Browse GPU / CPU groups and view current usage separately from reservations for your selected time. A busy resource can still be booked for an available future slot. The CPU entry is ready; no CPU resources have been registered yet.
+- **Find instructions:** [Linux](docs/LINUX.md) · [Mac](docs/MACOS.md) · [Asset management](docs/EQUIPMENT.md) · [Resource sharing](docs/SHARING.md).
 
 Quit the old app before upgrading. Upgrades using the same installation format retain existing data. DEB and Flatpak use different data directories; back up before changing formats.
 

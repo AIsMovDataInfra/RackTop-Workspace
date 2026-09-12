@@ -59,6 +59,43 @@ it('opens the authorized server directory with the shared workspace props', asyn
   expect(ServersWorkspace).toHaveBeenCalledWith(expect.objectContaining({ session: assigned, navigate: expect.any(Function), onSessionChanged: expect.any(Function) }), undefined)
 })
 
+it.each([
+  { path: '/reports', session: assigned, locale: 'zh-CN', title: '周报功能已移除', back: '返回资源看板' },
+  { path: '/reports/old-record?week=2026-09-07', session: superAdmin, locale: 'en', title: 'Weekly reports have been removed', back: 'Return to resource board' },
+])('retires the $path deep link without business requests and returns to the board', async ({ path, session, locale, title, back }) => {
+  window.history.replaceState({}, '', path)
+  window.localStorage.setItem('racktop-team-appearance', JSON.stringify({ locale }))
+  vi.spyOn(api, 'session').mockResolvedValue(session)
+  const fetch = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('Unexpected business request'))
+  await mount()
+  expect(container.querySelector('h1')?.textContent).toBe(title)
+  expect(container.querySelector('nav')?.textContent).not.toMatch(/周报|Weekly reports/)
+  expect(Workspace).not.toHaveBeenCalled()
+  expect(fetch).not.toHaveBeenCalled()
+  await click(back)
+  expect(window.location.pathname).toBe('/')
+  expect(Workspace).toHaveBeenCalledOnce()
+  expect(fetch).not.toHaveBeenCalled()
+})
+
+it('keeps report retirement behind login and company assignment without loading historical reports', async () => {
+  window.history.replaceState({}, '', '/reports/')
+  const session = vi.spyOn(api, 'session').mockResolvedValue(anonymous)
+  const fetch = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('Unexpected report request'))
+  await mount()
+  expect(container.querySelector('.member-login')).not.toBeNull()
+  expect(container.textContent).not.toContain('历史周报资料')
+  session.mockResolvedValue(pending)
+  await act(async () => window.dispatchEvent(new Event(ACCOUNT_CHANGED_EVENT)))
+  expect(container.textContent).toContain('等待分配公司')
+  expect(container.textContent).not.toContain('历史周报资料')
+  session.mockResolvedValue(assigned)
+  await act(async () => window.dispatchEvent(new Event('focus')))
+  expect(container.querySelector('h1')?.textContent).toBe('周报功能已移除')
+  expect(window.location.pathname).toBe('/reports/')
+  expect(fetch).not.toHaveBeenCalled()
+})
+
 it('remounts business content on organization switch and ignores delayed data from the previous organization', async () => {
   let finish!: () => void
   const cleanup = vi.fn()
