@@ -783,12 +783,12 @@ impl TeamManager {
             database.check_managed_server(server)?;
             let actual = database.get_server(&server.id)?;
             if actual.managed.as_ref().is_none_or(|m| m.version != managed.version) { return Err("组织服务器版本已变化，请重新连接".into()); }
-            let shared = credentials.into_passwords(managed)?;
+            let mut shared = credentials.into_passwords(managed)?;
             // A local private key / password may still be used for the other hop.
             // The local reader explicitly skips every shared-password slot.
             let mut passwords = database.local_ssh_passwords(server, allow_prompt)?.unwrap_or_default();
-            if managed.has_password { passwords.target = shared.target; }
-            if managed.has_jump_password { passwords.proxy = shared.proxy; }
+            if managed.has_password { passwords.target = shared.target.take(); }
+            if managed.has_jump_password { passwords.proxy = shared.proxy.take(); }
             Ok(Some(passwords))
         };
         let result = crate::managed_servers::authorized(database, &[server], operation).await;

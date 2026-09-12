@@ -7,6 +7,7 @@ async fn main() {
         if let Err(error) = racktop_lib::ssh_connection::run_proxy(&targets[1..]) { eprintln!("{error}"); std::process::exit(1); }
         return;
     }
+    if let Some(result) = racktop_lib::askpass::run_helper() { if result.is_err() { std::process::exit(1); } return; }
     if targets.first().map(String::as_str) == Some("--managed-directory-fixture") {
         match racktop_lib::managed_servers::exercise_directory_fixture(targets.get(1).map(String::as_str).unwrap_or("")).await {
             Ok(result) => println!("{result}"), Err(error) => { eprintln!("{error}"); std::process::exit(1); }
@@ -19,7 +20,6 @@ async fn main() {
         }
         return;
     }
-    if let Ok(password) = std::env::var("RACKTOP_ASKPASS_PASSWORD") { print!("{password}"); return; }
     if targets.first().map(String::as_str) == Some("--password-test") {
         if let Err(error) = password_test().await { eprintln!("{error}"); std::process::exit(1); }
         return;

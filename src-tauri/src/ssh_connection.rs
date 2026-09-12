@@ -1,5 +1,6 @@
 use crate::models::Server;
 use std::{ffi::OsString, path::Path};
+use zeroize::Zeroize;
 
 /// Credentials are deliberately separate from the serializable server model.
 #[derive(Clone, Default)]
@@ -12,6 +13,19 @@ impl std::fmt::Debug for SshPasswords {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SshPasswords").field("target", &self.target.is_some()).field("proxy", &self.proxy.is_some()).finish()
     }
+}
+
+impl Drop for SshPasswords {
+    fn drop(&mut self) { self.target.zeroize(); self.proxy.zeroize(); }
+}
+
+pub(crate) const INHERITED_ASKPASS_ENV: [&str; 7] = [
+    "RACKTOP_ASKPASS_PASSWORD", "RACKTOP_PROXY_PASSWORD", crate::askpass::SOCKET_ENV,
+    crate::askpass::TOKEN_ENV, crate::askpass::PROXY_TOKEN_ENV, "SSH_ASKPASS", "SSH_ASKPASS_REQUIRE",
+];
+
+pub(crate) fn clear_inherited_askpass_env(command: &mut tokio::process::Command) {
+    for key in INHERITED_ASKPASS_ENV { command.env_remove(key); }
 }
 
 #[derive(Debug, PartialEq)]
@@ -48,10 +62,13 @@ fn quote(value: &str) -> String { format!("'{}'", value.replace('\'', "'\\''")) 
 pub struct SshOptions {
     pub args: Vec<String>,
     pub env: Vec<(OsString, OsString)>,
+    pub broker: Option<crate::askpass::Broker>,
 }
 
 pub fn options(server: &Server, passwords: Option<&SshPasswords>, probe_keys: Option<&Path>) -> Result<SshOptions, String> {
-    let mut options = SshOptions { args: Vec::new(), env: Vec::new() };
+    let mut options = SshOptions { args: Vec::new(), env: Vec::new(), broker: None };
+    let mut target_password = None;
+    let mut proxy_password = None;
     if server.managed.is_some() {
         // An organization address cannot be redirected by a local Host stanza.
         options.args.extend(["-F".into(), if cfg!(windows) { "NUL" } else { "/dev/null" }.into()]);
@@ -70,7 +87,7 @@ pub fn options(server: &Server, passwords: Option<&SshPasswords>, probe_keys: Op
         if server.auth_method == "password" {
             let password = passwords.and_then(|value| value.target.as_deref()).ok_or("没有可用的目标服务器密码；请编辑服务器并重新输入密码")?;
             for value in ["BatchMode=no", "PreferredAuthentications=password,keyboard-interactive", "PubkeyAuthentication=no", "NumberOfPasswordPrompts=1"] { setting(value); }
-            options.env.push(("RACKTOP_ASKPASS_PASSWORD".into(), password.into()));
+            target_password = Some(password);
         } else {
             setting("BatchMode=yes");
         }
@@ -89,14 +106,17 @@ pub fn options(server: &Server, passwords: Option<&SshPasswords>, probe_keys: Op
         let executable = std::env::current_exe().map_err(|error| error.to_string())?;
         let executable = executable.to_str().ok_or("RackTop 安装路径不是有效的 UTF-8")?;
         let isolated_config = if server.managed.is_some() { " no-config" } else { "" };
-        // Secrets never appear in ProxyCommand or process arguments. The helper
-        // gives the outer ssh only the jump password, and replaces itself with ssh.
+        // The proxy helper receives only operation-scoped capability metadata;
+        // the password is delivered directly to the nested SSH's askpass child.
         options.args.extend(["-o".into(), format!("ProxyCommand={} --racktop-ssh-proxy {} {} {}{isolated_config}", quote(executable), quote(proxy), quote(&server.host), server.port)]);
-        options.env.push(("RACKTOP_PROXY_PASSWORD".into(), password.into()));
+        proxy_password = Some(password);
     } else if let Some(proxy) = server.proxy_jump.as_deref().filter(|value| !value.is_empty()) {
         options.args.extend(["-J".into(), proxy.into()]);
     }
-    if !options.env.is_empty() {
+    if target_password.is_some() || proxy_password.is_some() {
+        let (broker, env) = crate::askpass::Broker::start(target_password, proxy_password)?;
+        options.broker = Some(broker);
+        options.env.extend(env);
         options.env.push(("SSH_ASKPASS".into(), std::env::current_exe().map_err(|error| error.to_string())?.into_os_string()));
         options.env.push(("SSH_ASKPASS_REQUIRE".into(), "force".into()));
         options.env.push(("DISPLAY".into(), "racktop:0".into()));
@@ -112,14 +132,15 @@ pub fn run_proxy(args: &[String]) -> Result<(), String> {
     let target_port = args[2].parse::<u16>().map_err(|_| "无效的目标端口")?;
     let target_host = &args[1];
     if target_port == 0 || target_host.is_empty() || target_host.starts_with('-') || !target_host.chars().all(|c| c.is_ascii_alphanumeric() || "_.-:".contains(c)) { return Err("无效的目标地址".into()); }
-    let password = std::env::var("RACKTOP_PROXY_PASSWORD").map_err(|_| "没有可用的跳板机密码")?;
+    let token = std::env::var_os(crate::askpass::PROXY_TOKEN_ENV).ok_or("没有可用的跳板机密码通道")?;
     let mut command = std::process::Command::new("ssh");
     if args.len() == 4 { command.args(["-F", if cfg!(windows) { "NUL" } else { "/dev/null" }]); }
     command.args(["-T", "-o", "StrictHostKeyChecking=yes", "-o", "BatchMode=no", "-o", "PreferredAuthentications=password,keyboard-interactive", "-o", "PubkeyAuthentication=no", "-o", "NumberOfPasswordPrompts=1", "-o", "ConnectTimeout=8", "-o", "ServerAliveInterval=5", "-o", "ServerAliveCountMax=2", "-o", "ControlMaster=no", "-o", "ControlPath=none", "-o", "ProxyCommand=none", "-o", "ProxyJump=none"]);
     #[cfg(feature = "integration-probe")]
     if let Some(path) = std::env::var_os("RACKTOP_TEST_KNOWN_HOSTS") { command.args(["-o", &format!("UserKnownHostsFile={}", Path::new(&path).display())]); }
     command.args(["-p", &jump.port.to_string(), "-l", &jump.username, "-W", &format!("[{target_host}]:{target_port}"), &jump.host]);
-    command.env("RACKTOP_ASKPASS_PASSWORD", password).env_remove("RACKTOP_PROXY_PASSWORD");
+    command.env(crate::askpass::TOKEN_ENV, token).env_remove(crate::askpass::PROXY_TOKEN_ENV)
+        .env_remove("RACKTOP_ASKPASS_PASSWORD").env_remove("RACKTOP_PROXY_PASSWORD");
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     {
         use std::os::unix::process::CommandExt;
@@ -127,6 +148,54 @@ pub fn run_proxy(args: &[String]) -> Result<(), String> {
     }
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     { Err("独立跳板机密码目前仅支持 Linux 和 macOS 客户端".into()) }
+}
+
+/// The command and its child own the channel. Keeping this wrapper through
+/// output()/spawn() prevents builders from dropping the channel before askpass.
+pub(crate) struct SshCommand {
+    command: tokio::process::Command,
+    broker: Option<crate::askpass::Broker>,
+}
+
+impl SshCommand {
+    pub(crate) fn new(mut command: tokio::process::Command, broker: Option<crate::askpass::Broker>) -> Self {
+        // Builders clear inherited capability metadata before adding this
+        // operation's values; keep the legacy plaintext fields absent too.
+        command.env_remove("RACKTOP_ASKPASS_PASSWORD").env_remove("RACKTOP_PROXY_PASSWORD");
+        Self { command, broker }
+    }
+    pub(crate) fn arg(&mut self, arg: impl AsRef<std::ffi::OsStr>) -> &mut Self { self.command.arg(arg); self }
+    pub(crate) fn args<I, S>(&mut self, args: I) -> &mut Self where I: IntoIterator<Item=S>, S: AsRef<std::ffi::OsStr> { self.command.args(args); self }
+    pub(crate) fn stdin(&mut self, value: std::process::Stdio) -> &mut Self { self.command.stdin(value); self }
+    pub(crate) fn stdout(&mut self, value: std::process::Stdio) -> &mut Self { self.command.stdout(value); self }
+    pub(crate) fn stderr(&mut self, value: std::process::Stdio) -> &mut Self { self.command.stderr(value); self }
+    pub(crate) fn kill_on_drop(&mut self, value: bool) -> &mut Self { self.command.kill_on_drop(value); self }
+    #[cfg(test)]
+    pub(crate) fn as_std(&self) -> &std::process::Command { self.command.as_std() }
+    pub(crate) fn spawn(&mut self) -> std::io::Result<SshChild> {
+        let child = self.command.spawn()?;
+        if let Some(broker) = &self.broker { broker.bind_child(child.id()); }
+        Ok(SshChild { child, _broker: self.broker.take() })
+    }
+    pub(crate) async fn output(&mut self) -> std::io::Result<std::process::Output> {
+        self.command.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
+        self.spawn()?.wait_with_output().await
+    }
+}
+
+pub(crate) struct SshChild {
+    child: tokio::process::Child,
+    _broker: Option<crate::askpass::Broker>,
+}
+impl std::ops::Deref for SshChild { type Target = tokio::process::Child; fn deref(&self) -> &Self::Target { &self.child } }
+impl std::ops::DerefMut for SshChild { fn deref_mut(&mut self) -> &mut Self::Target { &mut self.child } }
+impl SshChild {
+    pub(crate) async fn wait_with_output(self) -> std::io::Result<std::process::Output> {
+        let Self { child, _broker } = self;
+        let result = child.wait_with_output().await;
+        drop(_broker);
+        result
+    }
 }
 
 #[cfg(test)]
@@ -141,6 +210,29 @@ mod tests {
         })).unwrap()
     }
 
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn cancelling_an_output_operation_closes_its_password_channel() {
+        let (broker, env) = crate::askpass::Broker::start(Some("synthetic-cancel-password"), None).unwrap();
+        let endpoint = std::path::PathBuf::from(&env.iter().find(|(key, _)| key == crate::askpass::SOCKET_ENV).unwrap().1);
+        let mut process = tokio::process::Command::new("sleep");
+        process.arg("5").kill_on_drop(true);
+        let mut command = SshCommand::new(process, Some(broker));
+        assert!(tokio::time::timeout(std::time::Duration::from_millis(30), command.output()).await.is_err());
+        assert!(!endpoint.exists());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_failed_spawn_releases_the_operation_channel() {
+        let (broker, env) = crate::askpass::Broker::start(Some("synthetic-spawn-password"), None).unwrap();
+        let endpoint = std::path::PathBuf::from(&env.iter().find(|(key, _)| key == crate::askpass::SOCKET_ENV).unwrap().1);
+        let mut command = SshCommand::new(tokio::process::Command::new("/racktop-fixture-no-such-executable"), Some(broker));
+        assert!(command.spawn().is_err());
+        drop(command);
+        assert!(!endpoint.exists());
+    }
+
     #[test]
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     fn credentials_are_not_in_arguments_and_probe_has_no_target_secret() {
@@ -152,8 +244,10 @@ mod tests {
         assert!(normal.args.iter().any(|arg| arg == "StrictHostKeyChecking=yes"));
         let directory = tempfile::tempdir().unwrap();
         let probe = options(&server, Some(&passwords), Some(&directory.path().join("keys"))).unwrap();
-        assert!(!probe.env.iter().any(|(key, _)| key == "RACKTOP_ASKPASS_PASSWORD"));
-        assert!(probe.env.iter().any(|(key, _)| key == "RACKTOP_PROXY_PASSWORD"));
+        assert!(!probe.env.iter().any(|(key, _)| key == crate::askpass::TOKEN_ENV));
+        assert!(probe.env.iter().any(|(key, _)| key == crate::askpass::PROXY_TOKEN_ENV));
+        assert!(!format!("{:?}", normal.env).contains("target-only"));
+        assert!(!format!("{:?}", normal.env).contains("jump-only"));
         assert!(probe.args.iter().any(|arg| arg == "PreferredAuthentications=none"));
         let absent = SshPasswords { target: Some("target-only".into()), proxy: None };
         assert!(options(&server, Some(&absent), None).err().unwrap().contains("跳板机密码"));
@@ -169,8 +263,9 @@ mod tests {
         let executable = std::env::current_exe().unwrap();
         assert_eq!(env.get(std::ffi::OsStr::new("SSH_ASKPASS")), Some(&executable.clone().into_os_string()));
         assert_eq!(env.get(std::ffi::OsStr::new("SSH_ASKPASS_REQUIRE")), Some(&OsString::from("force")));
-        assert_eq!(env.get(std::ffi::OsStr::new("RACKTOP_ASKPASS_PASSWORD")), Some(&OsString::from("target-only")));
-        assert_eq!(env.get(std::ffi::OsStr::new("RACKTOP_PROXY_PASSWORD")), Some(&OsString::from("jump-only")));
+        assert!(env.contains_key(std::ffi::OsStr::new(crate::askpass::TOKEN_ENV)));
+        assert!(env.contains_key(std::ffi::OsStr::new(crate::askpass::PROXY_TOKEN_ENV)));
+        assert_ne!(env.get(std::ffi::OsStr::new(crate::askpass::TOKEN_ENV)), env.get(std::ffi::OsStr::new(crate::askpass::PROXY_TOKEN_ENV)));
         assert!(options.args.iter().any(|arg| arg == &format!("ProxyCommand={} --racktop-ssh-proxy 'jump@jump.example:21022' 'target.example' 22", quote(executable.to_str().unwrap()))));
         assert_eq!(quote("/Applications/RackTop Preview.app/Contents/MacOS/racktop"), "'/Applications/RackTop Preview.app/Contents/MacOS/racktop'");
     }

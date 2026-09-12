@@ -18,6 +18,7 @@ struct TerminalSession {
     writer: Box<dyn Write + Send>,
     child: Box<dyn Child + Send + Sync>,
     master: Box<dyn MasterPty + Send>,
+    _password_channel: Option<crate::askpass::Broker>,
 }
 
 #[derive(Default)]
@@ -58,17 +59,19 @@ impl TerminalManager {
             pixel_height: 0,
         }).map_err(|error| format!("无法创建终端 PTY：{error}"))?;
 
-        let mut command = configured_ssh_command(server, password)?;
+        let (mut command, password_channel) = configured_ssh_command(server, password)?;
         if let Some(index) = gpu_index {
             let variable = visible_devices_variable(accelerator_vendor);
             command.arg(format!("export {variable}={index}; exec \"${{SHELL:-/bin/sh}}\" -l"));
         }
         let child = pair.slave.spawn_command(command).map_err(|error| format!("无法启动 SSH 终端：{error}"))?;
+        if let Some(channel) = &password_channel { channel.bind_child(child.process_id()); }
         drop(pair.slave);
         let mut reader = pair.master.try_clone_reader().map_err(|error| format!("无法读取终端输出：{error}"))?;
         let writer = pair.master.take_writer().map_err(|error| format!("无法写入终端：{error}"))?;
         let session_id = Uuid::new_v4().to_string();
         let event_session_id = session_id.clone();
+        let close_password_channel = password_channel.as_ref().map(|channel| channel.cancellation());
 
         thread::spawn(move || {
             let mut buffer = [0u8; 8192];
@@ -83,6 +86,7 @@ impl TerminalManager {
                     }
                 }
             }
+            if let Some(close) = close_password_channel { close(); }
             let _ = app.emit("terminal-exit", TerminalExit { session_id: event_session_id });
         });
 
@@ -92,6 +96,7 @@ impl TerminalManager {
             writer,
             child,
             master: pair.master,
+            _password_channel: password_channel,
         });
         Ok(session_id)
     }
@@ -142,15 +147,16 @@ impl TerminalManager {
     }
 }
 
-fn configured_ssh_command(server: &Server, password: Option<&crate::ssh_connection::SshPasswords>) -> Result<CommandBuilder, String> {
+fn configured_ssh_command(server: &Server, password: Option<&crate::ssh_connection::SshPasswords>) -> Result<(CommandBuilder, Option<crate::askpass::Broker>), String> {
     configured_ssh_command_mode(server, password, false)
 }
 
-fn configured_ssh_command_mode(server: &Server, password: Option<&crate::ssh_connection::SshPasswords>, shared: bool) -> Result<CommandBuilder, String> {
+fn configured_ssh_command_mode(server: &Server, password: Option<&crate::ssh_connection::SshPasswords>, shared: bool) -> Result<(CommandBuilder, Option<crate::askpass::Broker>), String> {
     let mut command = CommandBuilder::new("ssh");
     if shared { command.args(shared_ssh_restrictions()); }
     command.arg("-tt");
     let options = crate::ssh_connection::options(server, password, None)?;
+    for key in crate::ssh_connection::INHERITED_ASKPASS_ENV { command.env_remove(key); }
     command.args(options.args);
     for (key, value) in options.env { command.env(key, value); }
     if let Some(identity) = explicit_identity_file(server) {
@@ -169,7 +175,7 @@ fn configured_ssh_command_mode(server: &Server, password: Option<&crate::ssh_con
     } else {
         command.args(["-p", &server.port.to_string(), &format!("{}@{}", server.username, server.host)]);
     }
-    Ok(command)
+    Ok((command, options.broker))
 }
 
 /// These options precede user SSH configuration: OpenSSH keeps the first value.
@@ -216,6 +222,7 @@ struct SharedSession {
     input: mpsc::SyncSender<Vec<u8>>,
     killer: Box<dyn portable_pty::ChildKiller + Send + Sync>,
     master: Box<dyn MasterPty + Send>,
+    _password_channel: Option<crate::askpass::Broker>,
 }
 
 /// Shared terminals have their own bounded output sink. They never emit Tauri
@@ -233,18 +240,19 @@ impl SharedTerminalManager {
         if sessions.len() >= 4 { return Err("每个共享连接最多打开 4 个终端".into()); }
         let pair = native_pty_system().openpty(PtySize { rows: rows.clamp(2, 500), cols: columns.clamp(2, 500), pixel_width: 0, pixel_height: 0 })
             .map_err(|error| format!("无法创建共享终端：{error}"))?;
-        let mut command = configured_ssh_command_mode(server, password, true)?;
+        let (mut command, password_channel) = configured_ssh_command_mode(server, password, true)?;
         command.arg(format!("cd -- {directory} && exec \"${{SHELL:-/bin/sh}}\" -l"));
         let mut reader = pair.master.try_clone_reader().map_err(|error| error.to_string())?;
         let mut writer = pair.master.take_writer().map_err(|error| error.to_string())?;
         let mut child = pair.slave.spawn_command(command).map_err(|_| "无法启动共享 SSH，请让共享方检查本机 SSH 环境")?;
+        if let Some(channel) = &password_channel { channel.bind_child(child.process_id()); }
         drop(pair.slave);
         let killer = child.clone_killer();
         let mut output_killer = child.clone_killer();
         let mut input_killer = child.clone_killer();
         let (input, receiver) = mpsc::sync_channel::<Vec<u8>>(16);
         let id = Uuid::new_v4().to_string();
-        sessions.insert(id.clone(), SharedSession { scope: scope.clone(), input, killer, master: pair.master });
+        sessions.insert(id.clone(), SharedSession { scope: scope.clone(), input, killer, master: pair.master, _password_channel: password_channel });
         drop(sessions);
         thread::spawn(move || {
             while let Ok(data) = receiver.recv() {
@@ -338,7 +346,7 @@ mod tests {
         let mut server: Server = serde_json::from_value(serde_json::json!({"id":"fixture","name":"fixture",
             "host":"example.invalid","port":22,"username":"worker","tags":[],"samplingIntervalSeconds":2,
             "historyRetentionDays":90,"authMethod":"sshAgent","status":"unknown"})).unwrap();
-        let command = configured_ssh_command_mode(&server, None, true).unwrap();
+        let (command, _channel) = configured_ssh_command_mode(&server, None, true).unwrap();
         let args: Vec<_> = command.get_argv().iter().map(|arg| arg.to_string_lossy().to_string()).collect();
         assert_eq!(&args[..5], ["ssh", "-e", "none", "-o", "ForwardAgent=no"]);
         for option in ["ForwardX11=no", "ClearAllForwardings=yes", "PermitLocalCommand=no", "LocalCommand=none", "RemoteCommand=none", "StrictHostKeyChecking=yes", "LogLevel=QUIET"] {
@@ -383,7 +391,7 @@ mod tests {
         let killed = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let (input, receiver) = mpsc::sync_channel(2);
         manager.sessions.lock().unwrap().insert("session".into(), SharedSession {
-            scope: scope.clone(), input, killer: Box::new(TestKiller(killed.clone())), master: pair.master,
+            scope: scope.clone(), input, killer: Box::new(TestKiller(killed.clone())), master: pair.master, _password_channel: None,
         });
         for foreign in [&other_peer, &other_share] {
             assert!(manager.write(foreign, "session", b"forbidden").is_err());
@@ -406,9 +414,10 @@ pub fn password_probe(server: &Server, password: Option<&crate::ssh_connection::
     use std::io::Read;
     let pty = native_pty_system();
     let pair = pty.openpty(PtySize { rows: 24, cols: 80, pixel_width: 0, pixel_height: 0 }).map_err(|e| e.to_string())?;
-    let mut command = configured_ssh_command(server, password)?;
+    let (mut command, password_channel) = configured_ssh_command(server, password)?;
     command.arg("printf 'racktop-terminal-ok\\n'");
     let mut child = pair.slave.spawn_command(command).map_err(|e| e.to_string())?;
+    if let Some(channel) = &password_channel { channel.bind_child(child.process_id()); }
     drop(pair.slave);
     let mut text = String::new();
     pair.master.try_clone_reader().map_err(|e| e.to_string())?.read_to_string(&mut text).map_err(|e| e.to_string())?;

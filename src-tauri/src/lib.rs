@@ -6,6 +6,7 @@ pub mod flatpak_update;
 use linux_update::{check_linux_update, install_linux_update, relaunch_linux_app};
 pub mod collector;
 pub mod ssh_connection;
+pub mod askpass;
 pub mod models;
 mod remote_history;
 mod project_sync;

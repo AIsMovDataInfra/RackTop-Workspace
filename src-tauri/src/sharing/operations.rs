@@ -217,7 +217,7 @@ impl RemoteFiles {
     fn start(server: &Server, passwords: &SshPasswords, root: &str) -> Result<Self, String> {
         Self::spawn(remote_command(server, passwords)?, root)
     }
-    fn spawn(mut command: Command, root: &str) -> Result<Self, String> {
+    fn spawn(mut command: crate::ssh_connection::SshCommand, root: &str) -> Result<Self, String> {
         let mut child = command.spawn().map_err(|_| "无法启动共享文件 SSH 进程")?;
         let stdin = child.stdin.take().ok_or("无法打开共享文件输入")?;
         let stdout = child.stdout.take().ok_or("无法打开共享文件输出")?;
@@ -261,12 +261,13 @@ impl Drop for RemoteFiles {
     }
 }
 
-fn remote_command(server: &Server, passwords: &SshPasswords) -> Result<Command, String> {
+fn remote_command(server: &Server, passwords: &SshPasswords) -> Result<crate::ssh_connection::SshCommand, String> {
     let mut command = Command::new("ssh");
     command
         .args(crate::terminal::shared_ssh_restrictions())
         .arg("-T");
     let options = crate::ssh_connection::options(server, Some(passwords), None)?;
+    crate::ssh_connection::clear_inherited_askpass_env(&mut command);
     command.args(options.args).envs(options.env);
     if let Some(identity) = explicit_identity_file(server) {
         command
@@ -297,7 +298,7 @@ fn remote_command(server: &Server, passwords: &SshPasswords) -> Result<Command, 
         .kill_on_drop(true);
     #[cfg(windows)]
     command.creation_flags(0x08000000);
-    Ok(command)
+    Ok(crate::ssh_connection::SshCommand::new(command, options.broker))
 }
 
 async fn file_actor(
@@ -523,7 +524,7 @@ mod tests {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
-        RemoteFiles::spawn(command, root.to_str().unwrap()).unwrap()
+        RemoteFiles::spawn(crate::ssh_connection::SshCommand::new(command, None), root.to_str().unwrap()).unwrap()
     }
     async fn call(files: &RemoteFiles, method: &str, params: Value) -> Result<Value, String> {
         let (reply, response) = oneshot::channel();

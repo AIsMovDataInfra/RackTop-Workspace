@@ -275,19 +275,20 @@ pub fn collection_display_command(server: &Server, include_processes: bool, incl
     format!("ssh {} {} {}", arguments.join(" "), shell_quote(&target), shell_quote(&remote_command))
 }
 
-pub(crate) fn configured_ssh_command(server: &Server, password: Option<&crate::ssh_connection::SshPasswords>) -> Result<(Command, String), String> {
+pub(crate) fn configured_ssh_command(server: &Server, password: Option<&crate::ssh_connection::SshPasswords>) -> Result<(crate::ssh_connection::SshCommand, String), String> {
     configured_ssh_command_with_control(server, password, false)
 }
 
-pub(crate) fn configured_ssh_command_without_control(server: &Server, password: Option<&crate::ssh_connection::SshPasswords>) -> Result<(Command, String), String> {
+pub(crate) fn configured_ssh_command_without_control(server: &Server, password: Option<&crate::ssh_connection::SshPasswords>) -> Result<(crate::ssh_connection::SshCommand, String), String> {
     configured_ssh_command_with_control(server, password, false)
 }
 
-fn configured_ssh_command_with_control(server: &Server, password: Option<&crate::ssh_connection::SshPasswords>, _use_control_master: bool) -> Result<(Command, String), String> {
+fn configured_ssh_command_with_control(server: &Server, password: Option<&crate::ssh_connection::SshPasswords>, _use_control_master: bool) -> Result<(crate::ssh_connection::SshCommand, String), String> {
     let mut command = Command::new("ssh");
     #[cfg(windows)]
     command.creation_flags(0x08000000);
     let options = crate::ssh_connection::options(server, password, None)?;
+    crate::ssh_connection::clear_inherited_askpass_env(&mut command);
     command.args(options.args).envs(options.env).kill_on_drop(true);
     if let Some(identity) = explicit_identity_file(server) {
         command.args(["-o", "IdentitiesOnly=yes"]);
@@ -299,7 +300,7 @@ fn configured_ssh_command_with_control(server: &Server, password: Option<&crate:
         command.args(["-p", &server.port.to_string()]);
         format!("{}@{}", server.username, server.host)
     };
-    Ok((command, target))
+    Ok((crate::ssh_connection::SshCommand::new(command, options.broker), target))
 }
 
 pub async fn install_nvidia_driver(server: &Server, password: Option<&crate::ssh_connection::SshPasswords>) -> Result<String, String> {

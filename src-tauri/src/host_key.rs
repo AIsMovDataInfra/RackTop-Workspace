@@ -38,8 +38,10 @@ async fn scan_through_jump(server: &Server, passwords: Option<&crate::ssh_connec
     let key_path = directory.path().join("untrusted-known-hosts");
     let options = crate::ssh_connection::options(server, passwords, Some(&key_path))?;
     let mut command = Command::new("ssh");
+    crate::ssh_connection::clear_inherited_askpass_env(&mut command);
     command.args(options.args).envs(options.env).args(["-N", "-p", &server.port.to_string(), "-l", &server.username, &server.host])
         .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped()).kill_on_drop(true);
+    let mut command = crate::ssh_connection::SshCommand::new(command, options.broker);
     let result = timeout(Duration::from_secs(12), command.output()).await;
     let text = std::fs::read_to_string(&key_path).unwrap_or_default();
     let line = text.lines().find(|line| !line.starts_with('#') && !line.trim().is_empty());

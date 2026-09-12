@@ -6,8 +6,8 @@ fn main() {
         if let Err(error) = racktop_lib::ssh_connection::run_proxy(&args[1..]) { eprintln!("{error}"); std::process::exit(1); }
         return;
     }
-    if let Ok(password) = std::env::var("RACKTOP_ASKPASS_PASSWORD") {
-        print!("{password}");
+    if let Some(result) = racktop_lib::askpass::run_helper() {
+        if result.is_err() { std::process::exit(1); }
         return;
     }
     racktop_lib::run();

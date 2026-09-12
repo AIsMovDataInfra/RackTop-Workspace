@@ -9,6 +9,7 @@ use tauri::{Emitter, Manager};
 pub(crate) const LEASE_MS: i64 = 75_000;
 const AUTH_REQUIRED: &str = "请先配置本机 SSH 认证";
 const EXPIRED: &str = "请联网重新验证团队权限";
+const CREDENTIAL_FIELDS: [&str; 3] = ["hasPassword", "hasJumpPassword", "credentialRevision"];
 pub(crate) fn now_ms() -> i64 { SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as i64 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -57,7 +58,7 @@ impl Directory {
         let schema = value.get("schemaVersion").and_then(serde_json::Value::as_u64);
         if let Some(rows) = value.get("servers").and_then(serde_json::Value::as_array) {
             for row in rows {
-                let keys = ["hasPassword", "hasJumpPassword", "credentialRevision"];
+                let keys = CREDENTIAL_FIELDS;
                 if (schema == Some(1) && keys.iter().any(|key| row.get(key).is_some()))
                     || (schema == Some(2) && (row.get(keys[0]).and_then(serde_json::Value::as_bool).is_none()
                         || row.get(keys[1]).and_then(serde_json::Value::as_bool).is_none()
@@ -198,11 +199,28 @@ impl Database {
         for remote in &directory.servers {
             let previous = old.iter().find(|(_, owner, company, id, _, _, _)| owner == account && company == &remote.company && id == &remote.id);
             let id = previous.map(|p| p.0.clone()).unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-            let encoded = serde_json::to_string(remote).map_err(|e| e.to_string())?;
+            let mut encoded = serde_json::to_value(remote).map_err(|e| e.to_string())?;
+            if directory.schema_version == 1 {
+                // Missing metadata must remain distinguishable from explicit
+                // schema 2 values when a newer service becomes available.
+                if let Some(fields) = encoded.as_object_mut() { for key in CREDENTIAL_FIELDS { fields.remove(key); } }
+            }
+            let encoded = serde_json::to_string(&encoded).map_err(|e| e.to_string())?;
             let mut reset_local = false;
             if let Some((_, _, _, _, definition, until, _)) = previous {
-                let earlier: RemoteServer = serde_json::from_str(definition).map_err(|_| "本机组织目录记录损坏，原记录已保留")?;
-                if remote.version < earlier.version || (remote.version == earlier.version && remote != &earlier) { return Err("组织目录返回旧版本或冲突记录，请刷新后重试".into()); }
+                let value: serde_json::Value = serde_json::from_str(definition).map_err(|_| "本机组织目录记录损坏，原记录已保留")?;
+                let legacy = CREDENTIAL_FIELDS.iter().all(|key| value.get(key).is_none());
+                let earlier: RemoteServer = serde_json::from_value(value).map_err(|_| "本机组织目录记录损坏，原记录已保留")?;
+                if directory.schema_version == 1 && !legacy { return Err("组织目录缺少已记录的认证元数据，请刷新后重试".into()); }
+                let mut upgraded = earlier.clone();
+                upgraded.has_password = remote.has_password;
+                upgraded.has_jump_password = remote.has_jump_password;
+                upgraded.credential_revision = remote.credential_revision;
+                // 2.5 stored schema 1 at the current server version. Only fill
+                // its entirely absent credential metadata; no existing field
+                // or known credential value may change at the same version.
+                let fills_legacy_metadata = legacy && directory.schema_version == 2 && remote == &upgraded;
+                if remote.version < earlier.version || (remote.version == earlier.version && remote != &earlier && !fills_legacy_metadata) { return Err("组织目录返回旧版本或冲突记录，请刷新后重试".into()); }
                 if remote.credential_revision < earlier.credential_revision { return Err("组织目录返回旧认证版本，请刷新后重试".into()); }
                 reset_local = remote.target_changed(&earlier) || (earlier.has_password && !remote.has_password) || (earlier.has_jump_password && !remote.has_jump_password);
                 if remote.credentials_changed(&earlier) { reset.push(id.clone()); }
@@ -367,6 +385,100 @@ mod tests {
     fn shared(mut row: serde_json::Value, target: bool, jump: bool, revision: u64) -> Directory {
         row["hasPassword"] = json!(target); row["hasJumpPassword"] = json!(jump); row["credentialRevision"] = json!(revision);
         Directory::parse(json!({"schemaVersion":2,"revision":"b".repeat(64),"servers":[row]}),"A公司").unwrap()
+    }
+
+    #[test]
+    fn legacy_same_version_cache_receives_shared_password_metadata_after_restart() {
+        let (dir,db)=database(); let mut row=remote(1,"node.example"); row["version"]=json!(8);
+        row["jump"]=json!({"host":"jump.example","port":22,"username":"hop"});
+        db.apply_directory("account-a",&directory(vec![row.clone()],"A公司"),now_ms()).unwrap();
+        let id=db.list_servers().unwrap().pop().unwrap().id;
+        // A released 2.5 client stores exactly the schema 1 fields even after
+        // an administrator has changed shared credentials on the server.
+        db.connection.lock().unwrap().execute("UPDATE managed_servers SET definition_json=?2 WHERE local_id=?1",params![id,serde_json::to_string(&row).unwrap()]).unwrap();
+        db.connection.lock().unwrap().execute("INSERT INTO snapshots(server_id,timestamp,cpu_utilization,memory_utilization,gpu_json,payload_json) VALUES(?1,1,0,0,'{}','{}')",[&id]).unwrap();
+        drop(db); let db=Database::open(&dir.path().join("test.sqlite")).unwrap();
+        assert!(db.get_server(&id).is_err());
+        db.session_passwords.lock().unwrap().insert(id.clone(),"stale-target-fixture".into());
+        db.session_passwords.lock().unwrap().insert(format!("proxy:{id}"),"stale-hop-fixture".into());
+        db.apply_directory("account-a",&shared(row,true,true,2),now_ms()).unwrap();
+        let server=db.get_server(&id).unwrap(); let managed=server.managed.as_ref().unwrap();
+        assert!(managed.available && managed.has_password && managed.has_jump_password);
+        assert_eq!(managed.version,8); assert_eq!(managed.credential_revision,2);
+        assert_eq!(server.auth_method,"password"); assert!(server.proxy_use_password);
+        assert!(db.session_passwords.lock().unwrap().is_empty());
+        assert_eq!(db.list_servers().unwrap().len(),1);
+        assert_eq!(db.connection.lock().unwrap().query_row("SELECT COUNT(*) FROM snapshots WHERE server_id=?1",[&id],|r|r.get::<_,i64>(0)).unwrap(),1);
+    }
+
+    #[tokio::test]
+    async fn schema_one_cache_upgrade_cancels_active_local_auth_without_losing_confirmation() {
+        let (_dir,db)=database(); let mut row=remote(1,"node.example");
+        row["jump"]=json!({"host":"jump.example","port":22,"username":"hop"});
+        let server=configured(&db,row.clone()); let epoch=db.managed_epoch(&server.id).unwrap();
+        let encoded:String=db.connection.lock().unwrap().query_row("SELECT definition_json FROM managed_servers WHERE local_id=?1",[&server.id],|r|r.get(0)).unwrap();
+        let value:serde_json::Value=serde_json::from_str(&encoded).unwrap();
+        assert!(CREDENTIAL_FIELDS.iter().all(|key|value.get(key).is_none()));
+        db.session_passwords.lock().unwrap().insert(format!("proxy:{}",server.id),"old-hop-fixture".into());
+        let servers=[&server];
+        let operation=authorized(&db,&servers,std::future::pending::<Result<(),String>>());
+        let upgrade=async {
+            tokio::task::yield_now().await;
+            db.apply_directory("account-a",&shared(row.clone(),false,true,1),now_ms()).unwrap();
+        };
+        let (result,())=tokio::time::timeout(std::time::Duration::from_secs(1),async{tokio::join!(operation,upgrade)}).await.unwrap();
+        assert!(result.is_err()); assert_ne!(db.managed_epoch(&server.id).unwrap(),epoch);
+        assert!(db.check_managed_server(&server).is_err());
+        let fresh=db.get_server(&server.id).unwrap();
+        assert!(fresh.managed.as_ref().unwrap().available); assert_eq!(fresh.auth_method,"sshAgent");
+        assert!(fresh.proxy_use_password); assert!(db.session_passwords.lock().unwrap().is_empty());
+        db.apply_directory("account-a",&shared(row,false,true,1),now_ms()).unwrap();
+        assert!(db.get_server(&server.id).unwrap().managed.unwrap().available);
+    }
+
+    #[test]
+    fn legacy_metadata_upgrade_rejects_changes_to_known_definition_fields() {
+        for (field,value) in [("name",json!("Renamed")),("host",json!("other.example")),("port",json!(2222)),("username",json!("other")),
+            ("jump",json!({"host":"jump.example","port":22,"username":"hop"})),("enabled",json!(false)),("updatedAt",json!("2026-09-12T00:00:00.000Z"))] {
+            let (_dir,db)=database(); let original=remote(1,"node.example");
+            let server=configured(&db,original.clone()); let mut changed=original.clone(); changed[field]=value;
+            assert!(db.apply_directory("account-a",&shared(changed,true,false,1),now_ms()).is_err(),"{field}");
+            let encoded:String=db.connection.lock().unwrap().query_row("SELECT definition_json FROM managed_servers WHERE local_id=?1",[&server.id],|r|r.get(0)).unwrap();
+            assert_eq!(serde_json::from_str::<serde_json::Value>(&encoded).unwrap(),original,"{field}");
+        }
+    }
+
+    #[test]
+    fn same_version_metadata_changes_require_an_entirely_legacy_cache() {
+        for field in CREDENTIAL_FIELDS {
+            let (_dir,db)=database(); let row=remote(1,"node.example"); let server=configured(&db,row.clone());
+            let mut partial=row.clone(); partial[field]=if field=="credentialRevision" {json!(0)} else {json!(false)};
+            db.connection.lock().unwrap().execute("UPDATE managed_servers SET definition_json=?2 WHERE local_id=?1",params![server.id,serde_json::to_string(&partial).unwrap()]).unwrap();
+            assert!(db.apply_directory("account-a",&shared(row,true,false,1),now_ms()).is_err(),"{field}");
+        }
+        for (old_target,old_revision,new_target,new_revision) in [(false,0,true,1),(true,1,true,2),(true,1,false,2),(true,2,true,1)] {
+            let (_dir,db)=database(); let row=remote(1,"node.example");
+            db.apply_directory("account-a",&shared(row.clone(),old_target,false,old_revision),now_ms()).unwrap();
+            assert!(db.apply_directory("account-a",&shared(row,new_target,false,new_revision),now_ms()).is_err());
+            let current=db.list_servers().unwrap().pop().unwrap().managed.unwrap();
+            assert_eq!(current.has_password,old_target); assert_eq!(current.credential_revision,old_revision);
+        }
+    }
+
+    #[test]
+    fn schema_one_cannot_overwrite_schema_two_metadata_even_with_a_newer_version() {
+        for (target,revision) in [(false,0),(true,1)] {
+            for version in [1,2] {
+                let (_dir,db)=database(); let mut row=remote(1,"node.example");
+                db.apply_directory("account-a",&shared(row.clone(),target,false,revision),now_ms()).unwrap();
+                let server=db.list_servers().unwrap().pop().unwrap();
+                let before:String=db.connection.lock().unwrap().query_row("SELECT definition_json FROM managed_servers WHERE local_id=?1",[&server.id],|r|r.get(0)).unwrap();
+                row["version"]=json!(version);
+                assert!(db.apply_directory("account-a",&directory(vec![remote(2,"second.example"),row],"A公司"),now_ms()).is_err());
+                let after:String=db.connection.lock().unwrap().query_row("SELECT definition_json FROM managed_servers WHERE local_id=?1",[&server.id],|r|r.get(0)).unwrap();
+                assert_eq!(before,after); assert_eq!(db.list_servers().unwrap().len(),1);
+            }
+        }
     }
 
     #[test]

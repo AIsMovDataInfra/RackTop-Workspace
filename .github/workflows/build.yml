@@ -47,6 +47,20 @@ jobs:
       - run: npm run test
       - run: npm run build
       - run: cargo test --release --locked --lib --manifest-path src-tauri/Cargo.toml
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify SSH password delivery over direct and jump connections
+        run: |
+          python -m pip install 'paramiko==4.0.0'
+          cargo build --release --locked --features integration-probe --bin ssh-hardening-probe --manifest-path src-tauri/Cargo.toml
+          TMPDIR="$RUNNER_TEMP" python scripts/test-ssh-hardening.py "$PWD/src-tauri/target/release/ssh-hardening-probe"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: linux-ssh-verification
+          if-no-files-found: warn
+          path: ${{ runner.temp }}/racktop-ssh-hardening-*/results.json
       - name: Check sharing relay and file protocol
         run: |
           npm ci --prefix relay --ignore-scripts
@@ -201,6 +215,20 @@ jobs:
       - run: npm run test
       - run: npm run build
       - run: cargo test --manifest-path src-tauri/Cargo.toml --locked --release --lib --target ${{ matrix.target }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify native SSH password delivery over direct and jump connections
+        run: |
+          python -m pip install 'paramiko==4.0.0'
+          cargo build --manifest-path src-tauri/Cargo.toml --locked --release --features integration-probe --bin ssh-hardening-probe --target ${{ matrix.target }}
+          TMPDIR="$RUNNER_TEMP" python scripts/test-ssh-hardening.py "$PWD/src-tauri/target/${{ matrix.target }}/release/ssh-hardening-probe"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: macos-${{ matrix.arch }}-ssh-verification
+          if-no-files-found: warn
+          path: ${{ runner.temp }}/racktop-ssh-hardening-*/results.json
 
       - name: Import Apple Developer ID certificate
         shell: bash
