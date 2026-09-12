@@ -18,6 +18,11 @@ on:
         required: true
         type: boolean
         default: true
+      diagnose_ticket:
+        description: Run synthetic SSH ticket timing diagnostics without building the app
+        required: true
+        type: boolean
+        default: false
   push:
     tags:
       - "v*"
@@ -26,6 +31,38 @@ permissions:
   contents: read
 
 jobs:
+  ticket-diagnostics:
+    if: github.event_name == 'workflow_dispatch' && inputs.diagnose_ticket
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            label: linux
+          - runner: macos-14
+            label: macos-arm64
+          - runner: macos-15-intel
+            label: macos-x64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Trace synthetic local ticket timing
+        shell: bash
+        run: |
+          rustc --edition=2021 -O scripts/diagnose-ssh-ticket.rs -o "$RUNNER_TEMP/diagnose-ssh-ticket"
+          rustc --version > "$RUNNER_TEMP/ticket-diagnostics-environment.txt"
+          uname -sr >> "$RUNNER_TEMP/ticket-diagnostics-environment.txt"
+          "$RUNNER_TEMP/diagnose-ssh-ticket" 3 1 > "$RUNNER_TEMP/ticket-diagnostics-sequential.jsonl"
+          "$RUNNER_TEMP/diagnose-ssh-ticket" 2 4 > "$RUNNER_TEMP/ticket-diagnostics-concurrent.jsonl"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ticket-diagnostics-${{ matrix.label }}
+          if-no-files-found: error
+          path: ${{ runner.temp }}/ticket-diagnostics-*
+
   linux:
     if: (github.event_name == 'workflow_dispatch' && inputs.build_linux) || github.event_name == 'push'
     runs-on: ubuntu-22.04
