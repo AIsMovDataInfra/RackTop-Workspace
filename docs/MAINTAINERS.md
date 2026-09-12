@@ -48,7 +48,9 @@ cargo test --locked --manifest-path src-tauri/Cargo.toml
 
 统一 Linux 安装入口为 `scripts/install-racktop.sh`，只安装已发布的预编译包。它读取 HTTPS 更新清单，从同一版本 Release 获取 `SHA256SUMS` 并核验包摘要。Ubuntu 20.04 初装使用完整 Flatpak 运行时套件；已有 Flatpak 保持原来的 user / system 范围，运行时齐备时只下载应用包。Ubuntu 22.04 新装使用 DEB。不要在安装失败后尝试源码编译，也不要用 `releases/latest` 推导版本：GitHub 的预发布不出现在该接口。
 
-**当前分发为 [2.7.0 测试版（Pre-release）](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/tag/v2.7.0)。** 发布顺序为：完成全部平台验证 → 归并源码 → 固定版本标签 → 上传并验证全部附件 → 推进更新清单 → 发布安装脚本及下载页面。下载页提供统一在线安装器及四个平台安装入口。新 Ubuntu 20.04 离线套件的根目录为 `RackTop_2.7.0_flatpak_offline`，内置 `install.sh` 进行用户级安装；保留已有系统级安装应使用统一在线安装器。后续页面的阶段文字仍须以实际公开下载和安装验证为准。
+**当前分发为 [2.7.3 测试版（Pre-release）](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/tag/v2.7.3)。** 发布顺序为：完成全部平台验证 → 归并源码 → 固定版本标签 → 上传并验证全部附件 → 推进更新清单 → 发布安装脚本及下载页面。下载页提供统一在线安装器及四个平台安装入口。新 Ubuntu 20.04 离线套件的根目录为 `RackTop_2.7.3_flatpak_offline`，内置 `install.sh` 进行用户级安装；保留已有系统级安装应使用统一在线安装器。后续页面的阶段文字仍须以实际公开下载和安装验证为准。
+
+SSH 连接和文件传输继续通过成员本机网络直连目标服务器。2.7.3 的客户端加固减少密码意外暴露，但不能阻止获授权成员主动取得密码。
 
 ## 数据与来源
 

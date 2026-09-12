@@ -1,6 +1,6 @@
 # 安装 RackTop
 
-**[统一下载页](https://136.0.110.161/downloads/)提供 2.7.0 测试版（Pre-release）。** 安装的是现成程序，无需源码、Rust、Cargo 或 WebKit 开发包。
+**[统一下载页](https://136.0.110.161/downloads/)提供 2.7.3 测试版（Pre-release）。** 安装的是现成程序，无需源码、Rust、Cargo 或 WebKit 开发包。
 
 ## Ubuntu 一键安装
 
@@ -20,12 +20,12 @@ curl --proto '=https' --proto-redir '=https' -fL https://136.0.110.161/downloads
 
 | 电脑 | 云端下载 | GitHub 备用 |
 | --- | --- | --- |
-| Ubuntu 20.04，Intel / AMD 64 位 | [Flatpak 离线套件](https://136.0.110.161/downloads/RackTop_2.7.0_linux-amd64-flatpak-offline.tar.gz) | [下载](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.7.0/RackTop_2.7.0_linux-amd64-flatpak-offline.tar.gz) |
-| Ubuntu 22.04，Intel / AMD 64 位 | [DEB 安装包](https://136.0.110.161/downloads/RackTop_2.7.0_linux-amd64.deb) | [下载](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.7.0/RackTop_2.7.0_linux-amd64.deb) |
-| Mac，M 系列芯片 | [Apple Silicon DMG](https://136.0.110.161/downloads/RackTop_2.7.0_macos-arm64-unsigned.dmg) | [下载](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.7.0/RackTop_2.7.0_macos-arm64-unsigned.dmg) |
-| Mac，Intel 芯片 | [Intel DMG](https://136.0.110.161/downloads/RackTop_2.7.0_macos-x64-unsigned.dmg) | [下载](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.7.0/RackTop_2.7.0_macos-x64-unsigned.dmg) |
+| Ubuntu 20.04，Intel / AMD 64 位 | [Flatpak 离线套件](https://136.0.110.161/downloads/RackTop_2.7.3_linux-amd64-flatpak-offline.tar.gz) | [下载](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.7.3/RackTop_2.7.3_linux-amd64-flatpak-offline.tar.gz) |
+| Ubuntu 22.04，Intel / AMD 64 位 | [DEB 安装包](https://136.0.110.161/downloads/RackTop_2.7.3_linux-amd64.deb) | [下载](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.7.3/RackTop_2.7.3_linux-amd64.deb) |
+| Mac，M 系列芯片 | [Apple Silicon DMG](https://136.0.110.161/downloads/RackTop_2.7.3_macos-arm64-unsigned.dmg) | [下载](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.7.3/RackTop_2.7.3_macos-arm64-unsigned.dmg) |
+| Mac，Intel 芯片 | [Intel DMG](https://136.0.110.161/downloads/RackTop_2.7.3_macos-x64-unsigned.dmg) | [下载](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.7.3/RackTop_2.7.3_macos-x64-unsigned.dmg) |
 
-全部为同一 2.7.0 测试版；[GitHub Release](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/tag/v2.7.0)和[历史版本](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases)继续保留。团队工作台可[直接在浏览器打开](https://136.0.110.161/)。
+全部为同一 2.7.3 测试版；[GitHub Release](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/tag/v2.7.3)和[历史版本](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases)继续保留。团队工作台可[直接在浏览器打开](https://136.0.110.161/)。
 
 ### Ubuntu 20.04 手动安装
 
@@ -35,7 +35,7 @@ curl --proto '=https' --proto-redir '=https' -fL https://136.0.110.161/downloads
 sudo apt install flatpak
 ```
 
-下载并解压 `RackTop_2.7.0_linux-amd64-flatpak-offline.tar.gz`，进入 **`RackTop_2.7.0_flatpak_offline`** 文件夹，在空白处右键选择“在终端打开”，运行：
+下载并解压 `RackTop_2.7.3_linux-amd64-flatpak-offline.tar.gz`，进入 **`RackTop_2.7.3_flatpak_offline`** 文件夹，在空白处右键选择“在终端打开”，运行：
 
 ```bash
 bash install.sh
@@ -50,7 +50,7 @@ bash install.sh
 退出旧程序，在下载目录运行：
 
 ```bash
-sudo apt install ./RackTop_2.7.0_linux-amd64.deb
+sudo apt install ./RackTop_2.7.3_linux-amd64.deb
 ```
 
 APT 会补齐运行组件。安装成功后从应用菜单打开 RackTop，或运行 `racktop`。已有 Flatpak 请用统一安装器继续原格式；Ubuntu 20.04 请使用兼容套件。
@@ -65,20 +65,22 @@ APT 会补齐运行组件。安装成功后从应用菜单打开 RackTop，或�
 
 升级前退出 RackTop。同格式升级继续使用原资料；不要先在应用内删除服务器，也不要删除应用资料目录、SSH 密钥或系统钥匙串。
 
-旧 2.2.2 Flatpak 先通过上方统一安装器升级到 2.7.0，无需卸载。此后应用内更新只下载已签名的 `.flatpak` 应用包，复用 GNOME 50 运行时，并保留原安装范围与数据。
+旧 2.2.2 Flatpak 先通过上方统一安装器升级到 2.7.3，无需卸载。此后应用内更新只下载已签名的 `.flatpak` 应用包，复用 GNOME 50 运行时，并保留原安装范围与数据。
 
 DEB 默认资料在 `~/.local/share/com.racktop.desktop`，Flatpak 默认在 `~/.var/app/com.racktop.desktop/data/com.racktop.desktop`。两者不自动迁移；切换格式前先备份并核对服务器连接，团队账号和共享身份可能需要重新登录或绑定。不要让两个客户端同时读写同一数据库。
 
 ## 管理员分配的 SSH 密码
 
-网页管理员在「服务器资源 → 编辑」填写服务器现有密码并保存，再分配成员权限。成员升级到 2.7.0 后登录团队账号、选择组织，连接时自动领取密码。网页保存密码不会修改远端服务器账号的密码；私钥继续在本机配置。
+网页管理员在「服务器资源 → 编辑」填写服务器现有密码并保存，再分配成员权限。成员升级到 2.7.3 后登录团队账号、选择组织，连接时自动领取密码。网页保存密码不会修改远端服务器账号的密码；私钥继续在本机配置。
+
+SSH 连接和文件传输继续通过成员本机网络直连目标服务器。2.7.3 的客户端加固减少密码意外暴露，但不能阻止获授权成员主动取得密码。
 
 ## 校验、源码与帮助
 
-手动下载后可用同目录 [SHA256SUMS](https://136.0.110.161/downloads/SHA256SUMS) 核验摘要；[GitHub 校验清单](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.7.0/SHA256SUMS)对应 Release 附件。校验失败时重新下载，不要跳过校验。
+手动下载后可用同目录 [SHA256SUMS](https://136.0.110.161/downloads/SHA256SUMS) 核验摘要；[GitHub 校验清单](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.7.3/SHA256SUMS)对应 Release 附件。校验失败时重新下载，不要跳过校验。
 
-- 2.7.0 对应源码：[云端](https://136.0.110.161/downloads/RackTop_2.7.0_source.tar.gz) · [GitHub](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.7.0/RackTop_2.7.0_source.tar.gz)。
-- GPL-3.0 许可证：[云端](https://136.0.110.161/downloads/LICENSE) · [GitHub](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.7.0/LICENSE)。
-- 来源与署名：[云端 NOTICE](https://136.0.110.161/downloads/NOTICE.md) · [GitHub NOTICE](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.7.0/NOTICE.md)。
+- 2.7.3 对应源码：[云端](https://136.0.110.161/downloads/RackTop_2.7.3_source.tar.gz) · [GitHub](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.7.3/RackTop_2.7.3_source.tar.gz)。
+- GPL-3.0 许可证：[云端](https://136.0.110.161/downloads/LICENSE) · [GitHub](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.7.3/LICENSE)。
+- 来源与署名：[云端 NOTICE](https://136.0.110.161/downloads/NOTICE.md) · [GitHub NOTICE](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.7.3/NOTICE.md)。
 
 下载失败可使用表格中的 GitHub 备用链接；找不到资料时先核对安装格式。连接问题见 [Linux 指南](LINUX.md)，其他问题可[反馈](https://github.com/AIsMovDataInfra/RackTop-Workspace/issues)。构建和发布流程见[维护者说明](MAINTAINERS.md)。

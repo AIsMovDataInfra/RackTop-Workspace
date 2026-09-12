@@ -6,7 +6,9 @@
 
 ## 安装
 
-**当前桌面安装包：2.7.0 测试版（Pre-release）。** Ubuntu 20.04 / 22.04 推荐在终端运行统一安装命令；Mac 打开下载页，按芯片选择 DMG。无需下载源码或配置开发环境。网页和桌面 2.7.0 支持管理员分配 SSH 登录密码；成员升级后登录团队账号即可使用获授权的服务器。
+**当前桌面安装包：2.7.3 测试版（Pre-release）。** Ubuntu 20.04 / 22.04 推荐在终端运行统一安装命令；Mac 打开下载页，按芯片选择 DMG。无需下载源码或配置开发环境。管理员可在网页分配现有 SSH 登录密码；成员在桌面登录团队账号后即可使用获授权的服务器。
+
+SSH 连接和文件传输继续通过成员本机网络直连目标服务器。2.7.3 的客户端加固减少密码意外暴露，但不能阻止获授权成员主动取得密码。
 
 ```bash
 curl --proto '=https' --proto-redir '=https' -fL https://136.0.110.161/downloads/install-racktop.sh -o install-racktop.sh && bash install-racktop.sh
@@ -16,10 +18,10 @@ curl --proto '=https' --proto-redir '=https' -fL https://136.0.110.161/downloads
 
 | 电脑 | 云端安装包 | GitHub 备用 |
 | --- | --- | --- |
-| Ubuntu 20.04，Intel / AMD 64 位 | [Flatpak 离线套件](https://136.0.110.161/downloads/RackTop_2.7.0_linux-amd64-flatpak-offline.tar.gz) | [下载](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.7.0/RackTop_2.7.0_linux-amd64-flatpak-offline.tar.gz) |
-| Ubuntu 22.04，Intel / AMD 64 位 | [DEB 安装包](https://136.0.110.161/downloads/RackTop_2.7.0_linux-amd64.deb) | [下载](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.7.0/RackTop_2.7.0_linux-amd64.deb) |
-| Mac，M 系列芯片 | [Apple Silicon DMG](https://136.0.110.161/downloads/RackTop_2.7.0_macos-arm64-unsigned.dmg) | [下载](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.7.0/RackTop_2.7.0_macos-arm64-unsigned.dmg) |
-| Mac，Intel 芯片 | [Intel DMG](https://136.0.110.161/downloads/RackTop_2.7.0_macos-x64-unsigned.dmg) | [下载](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.7.0/RackTop_2.7.0_macos-x64-unsigned.dmg) |
+| Ubuntu 20.04，Intel / AMD 64 位 | [Flatpak 离线套件](https://136.0.110.161/downloads/RackTop_2.7.3_linux-amd64-flatpak-offline.tar.gz) | [下载](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.7.3/RackTop_2.7.3_linux-amd64-flatpak-offline.tar.gz) |
+| Ubuntu 22.04，Intel / AMD 64 位 | [DEB 安装包](https://136.0.110.161/downloads/RackTop_2.7.3_linux-amd64.deb) | [下载](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.7.3/RackTop_2.7.3_linux-amd64.deb) |
+| Mac，M 系列芯片 | [Apple Silicon DMG](https://136.0.110.161/downloads/RackTop_2.7.3_macos-arm64-unsigned.dmg) | [下载](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.7.3/RackTop_2.7.3_macos-arm64-unsigned.dmg) |
+| Mac，Intel 芯片 | [Intel DMG](https://136.0.110.161/downloads/RackTop_2.7.3_macos-x64-unsigned.dmg) | [下载](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.7.3/RackTop_2.7.3_macos-x64-unsigned.dmg) |
 
 旧 2.2.2 Flatpak 先用统一安装器升级一次，再使用新版应用内更新；已有 Flatpak 会保留原用户级或系统级安装范围。[安装步骤、资料保留与升级说明](docs/DOWNLOADS.md)。
 
