@@ -205,6 +205,11 @@ mod platform {
     }
 
     fn read_token(stream: &mut std::os::unix::net::UnixStream, state: &State, operation_deadline: Instant) -> Option<[u8; 32]> {
+        read_token_in_chunks(stream, state, operation_deadline, 32)
+    }
+
+    fn read_token_in_chunks(stream: &mut std::os::unix::net::UnixStream, state: &State, operation_deadline: Instant, max_read: usize) -> Option<[u8; 32]> {
+        debug_assert!(max_read > 0 && max_read <= 32);
         // A per-read timeout alone can be renewed by a slow sender. Bound the
         // complete fixed-size ticket, including all partial reads, to 100 ms.
         let deadline = (Instant::now() + Duration::from_millis(100)).min(operation_deadline);
@@ -214,7 +219,8 @@ mod platform {
             if state.stopped.load(Ordering::Acquire) { return None; }
             let remaining = deadline.checked_duration_since(Instant::now()).filter(|time| !time.is_zero())?;
             stream.set_read_timeout(Some(remaining)).ok()?;
-            match stream.read(&mut token[received..]) {
+            let end = (received + max_read).min(token.len());
+            match stream.read(&mut token[received..end]) {
                 Ok(0) => return None,
                 Ok(count) => received += count,
                 Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
@@ -224,6 +230,13 @@ mod platform {
         (!state.stopped.load(Ordering::Acquire) && Instant::now() < deadline).then_some(token)
     }
 
+    fn configure_ticket_stream(stream: &std::os::unix::net::UnixStream) -> std::io::Result<()> {
+        // BSD can inherit the listener's nonblocking flag. Token bytes may
+        // arrive after accept; use bounded blocking I/O on this stream only.
+        stream.set_nonblocking(false)?;
+        stream.set_write_timeout(Some(Duration::from_millis(100)))
+    }
+
     fn serve(listener: UnixListener, endpoint: PathBuf, state: Arc<State>, lifetime: Duration) {
         let deadline = Instant::now() + lifetime;
         while !state.stopped.load(Ordering::Acquire) && Instant::now() < deadline {
@@ -231,10 +244,7 @@ mod platform {
             if !pending { break; }
             match listener.accept() {
                 Ok((mut stream, _)) => {
-                    // BSD can inherit the listener's nonblocking flag. Token
-                    // bytes may arrive after accept; use bounded blocking I/O.
-                    if stream.set_nonblocking(false).is_err()
-                        || stream.set_write_timeout(Some(Duration::from_millis(100))).is_err() { continue; }
+                    if configure_ticket_stream(&stream).is_err() { continue; }
                     let Some(token) = read_token(&mut stream, &state, deadline) else { continue; };
                     let proxy = state.slots.lock().ok().and_then(|slots| slots.iter().find(|slot| slot.token.as_bytes() == token && slot.password.is_some()).map(|slot| slot.proxy));
                     let Some(proxy) = proxy else { continue; };
@@ -316,25 +326,36 @@ mod platform {
         }
 
         #[test]
-        fn a_token_can_arrive_in_parts_after_accept() {
-            let (broker, env) = Broker::start(Some("delayed-fixture"), None).unwrap();
-            broker.bind_child(Some(std::process::id()));
-            let endpoint = env_value(&env, SOCKET_ENV);
-            let token = env_value(&env, TOKEN_ENV);
-            let mut stream = std::os::unix::net::UnixStream::connect(&endpoint).unwrap();
-            stream.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
-            thread::sleep(Duration::from_millis(20));
-            let bytes = token.to_str().unwrap().as_bytes();
-            stream.write_all(&bytes[..16]).unwrap();
-            thread::sleep(Duration::from_millis(20));
-            stream.write_all(&bytes[16..]).unwrap();
-            let mut length = [0; 4];
-            stream.read_exact(&mut length).unwrap();
-            assert_eq!(u32::from_be_bytes(length), 15);
-            let mut password = [0; 15];
-            stream.read_exact(&mut password).unwrap();
-            assert_eq!(&password, b"delayed-fixture");
-            assert!(receive(&endpoint, &token).is_err());
+        fn accepted_stream_is_blocking_without_changing_the_listener() {
+            use std::os::fd::AsRawFd;
+            let directory = tempfile::Builder::new().prefix("racktop-ticket-test-").tempdir_in("/tmp").unwrap();
+            let path = directory.path().join("socket");
+            let listener = UnixListener::bind(&path).unwrap();
+            listener.set_nonblocking(true).unwrap();
+            let _client = std::os::unix::net::UnixStream::connect(&path).unwrap();
+            let (stream, _) = listener.accept().unwrap();
+            // Reproduce BSD's inherited mode on every Unix test platform.
+            stream.set_nonblocking(true).unwrap();
+            configure_ticket_stream(&stream).unwrap();
+            let stream_flags = unsafe { libc::fcntl(stream.as_raw_fd(), libc::F_GETFL) };
+            let listener_flags = unsafe { libc::fcntl(listener.as_raw_fd(), libc::F_GETFL) };
+            assert!(stream_flags >= 0 && listener_flags >= 0);
+            assert_eq!(stream_flags & libc::O_NONBLOCK, 0);
+            assert_ne!(listener_flags & libc::O_NONBLOCK, 0);
+            assert_eq!(stream.write_timeout().unwrap(), Some(Duration::from_millis(100)));
+        }
+
+        #[test]
+        fn fragmented_token_reads_assemble_the_exact_ticket() {
+            let (mut reader, mut writer) = std::os::unix::net::UnixStream::pair().unwrap();
+            let state = State { stopped: AtomicBool::new(false), child: Mutex::new(None), slots: Mutex::new(Vec::new()) };
+            let expected = *b"0123456789abcdefFEDCBA9876543210";
+            // Prebuffer both fragments: requested sleeps can overshoot the
+            // entire ticket budget on macOS. Limit each real read to 16 bytes
+            // so the production assembly loop must still handle partial input.
+            writer.write_all(&expected[..16]).unwrap();
+            writer.write_all(&expected[16..]).unwrap();
+            assert_eq!(read_token_in_chunks(&mut reader, &state, Instant::now() + Duration::from_secs(60), 16), Some(expected));
         }
 
         #[test]
