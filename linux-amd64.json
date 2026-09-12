@@ -1,16 +1,16 @@
 {
-  "version": "2.7.3",
-  "notes": "- 加固客户端 SSH 密码传递及辅助程序的环境清理，减少密码暴露；终端、采集和文件传输继续通过本地网络直连。\n- 修复 Mac 密码通道接受连接的兼容性，保持明确的请求期限。\n- 修复旧服务器缓存可能阻止管理员分配的共享密码生效的问题，保留已有连接和历史。",
-  "pub_date": "2026-09-12T08:16:26Z",
+  "version": "2.8.0",
+  "notes": "- 管理员新版桌面通过本地 SSH 采集并向云端同步 GPU 占用摘要，成员按组织权限查看。\n- 关闭本地历史记录后仍可同步实时占用摘要。\n- 占用超过 90 秒未更新时显示未知，有占用但没有系统用户名时显示「匿名用户」。\n- 分别显示当前占用与所选时段预约，忙碌中的资源仍可预约未来空余时段，预约不会自动停止任务。\n- 按 GPU / CPU 集群查找资源，CPU 入口支持整机预约，实际 CPU 资源尚未登记。\n- 将团队导航统一为「办公设备申请」和「资产设备管理」。\n- 移除周报功能，保留历史资料并为旧链接显示移除说明。",
+  "pub_date": "2026-09-12T16:17:04Z",
   "platforms": {
     "linux-x86_64-deb": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTVThDMjZnT3Yrc2xDL1pnMWV0dll5akMzdlhKZ3huR1RNc2JOWmR4L0dEYmo1N2ZzTDhTS1pNN3pRMjlmb2FuY3N1RnY3SGlsUHREVlZ3Z3VIZVJCOTVxazlXQ2hPYVFnPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg5MTk5NzMxCWZpbGU6UmFja1RvcF8yLjcuM19saW51eC1hbWQ2NC5kZWIKdjJVdmowQUtjK1NWOG9QNVVEUVJ5QkpBcXB6ak1yZ1lXQVA3WmFabmltUFpTL2NWaXpZZjg0YWczclJmT3dUWVVpU3gvY1ZtdVFReUhzeGNEOFY5RGc9PQo=",
-      "url": "https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.7.3/RackTop_2.7.3_linux-amd64.deb"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTVThDMjZnT3Yrc3ZRa0hSbEVRZ3NHa0pGRjdBc3lUQ0lGR3MwaWFTNkVPZG1TOGpXSDYwWjBvMjh4T2Rjb25XQzhpanNDaVFCeDYyNWY3VGw4UHJXSjU5Tkx4UWM1TEFNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg5MjI4MjEyCWZpbGU6UmFja1RvcF8yLjguMF9saW51eC1hbWQ2NC5kZWIKSkdsdDRBc1BwRDNZS1B3MDBjMU44b3YzYnhOeHcvbnQwcU5OUE5QeUR5RmhtRzFJd0VxMCtEeVhyNUpYcTZVbEpYRmNnVHNvQVdhVzVmNGl0MjIyQ3c9PQo=",
+      "url": "https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.8.0/RackTop_2.8.0_linux-amd64.deb"
     },
     "linux-x86_64-flatpak": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTVThDMjZnT3Yrc2lFeDFJQkhXbHA1di8wNHorRkxSZzJzQk94V2tDMkc0T2NOYTN2MjVRNk94czVhWFBIVytqR2I5YlZ0UWVLUHg4NlIrOThQbDVvUGZaVHE2cVB0amc4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg5MjAwMDQ2CWZpbGU6UmFja1RvcF8yLjcuM19saW51eC1hbWQ2NC5mbGF0cGFrCnFMWCtxTFFxVUVUblJwUDlON0M3WE1WblErcDU1ZkVndlk1L0o2ZWlFNTZTWWVoY0pWRFhYalF4N2FQTDlSWTZ0T0FoODlxdnlmbDZialhyVCtHbUFnPT0K",
-      "commit": "385ebf343c7b5210ef3505cbab42f9e7f67bed7e450c44910fb9de7f1ff558bb",
-      "url": "https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.7.3/RackTop_2.7.3_linux-amd64.flatpak"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTVThDMjZnT3Yrc202eGFvQStYN3IzZ0VFM0tJSG9zSjhyS0lSaWVSckp2eEU3Q0RDQUZWaEtmNzlTOVVSSDdYVGFyZnhSaVhSL2NBeDIwd2FYR2NPSXVmYVJrcHFWZFFnPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg5MjI4NTI0CWZpbGU6UmFja1RvcF8yLjguMF9saW51eC1hbWQ2NC5mbGF0cGFrCjlCeHQzdFNaZUh0VmJCb2tDcndraitZbkp1eFA1QXg0R1J5U0wxUHhBSDl1ODR3RVc4Skd2VTFZckZCd1dHcU8zUUZvc04raTdlV1ZEYkpRNEM5N0FBPT0K",
+      "commit": "bd664e81e0d9730d15a5e12fae7a304d28fb2debf3b393742dc7153cf1441918",
+      "url": "https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.8.0/RackTop_2.8.0_linux-amd64.flatpak"
     }
   }
 }
