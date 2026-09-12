@@ -1,15 +1,15 @@
 {
-  "version": "2.7.0",
-  "notes": "- 管理员可在「服务器资源」填写目标服务器和跳板机的现有 SSH 登录密码，并分配给获授权成员。\n- 桌面 2.7.0 每次连接按当前组织和权限领取共享密码，无需成员重复填写；个人连接和本机私钥认证继续保留。\n- 密码在云端加密保存，网页不回显旧密码；编辑时留空保留、输入替换，也可明确清除。连接地址、端口或账号变化时清除对应旧密码。\n- 网页和桌面统一使用「服务器资源」名称，成员自动同步管理员的更新；登录页提供无需登录的下载入口。\n- 包含此前网页更新：支持导入 SSH 配置、笔记本设备类型和多组织成员管理。",
-  "pub_date": "2026-09-11T17:36:02Z",
+  "version": "2.7.3",
+  "notes": "- 加固客户端 SSH 密码传递及辅助程序的环境清理，减少密码暴露；终端、采集和文件传输继续通过本地网络直连。\n- 修复 Mac 密码通道接受连接的兼容性，保持明确的请求期限。\n- 修复旧服务器缓存可能阻止管理员分配的共享密码生效的问题，保留已有连接和历史。",
+  "pub_date": "2026-09-12T08:16:26Z",
   "platforms": {
     "darwin-aarch64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTVThDMjZnT3Yrc2tYS040RmhuQm5hNDNRUHk4TXhFUHZQalhGSkc1Nk5mdzBtL3ZmV1lDYVo5Qkk3UjFJRUhrU3FQY0Z6MzZkNlRIcjNJcUhHVHo3cWdpLytkb0tFTkFZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg5MTQ2OTAwCWZpbGU6UmFja1RvcF8yLjcuMF9tYWNvcy1hcm02NC11bnNpZ25lZC5hcHAudGFyLmd6Cno0bXZiVlpnRWJMcHpSOEQ1VEIwTVhWQ2Zra3l4MWpTWWtkRDNTdE4xYVViRWZmbnJtUVd5cGJGQUJTRlBjelpRZVJxVHY2ZURaV2dORW5ENnE0MEFnPT0K",
-      "url": "https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.7.0/RackTop_2.7.0_macos-arm64-unsigned.app.tar.gz"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTVThDMjZnT3Yrc3B2YWtKS0VqZCtBejM2QkZsWVpzcCtWdE1LUE1ZLzlkOEhkMU5rT0dPcXFEZWs4dDBlcEFBbUtsdFJNMi9CeUhqdDB5M3praWY2cG04NkU2dlZTQ0FFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg5MTk5NjQ1CWZpbGU6UmFja1RvcF8yLjcuM19tYWNvcy1hcm02NC11bnNpZ25lZC5hcHAudGFyLmd6CmV0QjJCUXFjY2ZkOThFL2k4WkVEbFZrNHRZdDRRdEI0aTZBSmFhZFpLQU1iTGt2K2pHbG0yenNid3NXS0trS2JwdHBLT09SbU9VdUhOSWllWkFKUEN3PT0K",
+      "url": "https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.7.3/RackTop_2.7.3_macos-arm64-unsigned.app.tar.gz"
     },
     "darwin-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTVThDMjZnT3Yrc2d1Nk5LVGNFUC9wYzlMdlEzSEdJRUdWRWtVNzlaM0Y4TDhIa2FoWHh5WEkwdnF5a3o2cnpTaE1CSG8yenVOK01CbFRzMmJFS2R1ekQ3U2JFbkNXWHdZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg5MTQ3MzQ2CWZpbGU6UmFja1RvcF8yLjcuMF9tYWNvcy14NjQtdW5zaWduZWQuYXBwLnRhci5negpPWVRrdHo0a2JnMk5hVVhwYi9RMDUrWDdQcFBnREE4SnBNOWdMTTA4ZDBETCthRzQvTkNFK09MZ3lxdXE0N2RDdDF6eDVFR1QwSVNsTFVSYkhNOFFDUT09Cg==",
-      "url": "https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.7.0/RackTop_2.7.0_macos-x64-unsigned.app.tar.gz"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTVThDMjZnT3Yrc3B0TTBQeVNiOWo2MEsrM0ZpeXNUbjBPVmh4cUROSnJPcmQxRzBPYmtWdnU0NDhNZFh5K0djYnIyYzErcUlVRFJjTklyTDF0Ums1NTQ0bGxScWliWWdVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg5MjAwMTc1CWZpbGU6UmFja1RvcF8yLjcuM19tYWNvcy14NjQtdW5zaWduZWQuYXBwLnRhci5negoxbkJuOFZRcDU0LzVLR2RpcW9FbGdqbjVNQk9WREZPMENDK1pGdDVhektmTEpnMExhaXFDaFRqTjVLamtLcEF4S25yTVJHMDRGaEU5ZTkzMythb0pCUT09Cg==",
+      "url": "https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.7.3/RackTop_2.7.3_macos-x64-unsigned.app.tar.gz"
     }
   }
 }
