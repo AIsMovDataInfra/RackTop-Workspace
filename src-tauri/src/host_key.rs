@@ -59,6 +59,7 @@ async fn scan_through_jump(server: &Server, passwords: Option<&crate::ssh_connec
 
 async fn scan_direct(server: &Server) -> Result<HostKeyInfo, String> {
     let mut command = Command::new("ssh-keyscan");
+    crate::ssh_connection::clear_inherited_askpass_env(&mut command);
     #[cfg(windows)]
     command.creation_flags(0x08000000);
     let output = timeout(
@@ -88,6 +89,7 @@ async fn known_key_changed(server: &Server, scanned: &HostKeyInfo) -> Result<boo
     if !path.exists() { return Ok(false); }
     let lookup = if server.port == 22 { server.host.clone() } else { format!("[{}]:{}", server.host, server.port) };
     let mut command = Command::new("ssh-keygen");
+    crate::ssh_connection::clear_inherited_askpass_env(&mut command);
     #[cfg(windows)]
     command.creation_flags(0x08000000);
     let output = command.args(["-F", &lookup, "-f", &path.to_string_lossy()]).output().await.map_err(|error| format!("无法核对现有 Host Key：{error}"))?;
@@ -151,7 +153,9 @@ pub fn trust(server: &Server, info: &HostKeyInfo) -> Result<(), String> {
 async fn known_key_matches(server: &Server, info: &HostKeyInfo) -> Result<bool, String> {
     let path = known_hosts_path()?;
     let lookup = if server.port == 22 { server.host.clone() } else { format!("[{}]:{}", server.host, server.port) };
-    let output = Command::new("ssh-keygen").args(["-F", &lookup, "-f", &path.to_string_lossy()]).output().await.map_err(|error| error.to_string())?;
+    let mut command = Command::new("ssh-keygen");
+    crate::ssh_connection::clear_inherited_askpass_env(&mut command);
+    let output = command.args(["-F", &lookup, "-f", &path.to_string_lossy()]).output().await.map_err(|error| error.to_string())?;
     let scanned: Vec<_> = info.key_line.split_whitespace().collect();
     Ok(String::from_utf8_lossy(&output.stdout).lines().filter(|line| !line.starts_with('#')).any(|line| {
         let fields: Vec<_> = line.split_whitespace().collect();

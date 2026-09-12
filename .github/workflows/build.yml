@@ -52,6 +52,7 @@ jobs:
           python-version: '3.12'
       - name: Verify SSH password delivery over direct and jump connections
         run: |
+          python scripts/test-ssh-hardening-monitor.py
           python -m pip install 'paramiko==4.0.0'
           cargo build --release --locked --features integration-probe --bin ssh-hardening-probe --manifest-path src-tauri/Cargo.toml
           TMPDIR="$RUNNER_TEMP" python scripts/test-ssh-hardening.py "$PWD/src-tauri/target/release/ssh-hardening-probe"
@@ -220,6 +221,7 @@ jobs:
           python-version: '3.12'
       - name: Verify native SSH password delivery over direct and jump connections
         run: |
+          python scripts/test-ssh-hardening-monitor.py
           python -m pip install 'paramiko==4.0.0'
           cargo build --manifest-path src-tauri/Cargo.toml --locked --release --features integration-probe --bin ssh-hardening-probe --target ${{ matrix.target }}
           TMPDIR="$RUNNER_TEMP" python scripts/test-ssh-hardening.py "$PWD/src-tauri/target/${{ matrix.target }}/release/ssh-hardening-probe"

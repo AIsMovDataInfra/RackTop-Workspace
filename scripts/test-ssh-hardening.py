@@ -16,6 +16,8 @@ from pathlib import Path
 import re
 import select
 import secrets
+import shlex
+import shutil
 import socket
 import subprocess
 import sys
@@ -24,6 +26,7 @@ import threading
 import time
 
 import paramiko
+from ssh_hardening_monitor import assert_password_free, process_kind, read_snapshot
 
 logging.getLogger("paramiko").setLevel(logging.CRITICAL)
 REPO = Path(__file__).resolve().parents[1]
@@ -42,11 +45,35 @@ JUMP = "Synthetic jump-only different 2026"
 LEGACY_A = "Synthetic inherited legacy target should be removed"
 LEGACY_B = "Synthetic inherited legacy proxy should be removed"
 SECRETS = [value.encode() for value in [TARGET_A, TARGET_B, JUMP, LEGACY_A, LEGACY_B]]
+SECRET_KINDS = dict(zip(["target-a", "target-b", "jump", "inherited-legacy-target", "inherited-legacy-proxy"], SECRETS))
+INHERITED_FIELDS = ["RACKTOP_ASKPASS_PASSWORD", "RACKTOP_PROXY_PASSWORD", "RACKTOP_ASKPASS_SOCKET",
+                    "RACKTOP_ASKPASS_TOKEN", "RACKTOP_PROXY_ASKPASS_TOKEN", "SSH_ASKPASS", "SSH_ASKPASS_REQUIRE"]
+# Auxiliary commands can finish between /proc samples. Check their executed
+# environments deterministically, then exec the real tool with unchanged argv.
+SHIMS = RUN / "ssh-tools"
+SHIMS.mkdir(mode=0o700)
+AUX_AUDIT = RUN / "ssh-tools-audit.txt"
+for tool in ["ssh-keyscan", "ssh-keygen"]:
+    executable = shutil.which(tool, path=SSH_PATH)
+    if not executable:
+        raise SystemExit(f"Missing synthetic fixture dependency: {tool}")
+    lines = ["#!/bin/sh", "clean=1"]
+    for key in INHERITED_FIELDS:
+        lines += [f'if [ "${{{key}+x}}" = x ]; then',
+                  f"  printf '%s\\n' '{tool}:{key}' >> {shlex.quote(str(AUX_AUDIT))}", "  clean=0", "fi"]
+    lines += ['[ "$clean" = 1 ] || exit 97',
+              f"printf '%s\\n' '{tool}:clean' >> {shlex.quote(str(AUX_AUDIT))}",
+              f'exec {shlex.quote(executable)} "$@"']
+    shim = SHIMS / tool
+    shim.write_text("\n".join(lines) + "\n")
+    shim.chmod(0o700)
+SSH_PATH = str(SHIMS) + ":" + SSH_PATH
 source = (REPO / "src-tauri/src/collector.rs").read_text()
 SAMPLE = json.loads(re.search(r'const SAMPLE: &str = ("(?:[^"\\]|\\.)*");', source).group(1)).encode()
 WORKER_PATH = REPO / "src-tauri/src/sharing/remote_files.py"
 WORKER_COMMAND = "python3 -u -c '" + WORKER_PATH.read_text().replace("'", "'\\''") + "'"
 METRICS = {"sshProcessesSampled": 0, "helperProcessesSampled": 0, "unrelatedHelperRejected": 0,
+           "auxiliaryProcessesSampled": 0, "preExecForksObserved": 0,
            "replaysRejected": 0, "passwordFreeChildEnvironment": True if LINUX else "not checked: no Linux /proc",
            "passwordFreeArguments": True if LINUX else "not checked: no Linux /proc",
            "noCrossDelivery": True, "noPlaintextFiles": True,
@@ -322,21 +349,23 @@ class Monitor:
         try:
             while not self.stop.is_set():
                 for pid in descendants(self.process.pid):
-                    try:
-                        exe = Path(os.readlink(f"/proc/{pid}/exe"))
-                        if exe.name != "ssh" and exe != PROBE:
-                            continue
-                        environment = Path(f"/proc/{pid}/environ").read_bytes()
-                        arguments = Path(f"/proc/{pid}/cmdline").read_bytes()
-                    except OSError:
+                    snapshot = read_snapshot(pid)
+                    if snapshot is None:
                         continue
-                    assert not any(secret in environment for secret in SECRETS), "Synthetic SSH child environment contains password bytes"
-                    assert not any(secret in arguments for secret in SECRETS), "Synthetic SSH arguments contain password bytes"
-                    if pid not in self.observed:
-                        self.observed.add(pid)
+                    kind = process_kind(snapshot, self.process.pid, PROBE, os.fsencode(PROBE) + b"\0")
+                    if kind is None:
+                        continue
+                    assert_password_free(snapshot, kind, SECRET_KINDS)
+                    identity = (pid, snapshot.started, kind)
+                    if identity not in self.observed:
+                        self.observed.add(identity)
                         with METRICS_LOCK:
-                            METRICS["sshProcessesSampled" if exe.name == "ssh" else "helperProcessesSampled"] += 1
-                    values = dict(part.split(b"=", 1) for part in environment.split(b"\0") if b"=" in part)
+                            metric = {"ssh": "sshProcessesSampled", "helper": "helperProcessesSampled",
+                                      "pre-exec": "preExecForksObserved"}.get(kind, "auxiliaryProcessesSampled")
+                            METRICS[metric] += 1
+                    if kind == "pre-exec":
+                        continue
+                    values = snapshot.values
                     endpoint = values.get(b"RACKTOP_ASKPASS_SOCKET")
                     token = values.get(b"RACKTOP_ASKPASS_TOKEN")
                     if endpoint and token:
@@ -405,6 +434,12 @@ def call(action, definition=None, expect_failure=False, **extra):
     finally:
         monitor.finish()
     assert not any(secret in stdout + stderr for secret in SECRETS), "Synthetic password appeared in result output"
+    if AUX_AUDIT.exists():
+        audit = AUX_AUDIT.read_text().splitlines()
+        allowed = {f"{tool}:{key}" for tool in ["ssh-keyscan", "ssh-keygen"] for key in ["clean", *INHERITED_FIELDS]}
+        assert all(record in allowed for record in audit), "Invalid synthetic auxiliary audit record"
+        inherited = sorted({record for record in audit if not record.endswith(":clean")})
+        assert not inherited, "Synthetic auxiliary SSH fields were inherited: " + ", ".join(inherited)
     diagnostic = stderr[-2048:].decode("utf-8", errors="replace")
     assert (process.returncode != 0) == expect_failure, f"Synthetic {action} ({data['server']['id']}) returned {process.returncode}; expected_failure={expect_failure}; stderr={diagnostic}"
     if not expect_failure:
@@ -424,6 +459,9 @@ try:
     call("scan", endpoint(jump=True))
     assert len(TARGETS[0].attempts) == before, "Host-key scan delivered target credentials"
     results["host_key_scan_has_only_jump_credentials"] = True
+    audit = AUX_AUDIT.read_text().splitlines()
+    assert audit and set(audit) == {"ssh-keyscan:clean", "ssh-keygen:clean"}, "An auxiliary SSH tool inherited askpass fields"
+    results["auxiliary_tools_reject_inherited_askpass_fields"] = True
     endpoints = [endpoint(target=index % 2, jump=index % 3 != 0) for index in range(8)]
     call("concurrent", endpoints=endpoints)
     results["eight_concurrent_operations_keep_distinct_passwords"] = True

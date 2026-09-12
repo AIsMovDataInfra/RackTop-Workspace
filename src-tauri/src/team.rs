@@ -1480,6 +1480,9 @@ mod tests {
             listener.set_nonblocking(true).unwrap();
             let start=std::time::Instant::now();
             let (mut stream,_)=loop { match listener.accept() { Ok(pair)=>break pair,Err(error) if error.kind()==std::io::ErrorKind::WouldBlock && start.elapsed()<Duration::from_secs(3)=>std::thread::sleep(Duration::from_millis(2)),Err(error)=>panic!("fixture accept: {error}") } };
+            // BSD may inherit O_NONBLOCK from the listener; the fixture reads
+            // a complete HTTP request with a bounded blocking timeout.
+            stream.set_nonblocking(false).unwrap();
             stream.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
             let mut bytes=Vec::new();let mut buffer=[0;2048];
             loop {

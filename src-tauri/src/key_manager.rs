@@ -459,6 +459,7 @@ fn derive_public(private: &Path) -> Result<String, String> {
 
 fn run_keygen(args: &[OsString], input: &[u8]) -> Result<String, String> {
     let mut command = Command::new("ssh-keygen");
+    for key in crate::ssh_connection::INHERITED_ASKPASS_ENV { command.env_remove(key); }
     command.args(args).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null())
         .env("SSH_ASKPASS_REQUIRE", "never").env_remove("SSH_ASKPASS");
     #[cfg(unix)] {

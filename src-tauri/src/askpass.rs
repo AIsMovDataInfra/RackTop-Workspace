@@ -204,6 +204,26 @@ mod platform {
         }
     }
 
+    fn read_token(stream: &mut std::os::unix::net::UnixStream, state: &State, operation_deadline: Instant) -> Option<[u8; 32]> {
+        // A per-read timeout alone can be renewed by a slow sender. Bound the
+        // complete fixed-size ticket, including all partial reads, to 100 ms.
+        let deadline = (Instant::now() + Duration::from_millis(100)).min(operation_deadline);
+        let mut token = [0; 32];
+        let mut received = 0;
+        while received < token.len() {
+            if state.stopped.load(Ordering::Acquire) { return None; }
+            let remaining = deadline.checked_duration_since(Instant::now()).filter(|time| !time.is_zero())?;
+            stream.set_read_timeout(Some(remaining)).ok()?;
+            match stream.read(&mut token[received..]) {
+                Ok(0) => return None,
+                Ok(count) => received += count,
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(_) => return None,
+            }
+        }
+        (!state.stopped.load(Ordering::Acquire) && Instant::now() < deadline).then_some(token)
+    }
+
     fn serve(listener: UnixListener, endpoint: PathBuf, state: Arc<State>, lifetime: Duration) {
         let deadline = Instant::now() + lifetime;
         while !state.stopped.load(Ordering::Acquire) && Instant::now() < deadline {
@@ -211,10 +231,11 @@ mod platform {
             if !pending { break; }
             match listener.accept() {
                 Ok((mut stream, _)) => {
-                    let _ = stream.set_read_timeout(Some(Duration::from_millis(100)));
-                    let _ = stream.set_write_timeout(Some(Duration::from_millis(100)));
-                    let mut token = [0; 32];
-                    if stream.read_exact(&mut token).is_err() || state.stopped.load(Ordering::Acquire) || Instant::now() >= deadline { continue; }
+                    // BSD can inherit the listener's nonblocking flag. Token
+                    // bytes may arrive after accept; use bounded blocking I/O.
+                    if stream.set_nonblocking(false).is_err()
+                        || stream.set_write_timeout(Some(Duration::from_millis(100))).is_err() { continue; }
+                    let Some(token) = read_token(&mut stream, &state, deadline) else { continue; };
                     let proxy = state.slots.lock().ok().and_then(|slots| slots.iter().find(|slot| slot.token.as_bytes() == token && slot.password.is_some()).map(|slot| slot.proxy));
                     let Some(proxy) = proxy else { continue; };
                     if !authorized_peer(&stream, &state, proxy) { continue; }
@@ -295,6 +316,28 @@ mod platform {
         }
 
         #[test]
+        fn a_token_can_arrive_in_parts_after_accept() {
+            let (broker, env) = Broker::start(Some("delayed-fixture"), None).unwrap();
+            broker.bind_child(Some(std::process::id()));
+            let endpoint = env_value(&env, SOCKET_ENV);
+            let token = env_value(&env, TOKEN_ENV);
+            let mut stream = std::os::unix::net::UnixStream::connect(&endpoint).unwrap();
+            stream.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
+            thread::sleep(Duration::from_millis(20));
+            let bytes = token.to_str().unwrap().as_bytes();
+            stream.write_all(&bytes[..16]).unwrap();
+            thread::sleep(Duration::from_millis(20));
+            stream.write_all(&bytes[16..]).unwrap();
+            let mut length = [0; 4];
+            stream.read_exact(&mut length).unwrap();
+            assert_eq!(u32::from_be_bytes(length), 15);
+            let mut password = [0; 15];
+            stream.read_exact(&mut password).unwrap();
+            assert_eq!(&password, b"delayed-fixture");
+            assert!(receive(&endpoint, &token).is_err());
+        }
+
+        #[test]
         fn a_stalled_client_cannot_hold_the_guard_open() {
             let (broker, env) = Broker::start(Some("fixture"), None).unwrap();
             let _stream = std::os::unix::net::UnixStream::connect(env_value(&env, SOCKET_ENV)).unwrap();
@@ -302,6 +345,28 @@ mod platform {
             let started = Instant::now();
             drop(broker);
             assert!(started.elapsed() < Duration::from_secs(1));
+        }
+
+        #[test]
+        fn partial_token_reads_cannot_renew_the_total_time_limit() {
+            let (mut reader, mut writer) = std::os::unix::net::UnixStream::pair().unwrap();
+            let state = State { stopped: AtomicBool::new(false), child: Mutex::new(None), slots: Mutex::new(Vec::new()) };
+            let sender = thread::spawn(move || {
+                for _ in 0..32 {
+                    // Every gap is below the old per-read timeout, but the
+                    // complete ticket needs at least 620 ms to arrive.
+                    if writer.write_all(b"0").is_err() { break; }
+                    thread::sleep(Duration::from_millis(20));
+                }
+            });
+            let started = Instant::now();
+            let token = read_token(&mut reader, &state, started + Duration::from_secs(2));
+            let elapsed = started.elapsed();
+            drop(reader);
+            sender.join().unwrap();
+            assert!(token.is_none(), "Partial input renewed the ticket deadline");
+            // Allow scheduling slack without accepting the old 620 ms read.
+            assert!(elapsed < Duration::from_millis(400), "Partial input held the reader past its total time limit");
         }
     }
 }
