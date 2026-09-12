@@ -1,8 +1,8 @@
 # Linux 客户端（实验版）
 
-**版本范围：本文说明 2.8.0 待交付源码。2.8.0 尚未发布安装包、部署上线或完成正式验收；当前公开下载仍为 2.7.3 测试版（Pre-release）。以下新功能须在相应桌面与网页交付后使用，历史验收不代表本轮结果。**
+**版本范围：本文对应已发布的 2.8.0。团队网页已上线，Linux 与两种 Mac 的测试版安装包可从下载页获取。新增 GPU 占用摘要需要管理员升级到 2.8.0 并持续采集；旧桌面不会产生该摘要，安装包发布不代表现有管理员电脑已经升级。历史验收不代表本轮结果。**
 
-RackTop 当前分发为 **2.7.3 测试版（Pre-release）**，面向 Ubuntu 20.04 / 22.04 的 Intel / AMD 64 位图形桌面。推荐从[统一下载页](https://136.0.110.161/downloads/)安装，也可使用 [v2.7.3 GitHub Release](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/tag/v2.7.3)。Linux 与 Mac Apple Silicon、Intel 共用版本、标签和 Release；项目保留 Tongzh-SEU 原作者署名、完整历史及 GPL-3.0。
+RackTop 当前分发为 **2.8.0 测试版（Pre-release）**，面向 Ubuntu 20.04 / 22.04 的 Intel / AMD 64 位图形桌面。推荐从[统一下载页](https://136.0.110.161/downloads/)安装，也可使用 [v2.8.0 GitHub Release](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/tag/v2.8.0)。Linux 与 Mac Apple Silicon、Intel 共用版本、标签和 Release；项目保留 Tongzh-SEU 原作者署名、完整历史及 GPL-3.0。
 
 ## 安装与启动
 
@@ -14,10 +14,10 @@ curl --proto '=https' --proto-redir '=https' -fL https://136.0.110.161/downloads
 
 缺少 `curl` 或 `python3` 时，先运行 `sudo apt install curl python3`。安装器核验下载包；Ubuntu 20.04 初装选择含运行时的 Flatpak 套件，22.04 初装选择 DEB；已有 Flatpak 沿用原用户级或系统级范围。补齐系统组件时才提示管理员认证，无需源码、Cargo 或 WebKit 开发包。
 
-Ubuntu 22.04 手动安装可下载 [2.7.3 DEB 云端包](https://136.0.110.161/downloads/RackTop_2.7.3_linux-amd64.deb)或 [GitHub 备用包](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.7.3/RackTop_2.7.3_linux-amd64.deb)，退出旧程序，在下载目录执行：
+Ubuntu 22.04 手动安装可下载 [2.8.0 DEB 云端包](https://136.0.110.161/downloads/RackTop_2.8.0_linux-amd64.deb)或 [GitHub 备用包](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.8.0/RackTop_2.8.0_linux-amd64.deb)，退出旧程序，在下载目录执行：
 
 ```bash
-sudo apt install ./RackTop_2.7.3_linux-amd64.deb
+sudo apt install ./RackTop_2.8.0_linux-amd64.deb
 racktop
 ```
 
@@ -27,29 +27,29 @@ racktop
 
 Ubuntu 20.04 桌面请使用 Flatpak，不能直接安装面向 22.04 的 `.deb`：Tauri 2 使用 WebKitGTK 4.1，而 20.04 标准软件源提供的是 WebKitGTK 4.0；此前 2.2.2 兼容诊断还确认，22.04 构建的 RackTop 要求 `GLIBC_2.34`，高于 20.04 的 glibc 2.31。不能通过强制安装、改包依赖、为 4.0 建立 4.1 软链接或混入 22.04 软件源解决。这里说的是运行客户端的桌面系统；被 SSH 管理的服务器不需要安装 WebKitGTK。
 
-当前 2.7.3 的 Flatpak 包沿用 GNOME 50 运行时提供 glibc、GTK 和 WebKitGTK 4.1，源码仍为 Tauri 2；Ubuntu 22.04 的 DEB 通道继续保留。兼容包与运行时均为 x86_64，需要图形桌面和 Flatpak。首次安装使用包含运行时的完整套件。
+当前 2.8.0 的 Flatpak 包沿用 GNOME 50 运行时提供 glibc、GTK 和 WebKitGTK 4.1，源码仍为 Tauri 2；Ubuntu 22.04 的 DEB 通道继续保留。兼容包与运行时均为 x86_64，需要图形桌面和 Flatpak。首次安装使用包含运行时的完整套件。
 
-兼容方案首次在 2.2.2 开发版中实现；技术诊断、当时的真实实测与限制保留在 [2.2.2 历史验证记录](VERIFICATION_2_2_2.md)。该记录只证明旧版当时的结果，不代表 2.7.3 或待交付 2.8.0 的平台、升级验收。
+兼容方案首次在 2.2.2 开发版中实现；技术诊断、当时的真实实测与限制保留在 [2.2.2 历史验证记录](VERIFICATION_2_2_2.md)。该记录只证明旧版当时的结果；2.8.0 的独立升级和原生启动验收见[版本信息](VERSION_INFOS.md)。
 
-此前在 Ubuntu 20.04 的 Flatpak 1.6.5 上实测可运行 GNOME 50，但在线读取 Flathub 索引遇到 10 MiB 大小上限。因此首次安装使用含运行时的 [2.7.3 离线套件](https://136.0.110.161/downloads/RackTop_2.7.3_linux-amd64-flatpak-offline.tar.gz)（[GitHub 备用](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.7.3/RackTop_2.7.3_linux-amd64-flatpak-offline.tar.gz)），不依赖在线解析运行时。以下手动步骤进行用户级安装；已有系统级 RackTop 应使用上方统一安装器：
+此前在 Ubuntu 20.04 的 Flatpak 1.6.5 上实测可运行 GNOME 50，但在线读取 Flathub 索引遇到 10 MiB 大小上限。因此首次安装使用含运行时的 [2.8.0 离线套件](https://136.0.110.161/downloads/RackTop_2.8.0_linux-amd64-flatpak-offline.tar.gz)（[GitHub 备用](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.8.0/RackTop_2.8.0_linux-amd64-flatpak-offline.tar.gz)），不依赖在线解析运行时。以下手动步骤进行用户级安装；已有系统级 RackTop 应使用上方统一安装器：
 
 ```bash
 sudo apt update
 sudo apt install flatpak xdg-desktop-portal xdg-desktop-portal-gtk
-tar -xzf RackTop_2.7.3_linux-amd64-flatpak-offline.tar.gz
-cd RackTop_2.7.3_flatpak_offline
+tar -xzf RackTop_2.8.0_linux-amd64-flatpak-offline.tar.gz
+cd RackTop_2.8.0_flatpak_offline
 bash install.sh
 flatpak run com.racktop.desktop
 ```
 
-新套件进入 `RackTop_2.7.3_flatpak_offline` 后运行 `bash install.sh`；旧 2.2.2 简易套件内才使用 `install-racktop.sh`。运行套件内脚本时不要加 `sudo`。
+新套件进入 `RackTop_2.8.0_flatpak_offline` 后运行 `bash install.sh`；旧 2.2.2 简易套件内才使用 `install-racktop.sh`。运行套件内脚本时不要加 `sudo`。
 
 套件包含 RackTop、GNOME 50 和 Mesa 图形运行时，体积较大。安装脚本先验证套件中的 SHA-256，再以用户级方式仅安装本地文件，不查询在线仓库。已有对应运行时会保留，避免用套件降级更新过的运行时。闭源 NVIDIA 硬件加速需要另外安装与驱动匹配的 Flatpak 扩展；扩展不可用时可尝试 `flatpak run --env=LIBGL_ALWAYS_SOFTWARE=1 com.racktop.desktop`。
 
 已有 Flatpak 推荐使用统一安装器升级；旧 2.2.2 先完成一次引导，2.5.0 起可在应用内下载签名更新。维护者若已核验包的版本与摘要，也可在确认原安装为用户级后手动安装较小的应用包：
 
 ```bash
-flatpak install --user --bundle --no-deps --no-related --or-update ./RackTop_2.7.3_linux-amd64.flatpak
+flatpak install --user --bundle --no-deps --no-related --or-update ./RackTop_2.8.0_linux-amd64.flatpak
 ```
 
 Ubuntu 20.04 的 Flatpak 1.6 对重复安装完全相同的小应用包会提示“already installed”，表示无需更新；离线套件安装器会按提交编号自动跳过这个情况。安装不同提交的新版包会原位更新并保留 Flatpak 应用资料。
@@ -75,8 +75,8 @@ Flatpak 的应用数据默认位于 `~/.var/app/com.racktop.desktop/data/com.rac
 
 ```bash
 flatpak install --user flathub org.gnome.Platform//50 org.gnome.Sdk//50
-bash scripts/package-flatpak.sh /absolute/path/RackTop_2.7.3_linux-amd64.deb /absolute/path/output
-bash scripts/package-flatpak-runtime.sh /absolute/path/output/RackTop_2.7.3_linux-amd64.flatpak /absolute/path/output
+bash scripts/package-flatpak.sh /absolute/path/RackTop_2.8.0_linux-amd64.deb /absolute/path/output
+bash scripts/package-flatpak-runtime.sh /absolute/path/output/RackTop_2.8.0_linux-amd64.flatpak /absolute/path/output
 ```
 
 参考：[Tauri 的 Linux 运行环境限制](https://v2.tauri.app/distribute/appimage/)、[Tauri Flatpak 分发](https://v2.tauri.app/distribute/flatpak/)、[Flatpak 运行时与沙箱](https://docs.flatpak.org/en/latest/basic-concepts.html)。
@@ -92,7 +92,7 @@ bash scripts/package-flatpak-runtime.sh /absolute/path/output/RackTop_2.7.3_linu
 
 ## 一键更新与首次升级
 
-从旧 `1.30.0-linux.12` 或其他旧维护版迁入当前 **2.7.3**，需要先从新仓库手动安装一次对应格式：Ubuntu 22.04 使用新 DEB；Ubuntu 20.04 使用 Flatpak。旧仓库及旧更新清单保持原状，不会自动将旧客户端引导到新仓库。旧 2.2.2 Flatpak 使用统一安装器进行一次引导升级，随后可用新版应用内更新；无需先卸载。
+从旧 `1.30.0-linux.12` 或其他旧维护版迁入当前 **2.8.0**，需要先从新仓库手动安装一次对应格式：Ubuntu 22.04 使用新 DEB；Ubuntu 20.04 使用 Flatpak。旧仓库及旧更新清单保持原状，不会自动将旧客户端引导到新仓库。旧 2.2.2 Flatpak 使用统一安装器进行一次引导升级，随后可用新版应用内更新；无需先卸载。
 
 新版本保留 `com.racktop.desktop` 标识；同格式升级继续使用原服务器、项目、密钥引用和本机历史。DEB 与 Flatpak 的资料目录不同，不自动迁移，切换格式前应退出客户端并备份。
 
@@ -104,9 +104,9 @@ bash scripts/package-flatpak-runtime.sh /absolute/path/output/RackTop_2.7.3_linu
 
 ```bash
 # TAURI_SIGNING_PRIVATE_KEY_PATH 指向受保护的私钥文件；不要将内容写进命令或日志。
-python3 scripts/sign-linux-update.py src-tauri/target/release/bundle/deb/RackTop_2.7.3_linux-amd64.deb
+python3 scripts/sign-linux-update.py src-tauri/target/release/bundle/deb/RackTop_2.8.0_linux-amd64.deb
 cargo build --release --locked --features integration-probe --bin racktop-probe --manifest-path src-tauri/Cargo.toml
-python3 scripts/test-linux-update.py src-tauri/target/release/racktop-probe src-tauri/target/release/bundle/deb/RackTop_2.7.3_linux-amd64.deb
+python3 scripts/test-linux-update.py src-tauri/target/release/racktop-probe src-tauri/target/release/bundle/deb/RackTop_2.8.0_linux-amd64.deb
 ```
 
 ## 分享 SSH 连接与失败重试
@@ -174,17 +174,17 @@ npm run bundle:linux -- --locked
 
 单台服务器「配置 → 服务器通知」可选打开、部分或关闭。部分模式取消最后一类后自动关闭，每次选择立即保存；关闭后，采集中或等待系统通知授权的提醒也会再次核对开关。预约条件仍会正常更新，但该服务器不再弹出相应提醒。保存失败会回到最后成功保存的设置并提示，不把尚未保存的开关状态当作永久生效。
 
-网页使用方法见[工作台指南](WORKSPACE.md)与[资产设备管理](EQUIPMENT.md)。现行 2.7.3 桌面支持管理员设置的共享 SSH 密码，私钥仍在本机配置；2.8.0 的新增 GPU 占用摘要需要新版桌面和服务共同交付，不能据此声称 2.7.3 已具备该能力。
+网页使用方法见[工作台指南](WORKSPACE.md)与[资产设备管理](EQUIPMENT.md)。现行 2.8.0 桌面支持管理员设置的共享 SSH 密码，私钥仍在本机配置。GPU 占用摘要需要管理员运行 2.8.0 桌面并持续采集；旧 2.7.3 客户端没有该上报能力。
 
 2.8.0 管理员桌面使用本机已有 SSH 连接和最近采样，约每 30 秒向中央 API 上传获授权组织服务器的 GPU 占用摘要。关闭本地历史记录后仍可同步实时占用：摘要保留在内存中，不为此额外持久化完整 Snapshot。网页按 GPU/CPU 分类，再保留原集群名称分组；每卡摘要含利用率、已用显存和 Linux 系统用户名，不上传完整进程命令行或环境。这里的系统用户不是预约人；有占用但无法识别用户名时显示匿名用户。超过约 90 秒没有有效采样时网页显示未知并隐藏旧用户，桌面退出、休眠或失去连接都会中断更新。
 
-显示“被占用”时仍可预约未来时段；预约不会自动停止现有任务。CPU 手工资源仅提供整机预约，不能从空 GPU 清单自动登记 CPU。本轮尚未登记生产 CPU 资源，也未完成全体 CPU 服务器实时监控；表单中的阿里云 ECS 仅为名称示例，不代表已有对应资源或观测状态。
+显示“被占用”时仍可预约未来时段；预约不会自动停止现有任务。CPU 服务器由管理员登记实际节点，仅支持整机预约，不能从空 GPU 清单自动登记 CPU，也不提供全 CPU 服务器实时监控。表单中的阿里云 ECS 仅为名称示例，不代表已有对应资源或观测状态。
 
 周报入口已从 2.8.0 源码移除，周报 API 在原权限校验后返回 `410 REPORTS_REMOVED`，历史资料保留。旧桌面菜单或书签仍可能访问 `/reports`；对应新网页显示移除说明并提供返回资源看板入口。
 
 ## 验证范围
 
-当前公开 2.7.3 的实际检查范围以[版本信息](VERSION_INFOS.md)对应条目及其 Release 为准；2.8.0 尚未正式验收或发布。以下旧版验收段原文保留，不能代替这两个版本的验证。
+当前公开 2.8.0 的实际检查范围以[版本信息](VERSION_INFOS.md)对应条目及其 Release 为准：隔离 Ubuntu 20.04.5 用户空间已验证 2.7.3 → 2.8.0 升级、原生启动、资料保留与重复安装；不代表真实用户电脑已升级或真实 GPU 遥测已启用。以下旧版验收段原文保留，不能代替本轮验证。
 
 ### 历史 2.2.0 验证记录
 

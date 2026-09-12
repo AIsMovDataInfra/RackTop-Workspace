@@ -48,13 +48,13 @@ cargo test --locked --manifest-path src-tauri/Cargo.toml
 
 统一 Linux 安装入口为 `scripts/install-racktop.sh`，只安装已发布的预编译包。它读取 HTTPS 更新清单，从同一版本 Release 获取 `SHA256SUMS` 并核验包摘要。Ubuntu 20.04 初装使用完整 Flatpak 运行时套件；已有 Flatpak 保持原来的 user / system 范围，运行时齐备时只下载应用包。Ubuntu 22.04 新装使用 DEB。不要在安装失败后尝试源码编译，也不要用 `releases/latest` 推导版本：GitHub 的预发布不出现在该接口。
 
-**当前分发为 [2.7.3 测试版（Pre-release）](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/tag/v2.7.3)。** 发布顺序为：完成全部平台验证 → 归并源码 → 固定版本标签 → 上传并验证全部附件 → 推进更新清单 → 发布安装脚本及下载页面。下载页提供统一在线安装器及四个平台安装入口。新 Ubuntu 20.04 离线套件的根目录为 `RackTop_2.7.3_flatpak_offline`，内置 `install.sh` 进行用户级安装；保留已有系统级安装应使用统一在线安装器。后续页面的阶段文字仍须以实际公开下载和安装验证为准。
+**当前分发为 [2.8.0 测试版（Pre-release）](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/tag/v2.8.0)。** 发布顺序为：完成全部平台验证 → 归并源码 → 固定版本标签 → 上传并验证全部附件 → 推进更新清单 → 发布安装脚本及下载页面。下载页提供统一在线安装器及四个平台安装入口。新 Ubuntu 20.04 离线套件的根目录为 `RackTop_2.8.0_flatpak_offline`，内置 `install.sh` 进行用户级安装；保留已有系统级安装应使用统一在线安装器。后续页面的阶段文字仍须以实际公开下载和安装验证为准。
 
 SSH 连接和文件传输继续通过成员本机网络直连目标服务器。2.7.3 的客户端加固减少密码意外暴露，但不能阻止获授权成员主动取得密码。
 
-## 2.8.0 待发布内容与兼容性
+## 2.8.0 交付状态与兼容性
 
-当前源码版本为 **2.8.0，待发布、待最终验证**；上方安装流程及公开下载仍为 2.7.3。正式包发布、验签和公开下载核验完成后，再更新用户下载链接及发布记录。
+**2.8.0 团队网页已于 2026-09-12 23:46:18（UTC+8）上线**，源码固定为 `63b4803b83df40128f349e0590ec169d95159ec2`。原 26 张表内容及 33 台资产保留，新增两张空遥测表；没有把旧快照当作新占用摘要。Linux 和两种 Mac 正式构建成功；发布器因版本标题带状态而失败，修复后以原标签、原 CI 产物和组织 App 恢复发布。四目标签名、11 个 Release 附件、对应源码及 15 个公开文件核验通过；本机仍运行 2.7.0，真实生产 GPU 摘要尚未由新版管理员客户端激活。
 
 - 团队导航使用「资产设备管理」和「办公设备申请」，移除周报前台入口；已登录用户打开旧 `/reports` 链接可看到移除说明。周报 API 保留既有鉴权并返回 `410 REPORTS_REMOVED`，历史周报表、内容及相关审计保留，部署不得清表。旧客户端的周报入口可能仍存在，需要升级后同步移除。
 - GPU / CPU 集群按实际 GPU 数量分类，保留原集群名称。CPU 入口和整机预约已准备，当前尚未登记 CPU 资源；本轮不提供通用 CPU 实时占用采集。
@@ -66,7 +66,7 @@ SSH 连接和文件传输继续通过成员本机网络直连目标服务器。2
 
 ### 正式构建入口
 
-在六字段一致、功能与数据保留检查通过、最终提交已集成至 `main` 后，使用该提交创建尚不存在的不可变 `v2.8.0` 标签并推送。标签触发 [build.yml](../.github/workflows/build.yml) 的 Linux 与两种 Mac 正式构建；三者全部成功后才由发布 job 调用 [publish-workspace-update.py](../scripts/publish-workspace-update.py)。不要移动标签或手动提前推进 `updater`。
+后续版本在六字段一致、功能与数据保留检查通过、最终提交已集成至 `main` 后，使用该提交创建尚不存在的不可变版本标签并推送。已有 `v2.8.0` 不可移动。标签触发 [build.yml](../.github/workflows/build.yml) 的 Linux 与两种 Mac 正式构建；三者全部成功后才由发布 job 调用 [publish-workspace-update.py](../scripts/publish-workspace-update.py)。不要移动标签或手动提前推进 `updater`。
 
 团队服务使用独立的 [team-web.yml](../.github/workflows/team-web.yml) 手动构建入口；Actions 产物只是部署包，构建成功不代表生产服务已更新。以下命令以已审核的最终 `main` 提交为前提；构建后还应核对 run 的 `headSha` 与最终提交相同：
 
@@ -76,7 +76,7 @@ racktop-gh run list --repo AIsMovDataInfra/RackTop-Workspace --workflow team-web
 racktop-gh run list --repo AIsMovDataInfra/RackTop-Workspace --workflow build.yml --limit 5
 ```
 
-正式 Release 后，核对附件、四个更新目标的签名、对应源码与许可证，再准备新版本的下载镜像与页面。2.7.3 的既有冻结策略和验收记录不能直接当作 2.8.0 发布依据；只有公开地址的实际内容与新产物吻合后，才把当前下载版本改为 2.8.0。
+正式 Release 后，核对附件、四个更新目标的签名、对应源码与许可证，再准备新版本的下载镜像与页面。每版使用独立冻结策略和验收记录，只有公开地址的实际内容与新产物吻合后，才更新当前下载版本。2.8.0 的恢复工具修复已保存于 `fe9cf94e7de27a70690f1ddd59870f46deb326f7`，产品标签和源代码归档仍为 `63b4803b83df40128f349e0590ec169d95159ec2`；原 Actions run 的 publisher 失败记录保留，不能改称原 CI 全绿。
 
 ## 数据与来源
 

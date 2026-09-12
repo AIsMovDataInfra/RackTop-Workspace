@@ -1,17 +1,17 @@
 # 公开安装包下载页
 
-[云端下载页](https://136.0.110.161/downloads/)当前提供 2.7.3 测试版（Pre-release）；2.8.0 尚待发布与验证。本目录的 `index.html`、`Ubuntu20.04-install.txt` 保留历史 2.5.0 模板，不能直接覆盖当前生产页面。维护者应先读取线上现状，再为新版本准备和验证候选内容。普通用户见[下载说明](../../../docs/DOWNLOADS.md)，发布维护见[维护者入口](../../../docs/MAINTAINERS.md)。页面和安装包由 Nginx 直接提供，无需登录。
+[云端下载页](https://136.0.110.161/downloads/)当前提供 2.8.0 测试版（Pre-release）。本目录的 `index.html`、`Ubuntu20.04-install.txt` 已同步为 2026-09-13 00:22:46（UTC+8）实际公布并通过匿名 HTTPS 摘要核验的两份内容。后续发布仍应先读取线上现状，再准备和验证候选内容，避免覆盖其他维护者的修改。普通用户见[下载说明](../../../docs/DOWNLOADS.md)，发布维护见[维护者入口](../../../docs/MAINTAINERS.md)。页面和安装包由 Nginx 直接提供，无需登录。
 
 公开目录为 `/var/www/racktop-public/downloads/`。当前公开版本使用这些文件；保留历史安装包，不覆盖旧版本附件：
 
 - `index.html`、`install-racktop.sh`、`Ubuntu20.04-install.txt`
-- `RackTop_2.7.3_linux-amd64-flatpak-offline.tar.gz`
-- `RackTop_2.7.3_linux-amd64.deb`
-- `RackTop_2.7.3_macos-arm64-unsigned.dmg`
-- `RackTop_2.7.3_macos-x64-unsigned.dmg`
-- `RackTop_2.7.3_source.tar.gz`、`LICENSE`、`NOTICE.md`、`SHA256SUMS`
+- `RackTop_2.8.0_linux-amd64-flatpak-offline.tar.gz`
+- `RackTop_2.8.0_linux-amd64.deb`
+- `RackTop_2.8.0_macos-arm64-unsigned.dmg`
+- `RackTop_2.8.0_macos-x64-unsigned.dmg`
+- `RackTop_2.8.0_source.tar.gz`、`LICENSE`、`NOTICE.md`、`SHA256SUMS`
 
-Ubuntu 20.04 新套件内根目录为 `RackTop_2.7.3_flatpak_offline`，运行 `bash install.sh`，仅进行用户级安装。旧 2.2.2 简易套件内才运行 `install-racktop.sh`。固定在线入口 `/downloads/install-racktop.sh` 自动识别已有 Flatpak 的安装范围。
+Ubuntu 20.04 新套件内根目录为 `RackTop_2.8.0_flatpak_offline`，运行 `bash install.sh`，仅进行用户级安装。旧 2.2.2 简易套件内才运行 `install-racktop.sh`。固定在线入口 `/downloads/install-racktop.sh` 自动识别已有 Flatpak 的安装范围。
 
 在线安装器从 `updater/linux-amd64.json` 获取版本和 Flatpak commit，下载同版 GitHub Release 的安装包及 SHA256SUMS；初装或缺运行时使用离线套件，运行时齐备时只下载应用包。不要用 GitHub `releases/latest` 推导测试版版本。
 

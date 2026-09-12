@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
-  <meta name="description" content="按系统和芯片下载 RackTop：2.5.0 测试版，Ubuntu 20.04 / 22.04 一键安装、Mac Apple Silicon 与 Intel DMG。">
+  <meta name="description" content="按系统和芯片下载 RackTop：2.8.0 测试版，Ubuntu 20.04 / 22.04 一键安装、Mac Apple Silicon 与 Intel DMG。">
   <title>安装 RackTop</title>
   <style>
     :root { color-scheme: light dark; --canvas: #f3f4f6; --surface: #fff; --subtle: #f0f1f3; --text: #1d1d1f; --muted: #62636a; --border: #dedfe3; --link: #0066cc; --fill: #0067d9; --focus: #007aff; }
@@ -77,7 +77,10 @@
     </header>
     <main>
       <h1>安装 RackTop</h1>
-      <p class="intro">2.5.0 测试版（Pre-release）。Ubuntu 推荐一键安装；Mac 按芯片选择 DMG。</p>
+      <p class="intro">2.8.0 测试版（Pre-release）。Ubuntu 推荐一键安装；Mac 按芯片选择 DMG。</p>
+      <p class="intro">管理员在「服务器资源」填写密码并授权，成员登录团队账号后即可连接；支持从旧版服务器缓存升级并自动领取共享密码。</p>
+      <p class="intro">SSH 与文件传输继续使用本机网络直连，沿用客户端密码保护，减少连接过程中密码的暴露；客户端加固不能阻止获授权成员自行取得密码。</p>
+      <p class="intro">资源看板按 GPU / CPU 集群分类，实际占用与时段预约分别显示；管理员使用 2.8.0 桌面客户端登录组织后，可上报 GPU 占用。</p>
       <p class="selection-help">Mac 可在苹果菜单的“关于本机”查看芯片；Ubuntu 请确认系统版本与电脑架构。</p>
 
       <section class="note" aria-labelledby="unified-title" style="margin: 0 0 16px">
@@ -95,12 +98,12 @@
         <section class="platform" aria-labelledby="ubuntu20-title">
           <h2 id="ubuntu20-title">Ubuntu 20.04</h2>
           <p class="chip">Intel / AMD 64 位电脑 · x86_64</p>
-          <p class="release"><span class="version">2.5.0 测试版</span><span>Flatpak 离线套件 · 含运行时</span></p>
-          <div class="actions"><a class="download" href="RackTop_2.5.0_linux-amd64-flatpak-offline.tar.gz" download>下载 Ubuntu 20.04 安装包</a><a class="alternate" href="https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.5.0/RackTop_2.5.0_linux-amd64-flatpak-offline.tar.gz">GitHub 备用下载</a></div>
+          <p class="release"><span class="version">2.8.0 测试版</span><span>Flatpak 离线套件 · 含运行时</span></p>
+          <div class="actions"><a class="download" href="RackTop_2.8.0_linux-amd64-flatpak-offline.tar.gz" download>下载 Ubuntu 20.04 安装包</a><a class="alternate" href="https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.8.0/RackTop_2.8.0_linux-amd64-flatpak-offline.tar.gz">GitHub 备用下载</a></div>
           <h3>解压后运行一个安装命令</h3>
           <ol class="steps">
             <li>没有 Flatpak 时，先运行 <code>sudo apt install flatpak</code>。</li>
-            <li>提取压缩包，进入 <code>RackTop_2.5.0_flatpak_offline</code> 文件夹。</li>
+            <li>提取压缩包，进入 <code>RackTop_2.8.0_flatpak_offline</code> 文件夹。</li>
             <li>在文件夹空白处右键，选择“在终端打开”。</li>
             <li>粘贴以下命令并回车：<pre><code>bash install.sh</code></pre></li>
             <li>安装成功后启动：<pre><code>flatpak run com.racktop.desktop</code></pre></li>
@@ -112,15 +115,15 @@
         <section class="platform" aria-labelledby="ubuntu22-title">
           <h2 id="ubuntu22-title">Ubuntu 22.04</h2>
           <p class="chip">Intel / AMD 64 位电脑 · amd64</p>
-          <p class="release"><span class="version">2.5.0 测试版</span><span>DEB 安装包</span></p>
+          <p class="release"><span class="version">2.8.0 测试版</span><span>DEB 安装包</span></p>
           <div class="actions">
-            <a class="download" href="RackTop_2.5.0_linux-amd64.deb" download>下载 Ubuntu 22.04 安装包</a>
-            <a class="alternate" href="https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.5.0/RackTop_2.5.0_linux-amd64.deb">GitHub 备用下载</a>
+            <a class="download" href="RackTop_2.8.0_linux-amd64.deb" download>下载 Ubuntu 22.04 安装包</a>
+            <a class="alternate" href="https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.8.0/RackTop_2.8.0_linux-amd64.deb">GitHub 备用下载</a>
           </div>
           <h3>在下载目录安装</h3>
           <ol class="steps">
             <li>进入安装包所在文件夹，右键选择“在终端打开”。</li>
-            <li>运行以下命令，按提示输入本机管理员密码：<pre><code>sudo apt install ./RackTop_2.5.0_linux-amd64.deb</code></pre></li>
+            <li>运行以下命令，按提示输入本机管理员密码：<pre><code>sudo apt install ./RackTop_2.8.0_linux-amd64.deb</code></pre></li>
             <li>在应用菜单搜索并打开 RackTop，也可运行：<pre><code>racktop</code></pre></li>
           </ol>
           <p class="hint">APT 会联网补齐运行组件。已有 Flatpak 请用上方一键入口，继续原安装格式；Ubuntu 20.04 请选兼容套件。</p>
@@ -129,10 +132,10 @@
         <section class="platform" aria-labelledby="mac-arm-title">
           <h2 id="mac-arm-title">Mac · Apple Silicon</h2>
           <p class="chip">M 系列芯片 · arm64</p>
-          <p class="release"><span class="version">2.5.0 测试版</span><span>DMG 安装包</span></p>
+          <p class="release"><span class="version">2.8.0 测试版</span><span>DMG 安装包</span></p>
           <div class="actions">
-            <a class="download" href="RackTop_2.5.0_macos-arm64-unsigned.dmg" download>下载 Mac M 系列安装包</a>
-            <a class="alternate" href="https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.5.0/RackTop_2.5.0_macos-arm64-unsigned.dmg">GitHub 备用下载</a>
+            <a class="download" href="RackTop_2.8.0_macos-arm64-unsigned.dmg" download>下载 Mac M 系列安装包</a>
+            <a class="alternate" href="https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.8.0/RackTop_2.8.0_macos-arm64-unsigned.dmg">GitHub 备用下载</a>
           </div>
           <ol class="steps">
             <li>升级时先退出旧程序。打开 DMG，将 RackTop 拖入“应用程序”。</li>
@@ -144,10 +147,10 @@
         <section class="platform" aria-labelledby="mac-intel-title">
           <h2 id="mac-intel-title">Mac · Intel</h2>
           <p class="chip">Intel 处理器 · x64</p>
-          <p class="release"><span class="version">2.5.0 测试版</span><span>DMG 安装包</span></p>
+          <p class="release"><span class="version">2.8.0 测试版</span><span>DMG 安装包</span></p>
           <div class="actions">
-            <a class="download" href="RackTop_2.5.0_macos-x64-unsigned.dmg" download>下载 Mac Intel 安装包</a>
-            <a class="alternate" href="https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.5.0/RackTop_2.5.0_macos-x64-unsigned.dmg">GitHub 备用下载</a>
+            <a class="download" href="RackTop_2.8.0_macos-x64-unsigned.dmg" download>下载 Mac Intel 安装包</a>
+            <a class="alternate" href="https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.8.0/RackTop_2.8.0_macos-x64-unsigned.dmg">GitHub 备用下载</a>
           </div>
           <ol class="steps">
             <li>升级时先退出旧程序。打开 DMG，将 RackTop 拖入“应用程序”。</li>
@@ -165,13 +168,13 @@
 
       <section class="note" aria-labelledby="upgrade-title">
         <h2 id="upgrade-title">升级与资料</h2>
-        <p>升级前退出旧程序，不要先卸载或删除资料。同格式升级沿用原资料；DEB 与 Flatpak 的资料目录不同，切换格式前请先备份。旧 2.2.2 简易套件内使用 install-racktop.sh；本页 2.5.0 离线套件内使用 install.sh。</p>
-        <p><a href="https://github.com/AIsMovDataInfra/RackTop-Workspace/blob/main/docs/DOWNLOADS.md">查看资料目录与升级说明</a> · <a href="https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/tag/v2.5.0">GitHub 2.5.0 测试版</a></p>
+        <p>升级前退出旧程序，不要先卸载或删除资料。同格式升级沿用原资料；DEB 与 Flatpak 的资料目录不同，切换格式前请先备份。旧 2.2.2 简易套件内使用 install-racktop.sh；本页 2.8.0 离线套件内使用 install.sh。</p>
+        <p><a href="https://github.com/AIsMovDataInfra/RackTop-Workspace/blob/main/docs/DOWNLOADS.md">查看资料目录与升级说明</a> · <a href="https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/tag/v2.8.0">GitHub 2.8.0 测试版</a></p>
       </section>
 
       <section class="note online" aria-labelledby="online-title">
-        <div><h2 id="online-title">在线设备管理</h2><p>直接在浏览器查看、登记团队设备和打印标签，无需安装桌面程序。</p></div>
-        <a href="/equipment">进入设备管理 →</a>
+        <div><h2 id="online-title">在线资产设备管理</h2><p>直接在浏览器查看、登记团队设备和打印标签，无需安装桌面程序。</p></div>
+        <a href="/equipment">进入资产设备管理 →</a>
       </section>
     </main>
 
@@ -180,12 +183,12 @@
       <nav class="footer-links" aria-label="源码、许可证与文件校验">
         <a href="https://github.com/AIsMovDataInfra/RackTop-Workspace/blob/main/docs/DOWNLOADS.md">安装与升级帮助</a>
         <a href="https://github.com/AIsMovDataInfra/RackTop-Workspace/blob/main/docs/MAINTAINERS.md">源码与维护</a>
-        <a href="RackTop_2.5.0_source.tar.gz" download>2.5.0 源代码</a>
-        <a href="https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.5.0/RackTop_2.5.0_source.tar.gz">GitHub 源代码</a>
+        <a href="RackTop_2.8.0_source.tar.gz" download>2.8.0 源代码</a>
+        <a href="https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.8.0/RackTop_2.8.0_source.tar.gz">GitHub 源代码</a>
         <a href="LICENSE">GPL-3.0 许可证</a>
         <a href="NOTICE.md">来源与署名</a>
         <a href="SHA256SUMS">文件校验清单</a>
-        <a href="https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.5.0/SHA256SUMS">GitHub 文件校验</a>
+        <a href="https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.8.0/SHA256SUMS">GitHub 文件校验</a>
       </nav>
     </footer>
   </div>
