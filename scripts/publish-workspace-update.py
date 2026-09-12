@@ -102,6 +102,22 @@ def check_feed(previous, manifest):
         raise ValueError('An existing version manifest is immutable')
 
 
+def release_bullets(overview, version):
+    headings = list(re.finditer(r'^##[ \t]+([^\r\n]+)$', overview, re.MULTILINE))
+    title = re.compile(re.escape(version) + r'(?:[ \t]*(?:（[^（）\n]+）|\([^()\n]+\)))?')
+    matches = [index for index, heading in enumerate(headings)
+               if title.fullmatch(heading.group(1).strip())]
+    if len(matches) != 1:
+        raise ValueError('Release notes must contain exactly one heading for the current version')
+    index = matches[0]
+    end = headings[index + 1].start() if index + 1 < len(headings) else len(overview)
+    section = overview[headings[index].end():end]
+    bullets = [line for line in section.splitlines() if line.startswith('- ')]
+    if not bullets:
+        raise ValueError('Release notes must contain the current version changes')
+    return bullets
+
+
 def publish_feeds(manifests):
     branch = api('git/ref/heads/updater', optional=True)
     head = branch['object']['sha'] if branch else None
@@ -144,6 +160,7 @@ def main():
     if run('git', 'rev-parse', 'HEAD') != commit:
         raise ValueError('Publication checkout must match the immutable tag')
     subprocess.run(['git', 'merge-base', '--is-ancestor', commit, 'origin/main'], check=True)
+    bullets = release_bullets((ROOT / 'docs/Version_overview.md').read_text(), version)
     packages, mac_platforms, linux_platforms, signing = collect_packages(assets, version)
     deb = next(path for path in packages if path.suffix == '.deb')
     metadata = run('dpkg-deb', '--show', '--showformat=${Package}\n${Version}\n${Architecture}', str(deb))
@@ -158,11 +175,6 @@ def main():
     checksums = assets / 'SHA256SUMS'
     checksums.write_text(''.join(f'{sha256(path)}  {path.name}\n' for path in files))
     files.append(checksums)
-    overview = (ROOT / 'docs/Version_overview.md').read_text()
-    section = overview.split(f'## {version}\n', 1)[1].split('\n## ', 1)[0]
-    bullets = [line for line in section.splitlines() if line.startswith('- ')]
-    if not bullets:
-        raise ValueError('Release notes must contain the current version changes')
     body = '## 主要更新\n\n' + '\n'.join(bullets) + '\n\n## 下载\n\n推荐从[统一下载页](https://136.0.110.161/downloads/)安装 RackTop；Ubuntu 使用一键安装，Mac 按芯片选择 DMG。\n\n'
     for path in packages:
         if path.suffix in ('.dmg', '.deb', '.flatpak'):

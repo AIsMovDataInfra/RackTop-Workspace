@@ -144,6 +144,20 @@ class WorkspaceRelease(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'immutable'):
             publisher.check_feed({'version': '2.0.0', 'platforms': {}}, self.manifest)
 
+    def test_release_notes_accept_status_annotation_and_keep_version_boundary(self):
+        for suffix in ('', '（待发布）', '（桌面待发布）', ' (Pre-release)', '  '):
+            with self.subTest(suffix=suffix):
+                overview = f'## 2.0.1\n- Later version.\n## 2.0.0{suffix}\n\n- Current change.\n## 1.9.0\n- Older version.\n'
+                self.assertEqual(publisher.release_bullets(overview, self.version), ['- Current change.'])
+
+    def test_release_notes_reject_missing_similar_duplicate_or_empty_version(self):
+        for overview in ('## 2.0.01\n- Other version.\n',
+                         '## 2.0.0-linux.1\n- Other version.\n',
+                         '## 2.0.0\n- First.\n## 2.0.0（待发布）\n- Second.\n',
+                         '## 2.0.0（待发布）\nNo changes.\n## 1.9.0\n- Older.\n'):
+            with self.subTest(overview=overview), self.assertRaises(ValueError):
+                publisher.release_bullets(overview, self.version)
+
     def test_recovery_requires_identical_complete_public_artifacts(self):
         files = [self.package, self.flatpak, self.offline]
         release = {'assets': [{'name': path.name, 'size': path.stat().st_size,
@@ -163,7 +177,7 @@ class WorkspaceRelease(unittest.TestCase):
 
     def test_publication_checksums_and_atomic_feeds_cover_both_linux_formats(self):
         (self.assets / 'docs').mkdir()
-        (self.assets / 'docs/Version_overview.md').write_text('## 2.0.0\n\n- 支持 Ubuntu 20.04 安装。\n')
+        (self.assets / 'docs/Version_overview.md').write_text('## 2.0.0（待发布）\n\n- 支持 Ubuntu 20.04 安装。\n')
         for name in ['LICENSE', 'NOTICE.md']:
             (self.assets / name).write_text(name)
 
