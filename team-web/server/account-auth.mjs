@@ -3,6 +3,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { chmodSync, mkdirSync } from 'node:fs';
 import { dirname, resolve as resolvePath } from 'node:path';
 import { isIP } from 'node:net';
+import { deviceTelemetrySource } from './telemetry-source.mjs';
 
 const TOKEN = /^[A-Za-z0-9_-]{43}$/;
 const SESSION_MS = 8 * 60 * 60_000;
@@ -663,6 +664,12 @@ export function createAccountAuth(config) {
     throw fail(404, 'NOT_FOUND', '没有此认证接口。');
   }
   return { handle, resolve, verifyWrite, provisionSuperAdmin, hasCompanyMembership,
+    telemetrySource(req) {
+      const record = recordFor(req);
+      verifyCompanyScope(req, record);
+      if (record?.kind !== 'device' || !record.user) throw fail(403, 'DEVICE_REQUIRED', '资源遥测仅供已登录的桌面客户端上报');
+      return deviceTelemetrySource(record.tokenHash);
+    },
     getMemberIdentity(id) { if (typeof id !== 'string') return null; return userView(db.prepare('SELECT * FROM account_users WHERE id = ? AND deleted_at IS NULL').get(id)); },
     sessionPayload(req) { validateRequest(req); return payload(recordFor(req)); },
     close() { if (!closed) { closed = true; rates.clear(); db.close(); } } };

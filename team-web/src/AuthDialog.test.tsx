@@ -95,11 +95,12 @@ describe('username accounts and member sign-in', () => {
     expect(login).toHaveBeenCalledWith({ username: '中', password: ' '.repeat(12), rememberMe: true })
   })
 
-  it('resumes the same GPU reservation after username login', async () => {
+  it('opens the same GPU for an explicitly selected future reservation after username login', async () => {
     mockCatalog(); vi.spyOn(api, 'session').mockResolvedValue(anonymous); vi.spyOn(api, 'login').mockResolvedValue(member)
     await act(async () => root.render(<App />))
     enter('username', 'test-member'); enter('password', 'safe-password-test')
     await act(async () => container.querySelector('.dialog form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })))
+    await act(async () => container.querySelector<HTMLButtonElement>('.time-filter .booking-mode button:last-child')!.click())
     await act(async () => container.querySelector<HTMLButtonElement>('.gpu-tile')!.click())
     expect(container.querySelector('[role="dialog"] h2')?.textContent).toBe('新建预约')
     expect(container.querySelector('[role="dialog"]')?.textContent).toContain('同步 A100')

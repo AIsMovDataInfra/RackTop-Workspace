@@ -4,6 +4,8 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { createHash } from 'node:crypto';
+import { deviceTelemetrySource } from '../server/telemetry-source.mjs';
 import { createStore } from '../server/store.mjs';
 
 const base = Date.parse('2026-09-12T12:00:00Z');
@@ -22,25 +24,31 @@ function fixture(t) {
   const db = new DatabaseSync(path);
   db.exec(`CREATE TABLE account_users(id TEXT PRIMARY KEY,role TEXT,is_super_admin INTEGER,deleted_at INTEGER);
     CREATE TABLE account_user_companies(user_id TEXT,company TEXT,PRIMARY KEY(user_id,company));
+    CREATE TABLE account_sessions(token_hash TEXT PRIMARY KEY,user_id TEXT,kind TEXT,expires_at INTEGER,active_company TEXT);
     CREATE TABLE managed_servers(id TEXT PRIMARY KEY,company TEXT,version INTEGER,enabled INTEGER);
     CREATE TABLE managed_server_grants(server_id TEXT,user_id TEXT,PRIMARY KEY(server_id,user_id));`);
+  const device = (actor, name = 'default') => {
+    const tokenHash = createHash('sha256').update(`synthetic-${actor.id}-${name}`).digest('base64url');
+    db.prepare("INSERT OR IGNORE INTO account_sessions VALUES(?,?,'device',?,?)").run(tokenHash, actor.id, base + 86_400_000, actor.company ?? null);
+    return deviceTelemetrySource(tokenHash);
+  };
   const addActor = actor => {
     db.prepare('INSERT INTO account_users VALUES(?,?,?,NULL)').run(actor.id, actor.role, actor.isSuperAdmin ? 1 : 0);
     if (actor.company) db.prepare('INSERT INTO account_user_companies VALUES(?,?)').run(actor.id, actor.company);
-    return actor;
+    device(actor); return actor;
   };
   [admin, superAdmin, member, { ...member, id: 'another-member' }].forEach(addActor);
   t.after(() => { db.close(); store.close(); rmSync(dir, { recursive: true, force: true }); });
-  const sync = (data = report(), managed = server(), user = admin) => {
+  const sync = (data = report(), managed = server(), user = admin, deviceName = 'default') => {
     db.prepare('INSERT OR IGNORE INTO managed_servers VALUES(?,?,?,?)').run(managed.id, managed.company, managed.version, managed.enabled ? 1 : 0);
     for (const id of [member.id, 'another-member']) db.prepare('INSERT OR IGNORE INTO managed_server_grants VALUES(?,?)').run(managed.id, id);
-    return store.syncManagedTelemetry(data, user, managed);
+    return store.syncManagedTelemetry(data, user, managed, device(user, deviceName));
   };
-  return { store, db, sync, addActor, setClock: value => { clock = value; } };
+  return { store, db, sync, addActor, device, setClock: value => { clock = value; } };
 }
 function booking(resource) {
   return { resourceId: resource.id, scope: 'gpus', gpuIds: [resource.gpus[0].id], inventoryVersion: resource.inventoryVersion,
-    startAt: new Date(base + 60_000).toISOString(), endAt: new Date(base + 3_600_000).toISOString(), purpose: '合成训练' };
+    startAt: new Date(base + 120_000).toISOString(), endAt: new Date(base + 3_600_000).toISOString(), purpose: '合成训练' };
 }
 
 test('first failed or stale observation does not invent a CPU node or resource', t => {
@@ -99,10 +107,10 @@ test('expired reports clear current people and metrics, and future sender clock 
 test('duplicate and older reports cannot replace state or refresh the receive clock', t => {
   const { sync, db, store, setClock } = fixture(t);
   const resource = sync(report({ gpus: [gpu(1, { utilization: 50 })] }));
-  const before = db.prepare('SELECT * FROM resource_usage').get();
+  const before = db.prepare('SELECT * FROM resource_usage_sources').get();
   setClock(base + 30_000);
   sync(report()); sync(report({ observedAt: base - 1 }));
-  assert.deepEqual(db.prepare('SELECT * FROM resource_usage').get(), before);
+  assert.deepEqual(db.prepare('SELECT * FROM resource_usage_sources').get(), before);
   assert.equal(store.getResource(resource.id, admin).usage.state, 'busy');
 });
 
@@ -201,14 +209,14 @@ test('actual busy is independent from future reservation conflicts and completio
 
 test('strict telemetry contract rejects extra secret/process fields and invalid values before persistence', t => {
   const { sync, db } = fixture(t);
-  fail(() => sync(report(), server(), member), 'FORBIDDEN');
+  fail(() => sync(report(), server(), member), 'TELEMETRY_BINDING_REQUIRED');
   for (const extra of [{ password: 'synthetic-only' }, { company: 'B公司' }, { processQueryOk: 1 }, { observedAt: base + 60_001 }, { serverVersion: 2 }]) {
     assert.throws(() => sync(report(extra)));
   }
   for (const extra of [{ command: 'synthetic-command' }, { pid: 123 }, { username: 'not-a-DTO-field' }, { utilization: -1 }, { utilization: 101 }, { utilization: undefined }, { memoryUsedMb: 90000 }, { users: ['a\nb'], hasProcesses: true }, { users: ['alice'], hasProcesses: false }]) {
     assert.throws(() => sync(report({ gpus: [gpu(1, extra)] })));
   }
-  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM resource_usage').get().n, 0);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM resource_usage_sources').get().n, 0);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM resources').get().n, 0);
 });
 
@@ -333,4 +341,104 @@ test('moving a future booking into the current interval must recheck every selec
   const future = store.createReservation(booking(resource), member);
   fail(() => store.updateReservation(future.id, { version: 1, inventoryVersion: 1, startAt: new Date(base).toISOString() }, member), 'GPU_BUSY');
   assert.equal(store.getReservation(future.id, member).startAt, future.startAt);
+});
+
+test('authorized members report only existing exact hardware without changing inventory, bindings or bookings', t => {
+  const { sync, store, db, device, setClock } = fixture(t);
+  const resource = sync(report({ gpus: [gpu(), gpu(2)] }));
+  store.createReservation(booking(resource), admin);
+  const tables = ['resources', 'resource_inventory', 'gpu_identity', 'managed_resource_bindings', 'reservations', 'resource_usage'];
+  const before = Object.fromEntries(tables.map(table => [table, db.prepare(`SELECT * FROM ${table}`).all()]));
+  setClock(base + 1000);
+  const updated = sync(report({ observedAt: base + 1000, gpus: [gpu(1, { index: 1, name: 'Ignored descriptor', hasProcesses: true }), gpu(2, { index: 0 })] }), server(), member);
+  assert.equal(updated.usage.state, 'busy'); assert.deepEqual(updated.gpus, resource.gpus);
+  for (const table of tables) assert.deepEqual(db.prepare(`SELECT * FROM ${table}`).all(), before[table], table);
+  fail(() => sync(report({ gpus: [gpu(), gpu(2)] }), server({ id: 'unbound-alias' }), member), 'TELEMETRY_BINDING_REQUIRED');
+  for (const gpus of [[gpu()], [gpu(), gpu(3)], []]) fail(() => sync(report({ observedAt: base + 2000, inventoryComplete: false, gpus }), server(), member), 'TOPOLOGY_CONFLICT');
+  const rows = db.prepare('SELECT * FROM resource_usage_sources ORDER BY source_id').all();
+  fail(() => store.syncManagedTelemetry(report({ observedAt: base + 2000 }), member, server(), device(admin)), 'TELEMETRY_FORBIDDEN');
+  assert.deepEqual(db.prepare('SELECT * FROM resource_usage_sources ORDER BY source_id').all(), rows);
+});
+
+for (const alias of [false, true]) for (const skew of [0, -60_000]) {
+  test(`fresh busy wins across ${alias ? 'SSH aliases' : 'devices of one entry'} with clock offset ${skew}`, t => {
+    const { sync, store, setClock, db } = fixture(t);
+    sync(report({ observedAt: base + 60_000 }), server(), admin, 'fast-clock');
+    setClock(base + 10_000);
+    const managed = alias ? server({ id: 'second-entry' }) : server();
+    const resource = sync(report({ observedAt: base + 10_000 + skew, gpus: [gpu(1, { hasProcesses: true, utilization: 90, memoryUsedMb: 6000 })] }), managed, admin, 'busy-clock');
+    assert.equal(resource.usage.state, 'busy');
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM resource_usage_sources').get().n, 2);
+    fail(() => store.createReservation({ ...booking(resource), startMode: 'now', startAt: undefined }, member), 'GPU_BUSY');
+  });
+}
+
+test('busy expiry reveals another valid idle source without replay extending either source lifetime', t => {
+  const { sync, store, setClock, db } = fixture(t);
+  const resource = sync(report({ gpus: [gpu(1, { hasProcesses: true })] }), server(), admin, 'busy');
+  setClock(base + 60_000); sync(report({ observedAt: base + 60_000 }), server(), admin, 'idle');
+  const before = db.prepare('SELECT * FROM resource_usage_sources ORDER BY source_id').all();
+  setClock(base + 89_999); sync(report(), server(), admin, 'busy');
+  assert.deepEqual(db.prepare('SELECT * FROM resource_usage_sources ORDER BY source_id').all(), before);
+  assert.equal(store.getResource(resource.id, member).usage.state, 'busy');
+  setClock(base + 90_000); assert.equal(store.getResource(resource.id, member).usage.state, 'free');
+  setClock(base + 150_000); assert.equal(store.getResource(resource.id, member).usage.state, 'unknown');
+});
+
+test('grant, session, company and version changes invalidate source evidence immediately', t => {
+  const { sync, store, setClock, db, device } = fixture(t);
+  const resource = sync(); setClock(base + 1000);
+  const busy = report({ observedAt: base + 1000, gpus: [gpu(1, { hasProcesses: true })] });
+  sync(busy, server(), member);
+  assert.equal(store.getResource(resource.id, admin).usage.state, 'busy');
+  db.prepare('DELETE FROM managed_server_grants WHERE user_id=?').run(member.id);
+  assert.equal(store.getResource(resource.id, admin).usage.state, 'free');
+  fail(() => store.syncManagedTelemetry(report({ observedAt: base + 2000 }), member, server(), device(member)), 'TELEMETRY_FORBIDDEN');
+  db.prepare('INSERT INTO managed_server_grants VALUES(?,?)').run(server().id, member.id);
+  db.prepare("UPDATE account_sessions SET active_company='B公司' WHERE user_id=?").run(member.id);
+  assert.equal(store.getResource(resource.id, admin).usage.state, 'free');
+  db.prepare("UPDATE account_sessions SET active_company='A公司' WHERE user_id=?").run(member.id);
+  db.prepare('DELETE FROM account_sessions WHERE user_id=?').run(member.id);
+  assert.equal(store.getResource(resource.id, admin).usage.state, 'free');
+  db.prepare('UPDATE managed_servers SET version=2').run();
+  assert.equal(store.getResource(resource.id, admin).usage.state, 'unknown');
+  setClock(base + 2000);
+  assert.equal(sync(report({ serverVersion: 2, observedAt: base + 2000 }), server({ version: 2 })).usage.state, 'free');
+});
+
+test('server-authoritative now preserves idempotency and legacy sub-minute timestamps cannot bypass occupancy', t => {
+  const { sync, store, setClock } = fixture(t);
+  let resource = sync(report({ gpus: [gpu(1, { hasProcesses: true })] }));
+  const draft = { ...booking(resource), startMode: 'now', startAt: undefined, requestId: 'stable-now' };
+  fail(() => store.createReservation(draft, member), 'GPU_BUSY');
+  for (const offset of [1, 60_000]) fail(() => store.createReservation({ ...booking(resource), startAt: new Date(base + offset).toISOString() }, member), 'GPU_BUSY');
+  fail(() => store.createReservation({ ...booking(resource), startMode: 'scheduled', startAt: new Date(base + 59_999).toISOString() }, member), 'SCHEDULE_TOO_SOON');
+  const future = store.createReservation({ ...booking(resource), startMode: 'scheduled', startAt: new Date(base + 60_000).toISOString() }, member);
+  store.cancelReservation(future.id, { version: 1 }, member);
+  setClock(base + 1000); resource = sync(report({ observedAt: base + 1000 }));
+  const created = store.createReservation(draft, member);
+  assert.equal(created.startAt, new Date(base + 1000).toISOString());
+  setClock(base + 5000);
+  assert.deepEqual(store.createReservation(draft, member), created, 'server time never changes the input request fingerprint');
+  const cpu = store.createResource({ cluster: 'CPU', name: 'Synthetic CPU', gpuCount: 0 }, admin);
+  assert.equal(store.createReservation({ resourceId: cpu.id, scope: 'machine', gpuIndices: [], startMode: 'now', endAt: new Date(base + 60_000).toISOString(), purpose: 'CPU' }, member).startAt, new Date(base + 5000).toISOString());
+});
+
+test('schema upgrade preserves legacy usage and every existing table byte value without trusting unscoped reports', t => {
+  const { sync, db } = fixture(t);
+  const resource = sync();
+  db.prepare(`INSERT INTO resource_usage VALUES(?,?,?,?,?,?,?,?,?,?)`).run(resource.id, server().id, 1, base, base, 'online', 1, 1, 1, JSON.stringify([gpu()]));
+  db.exec('DROP TABLE resource_usage_sources');
+  const tables = db.prepare("SELECT name,sql FROM sqlite_master WHERE type='table' ORDER BY name").all();
+  const contents = Object.fromEntries(tables.map(({ name }) => [name, db.prepare(`SELECT * FROM ${name}`).all()]));
+  const path = db.prepare('PRAGMA database_list').get().file;
+  const reopened = createStore({ dbPath: path, now: () => base, enforceCompanies: true });
+  try {
+    for (const table of tables) {
+      assert.equal(db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name=?").get(table.name).sql, table.sql);
+      assert.deepEqual(db.prepare(`SELECT * FROM ${table.name}`).all(), contents[table.name], table.name);
+    }
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM resource_usage_sources').get().n, 0);
+    assert.equal(reopened.getResource(resource.id, admin).usage.state, 'unknown');
+  } finally { reopened.close(); }
 });

@@ -209,7 +209,7 @@ export function createTeamServer(overrides = {}) {
             if (session.kind !== 'device') throw new ApiError(403, 'DEVICE_REQUIRED', '资源遥测仅供已登录的桌面客户端上报');
             if (typeof req.headers['x-racktop-company'] !== 'string') throw new ApiError(409, 'COMPANY_CHANGED', '请刷新当前组织后重试');
             const managed = managedServerStore.authorizeTelemetry(id, user, body.serverVersion);
-            json(res, 200, { resource: store.syncManagedTelemetry(body, user, managed) }); return;
+            json(res, 200, { resource: store.syncManagedTelemetry(body, user, managed, auth.telemetrySource(req)) }); return;
           }
           if (action === 'credentials' && req.method === 'POST') {
             if (session.kind !== 'device') throw new ApiError(403, 'DEVICE_REQUIRED', '共享密码仅供已登录的桌面客户端连接使用');

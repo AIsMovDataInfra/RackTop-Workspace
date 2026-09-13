@@ -1,4 +1,4 @@
-import type { BookingDraft, Reservation, Translate } from './types'
+import type { BookingDraft, BookingStartMode, Reservation, Translate } from './types'
 
 export function beijingInput(value: string | number = Date.now()) {
   return new Date(new Date(value).getTime() + 8 * 60 * 60 * 1000).toISOString().slice(0, 16)
@@ -11,8 +11,8 @@ export function inputToIso(value: string) {
   return result.toISOString()
 }
 
-export function initialWindow() {
-  const start = Math.ceil((Date.now() + 60_000) / 900_000) * 900_000
+export function initialWindow(mode: BookingStartMode = 'now') {
+  const start = mode === 'now' ? Date.now() : Math.ceil((Date.now() + 120_000) / 900_000) * 900_000
   return { start: beijingInput(start), end: beijingInput(start + 2 * 3_600_000) }
 }
 
@@ -31,12 +31,13 @@ export function reservationStatus(reservation: Reservation, t: Translate, now = 
   return Date.parse(reservation.startAt) > now ? t('待开始', 'Scheduled') : t('预约进行中', 'In progress')
 }
 
-export function bookingPayload(values: { resourceId: string; scope: 'machine' | 'gpus'; gpuIndices: number[]; start: string; end: string; purpose: string }): BookingDraft {
-  const startAt = inputToIso(values.start), endAt = inputToIso(values.end)
+export function bookingPayload(values: { resourceId: string; scope: 'machine' | 'gpus'; gpuIndices: number[]; start: string; end: string; purpose: string; startMode?: BookingStartMode }): BookingDraft {
+  const startAt = values.startMode === 'now' ? new Date().toISOString() : inputToIso(values.start), endAt = inputToIso(values.end)
+  if (values.startMode === 'scheduled' && Date.parse(startAt) < Date.now() + 60_000) throw new Error('未来预约须至少提前 1 分钟，请调整开始时间 / Future bookings must start at least 1 minute from now')
   if (Date.parse(endAt) <= Date.parse(startAt)) throw new Error('结束时间须晚于开始时间 / End must be after start')
   if (!values.purpose.trim()) throw new Error('请填写预约用途 / Enter a purpose')
   if (values.scope === 'gpus' && !values.gpuIndices.length) throw new Error('请至少选择一张 GPU / Select at least one GPU')
-  return { resourceId: values.resourceId, scope: values.scope, gpuIndices: values.scope === 'machine' ? [] : [...values.gpuIndices].sort((a, b) => a - b), startAt, endAt, purpose: values.purpose.trim() }
+  return { resourceId: values.resourceId, scope: values.scope, gpuIndices: values.scope === 'machine' ? [] : [...values.gpuIndices].sort((a, b) => a - b), ...(values.startMode ? { startMode: values.startMode } : {}), ...(values.startMode === 'now' ? {} : { startAt }), endAt, purpose: values.purpose.trim() }
 }
 
 export function reservationIdFromSearch(search: string) {

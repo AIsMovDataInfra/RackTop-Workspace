@@ -13,6 +13,12 @@ export function currentResourceUsage(resource: Pick<Resource, 'usage'>, now = Da
   return usage
 }
 
+export function currentGpuUsage(resource: Resource, index: number, now = Date.now()) {
+  const device = resource.gpus?.find(gpu => gpu.index === index)
+  const sample = currentResourceUsage(resource, now).gpus.find(gpu => device?.id ? gpu.id === device.id : gpu.index === index)
+  return { state: sample?.state ?? 'unknown', users: sample?.state === 'busy' ? [...new Set(sample.users.map(user => user.trim()).filter(Boolean))] : [] }
+}
+
 export function currentGpuRestriction(resource: Resource, start: string, indices?: number[], now = Date.now()): 'GPU_BUSY' | 'GPU_USAGE_UNKNOWN' | null {
   if (!resource.gpuCount || Date.parse(start) > now) return null
   const usage = currentResourceUsage(resource, now)

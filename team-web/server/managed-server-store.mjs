@@ -178,7 +178,7 @@ export function createManagedServerStore({ dbPath, now = Date.now, serverCredent
     close() { db.close(); },
     authorizeTelemetry(id, user, serverVersion) {
       return transaction(() => {
-        const row = rowFor(id, user, true);
+        const row = rowFor(id, user);
         version({ version: serverVersion }, row);
         if (!row.enabled) throw new ApiError(409, 'SERVER_DISABLED', '服务器已停用，不能上报遥测');
         return { id: row.id, company: row.company, name: row.name, version: row.version, enabled: true };
@@ -251,7 +251,7 @@ export function createManagedServerStore({ dbPath, now = Date.now, serverCredent
         if (connectionKey(previousConnection) !== connectionKey(data)) {
           // A reused directory id must not grant the new target access to the
           // old target's GPUs. Preserve resources and all historical bookings.
-          for (const table of ['managed_resource_bindings', 'resource_usage']) {
+          for (const table of ['managed_resource_bindings', 'resource_usage', 'resource_usage_sources']) {
             if (db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table)) {
               db.prepare(`DELETE FROM ${table} WHERE managed_server_id=?`).run(id);
             }

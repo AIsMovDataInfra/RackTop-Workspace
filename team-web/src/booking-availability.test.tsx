@@ -39,6 +39,7 @@ it('blocks an immediate occupied booking even on forced form submit but permits 
   await mount(sample(['busy', 'busy']))
   expect(submitButton().disabled).toBe(true)
   await submit(); expect(api.reserve).not.toHaveBeenCalled()
+  await act(async () => [...container.querySelectorAll('button')].find(button => button.textContent === '预约未来时段')!.click())
   enter('[aria-label="开始时间"]', '2030-09-09T11:00')
   expect(submitButton().disabled).toBe(false)
   await submit(); expect(api.reserve).toHaveBeenCalledWith(expect.objectContaining({ startAt: '2030-09-09T03:00:00.000Z', scope: 'machine' }))

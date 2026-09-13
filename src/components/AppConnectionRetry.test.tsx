@@ -105,6 +105,28 @@ describe('failed SSH connection retry scheduling', () => {
     await act(async () => { refresh?.click(); await Promise.resolve() })
     expect(collect).toHaveBeenCalledTimes(2)
   })
+
+  it('samples authorized team connections every thirty seconds with a 120-second background setting, while preserving failed-SSH cooldown', async () => {
+    const settings = await api.getSettings()
+    vi.spyOn(api, 'getSettings').mockResolvedValue({ ...settings, backgroundSamplingIntervalSeconds: 120 })
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(true)
+    const managed = { accountId: 'member', company: 'A公司', remoteId: 'cloud', available: true, reason: null, version: 1 }
+    const { collect, snapshot } = await mount(managed, undefined, { servers: server => [{ ...server, samplingIntervalSeconds: 120 }] })
+    expect(collect).toHaveBeenCalledOnce()
+    now += 30_000
+    await tick(FOREGROUND_STATUS_INTERVAL_MS)
+    expect(collect).toHaveBeenCalledOnce()
+    now += CONNECTION_RETRY_DELAY_MS - 30_000
+    collect.mockResolvedValue({ ...snapshot, gpus: [], processes: [] })
+    await tick(FOREGROUND_STATUS_INTERVAL_MS)
+    expect(collect).toHaveBeenCalledTimes(2)
+    now += 29_999
+    await tick(FOREGROUND_STATUS_INTERVAL_MS)
+    expect(collect).toHaveBeenCalledTimes(2)
+    now += 1
+    await tick(FOREGROUND_STATUS_INTERVAL_MS)
+    expect(collect).toHaveBeenCalledTimes(3)
+  })
 })
 
 describe('managed server authorization changes', () => {

@@ -32,7 +32,7 @@ describe('reservation interactions', () => {
     const reserve = vi.spyOn(api, 'reserve').mockResolvedValue({ reservation })
     const cpu: Resource = { ...resource, gpuCount: 0, gpuModel: '', usage: { state: 'busy', observedAt: new Date().toISOString(), gpus: [] } }
     vi.mocked(api.resources).mockResolvedValue({ resources: [cpu] })
-    await act(async () => root.render(<ReservationDialog resource={cpu} initialGpu={3} start="2030-09-09T10:00" end="2030-09-09T11:00" t={t} locale="zh-CN" onClose={vi.fn()} onSaved={vi.fn()} />))
+    await act(async () => root.render(<ReservationDialog initialMode="scheduled" resource={cpu} initialGpu={3} start="2030-09-09T10:00" end="2030-09-09T11:00" t={t} locale="zh-CN" onClose={vi.fn()} onSaved={vi.fn()} />))
     expect(container.querySelector('.resource-usage-state')?.textContent).toBe('被占用')
     expect(container.textContent).toContain('匿名用户')
     expect(container.querySelector('input[value="gpus"]')).toBeNull()
@@ -45,13 +45,13 @@ describe('reservation interactions', () => {
   it('keeps the full draft when a 409 is returned and shows the conflicting member and slot', async () => {
     const reserve = vi.spyOn(api, 'reserve').mockRejectedValue(new ApiError('GPU 1 已被预约', 409, 'CONFLICT', [reservation]))
     const onSaved = vi.fn()
-    await act(async () => root.render(<ReservationDialog resource={resource} initialGpu={1} start="2030-09-09T10:00" end="2030-09-09T11:00" t={t} locale="zh-CN" onClose={vi.fn()} onSaved={onSaved} />))
+    await act(async () => root.render(<ReservationDialog initialMode="scheduled" resource={resource} initialGpu={1} start="2030-09-09T10:00" end="2030-09-09T11:00" t={t} locale="zh-CN" onClose={vi.fn()} onSaved={onSaved} />))
     enter('textarea', '我自己的新训练任务')
     await submit()
-    expect(reserve).toHaveBeenCalledWith({ resourceId: resource.id, scope: 'gpus', gpuIndices: [1], startAt: '2030-09-09T02:00:00.000Z', endAt: '2030-09-09T03:00:00.000Z', purpose: '我自己的新训练任务', requestId: expect.any(String) })
+    expect(reserve).toHaveBeenCalledWith({ resourceId: resource.id, scope: 'gpus', gpuIndices: [1], startAt: '2030-09-09T02:00:00.000Z', endAt: '2030-09-09T03:00:00.000Z', purpose: '我自己的新训练任务', startMode: 'scheduled', requestId: expect.any(String) })
     expect(container.querySelector('textarea')!.value).toBe('我自己的新训练任务')
     expect(container.querySelector<HTMLInputElement>('[aria-label="开始时间"]')!.value).toBe('2030-09-09T10:00')
-    expect(container.querySelector<HTMLInputElement>('.gpu-picker input:checked')?.parentElement?.textContent).toBe('GPU 1')
+    expect(container.querySelector<HTMLInputElement>('.gpu-picker input:checked')?.parentElement?.textContent).toContain('GPU 1')
     expect(container.querySelector('[role="alert"]')?.textContent).toContain('其他成员')
     expect(container.querySelector('[role="alert"]')?.textContent).toContain('输入已保留')
     expect(onSaved).not.toHaveBeenCalled()
@@ -60,7 +60,7 @@ describe('reservation interactions', () => {
     const reserve = vi.spyOn(api, 'reserve').mockRejectedValue(new TypeError('Network error'))
     const synced: Resource = { ...resource, inventoryVersion: 4, inventoryState: 'synced', gpuCount: 1, gpus: [{ id: 'gpu-stable', uuid: 'GPU-physical', index: 7, model: 'A100', memoryTotalMb: 81920 }] }
     vi.mocked(api.resources).mockResolvedValue({ resources: [synced] })
-    await act(async () => root.render(<ReservationDialog resource={synced} initialGpu={7} start="2030-09-09T10:00" end="2030-09-09T11:00" t={t} locale="zh-CN" onClose={vi.fn()} onSaved={vi.fn()} />))
+    await act(async () => root.render(<ReservationDialog initialMode="scheduled" resource={synced} initialGpu={7} start="2030-09-09T10:00" end="2030-09-09T11:00" t={t} locale="zh-CN" onClose={vi.fn()} onSaved={vi.fn()} />))
     enter('textarea', '稳定 GPU 预约')
     await submit(); await submit()
     const first = reserve.mock.calls[0][0], second = reserve.mock.calls[1][0]
@@ -72,7 +72,7 @@ describe('reservation interactions', () => {
   it('prevents new bookings while the synchronized GPU inventory requires review', async () => {
     const reserve = vi.spyOn(api, 'reserve')
     vi.mocked(api.resources).mockResolvedValue({ resources: [{ ...resource, inventoryState: 'conflict', inventoryVersion: 2 }] })
-    await act(async () => root.render(<ReservationDialog resource={{ ...resource, inventoryState: 'conflict', inventoryVersion: 2 }} start="2030-09-09T10:00" end="2030-09-09T11:00" t={t} locale="zh-CN" onClose={vi.fn()} onSaved={vi.fn()} />))
+    await act(async () => root.render(<ReservationDialog initialMode="scheduled" resource={{ ...resource, inventoryState: 'conflict', inventoryVersion: 2 }} start="2030-09-09T10:00" end="2030-09-09T11:00" t={t} locale="zh-CN" onClose={vi.fn()} onSaved={vi.fn()} />))
     enter('textarea', '无法提交'); await submit()
     expect(reserve).not.toHaveBeenCalled()
     expect(container.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled).toBe(true)
@@ -112,7 +112,7 @@ describe('reservation interactions', () => {
     expect(container.querySelector('nav')?.textContent).not.toContain('资源管理')
     expect(container.querySelector('.resource-usage-state')?.textContent).toBe('未知')
     expect(container.textContent).toContain('预约不会自动启动或停止任务')
-    await click('选择时段')
+    await act(async () => container.querySelector<HTMLButtonElement>('.resource-card > header > button')!.click())
     expect(container.querySelector('[role="dialog"]')?.contains(document.activeElement)).toBe(true)
     act(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
     expect(container.querySelector('[role="dialog"]')).toBeNull()

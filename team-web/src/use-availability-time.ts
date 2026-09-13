@@ -10,7 +10,7 @@ export function useAvailabilityTime(resource: Resource, start: string) {
       window.clearTimeout(timer)
       const current = Date.now()
       setNow(current)
-      const deadlines = [Date.parse(start), Date.parse(resource.usage?.observedAt || '') + USAGE_FRESHNESS_MS].filter(value => Number.isFinite(value) && value > current)
+      const deadlines = [Date.parse(start) - 60_000, Date.parse(start), Date.parse(resource.usage?.observedAt || '') + USAGE_FRESHNESS_MS].filter(value => Number.isFinite(value) && value > current)
       if (deadlines.length) timer = window.setTimeout(refresh, Math.min(Math.min(...deadlines) - current + 1, 2_147_483_647))
     }
     refresh()

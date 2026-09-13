@@ -47,16 +47,16 @@ async function fixture(t, options = {}) {
     const result = await call('/api/servers', { method: 'POST', browser: admin, body: { company: 'A公司', name: 'Synthetic GPU', host: 'sensitive-host.example.test', port: 22, username: 'sensitive-ssh-user', ...extra } });
     assert.equal(result.status, 201, result.text); return result.body.server;
   };
-  return { app, call, admin, adminDevice, add, create, dbPath };
+  return { app, call, admin, adminDevice, add, create, dbPath, deviceLogin };
 }
 
-test('telemetry route requires device administrator and live company membership; browser, member and cross-company requests cannot upload', async t => {
+test('telemetry route requires live device and company permissions; member cannot create the first binding', async t => {
   const { call, admin, adminDevice, add, create } = await fixture(t);
   const reader = await add('reader'), maintainer = await add('maintainer', 'A公司', 'admin'), outsider = await add('outsider', 'B公司', 'admin');
   const server = await create({ memberIds: [reader.member.id] }), path = `/api/servers/${server.id}/telemetry`;
   for (const options of [{}, { browser: admin }, { device: reader.device }, { device: outsider.device }]) {
     const result = await call(path, { method: 'POST', body: body(), ...options });
-    assert.ok([401, 403, 404].includes(result.status), result.text);
+    assert.ok([401, 403, 404, 409].includes(result.status), result.text);
   }
   for (const query of ['?schema=2', '?company=A', '?other=1']) assert.equal((await call(path + query, { method: 'POST', device: adminDevice, body: body() })).status, 422);
   const missingScope = await call(path, { method: 'POST', body: body(), headers: { authorization: `Bearer ${adminDevice.token}` } });
@@ -67,6 +67,67 @@ test('telemetry route requires device administrator and live company membership;
   const resources = await call('/api/resources', { device: reader.device });
   assert.equal(resources.body.resources[0].id, valid.body.resource.id);
   assert.deepEqual((await call('/api/resources', { device: outsider.device })).body.resources, []);
+  const memberUpload = await call(path, { method: 'POST', device: reader.device, body: body({ observedAt: NOW + 1 }) });
+  assert.equal(memberUpload.status, 200, memberUpload.text);
+  assert.equal(memberUpload.body.resource.id, valid.body.resource.id);
+  for (const secret of ['tokenHash', 'token_hash', 'source_id', 'sourceId', 'reporter_id']) assert.equal(memberUpload.text.includes(secret), false);
+  for (const extra of [{ sourceId: 'self-selected-device' }, { reporterId: reader.member.id }, { tokenHash: 'synthetic' }]) {
+    assert.equal((await call(path, { method: 'POST', device: reader.device, body: body(extra) })).status, 422);
+  }
+});
+
+test('two authenticated device sessions of one directory retain independent reports and logout removes only that source', async t => {
+  let clock = NOW;
+  const { call, adminDevice, deviceLogin, create, dbPath } = await fixture(t, { now: () => clock });
+  const second = await deviceLogin('admin'), server = await create(), path = `/api/servers/${server.id}/telemetry`;
+  const idle = body({ observedAt: NOW + 60_000 });
+  Object.assign(idle.gpus[0], { hasProcesses: false, users: [], utilization: 0, memoryUsedMb: 0 });
+  const first = await call(path, { method: 'POST', device: adminDevice, body: idle });
+  assert.equal(first.status, 200, first.text);
+  clock += 10_000;
+  const busy = await call(path, { method: 'POST', device: second, body: body({ observedAt: clock }) });
+  assert.equal(busy.status, 200, busy.text); assert.equal(busy.body.resource.usage.state, 'busy');
+  const db = new DatabaseSync(dbPath);
+  try {
+    assert.equal(db.prepare('SELECT COUNT(DISTINCT source_id) AS n FROM resource_usage_sources').get().n, 2);
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM resource_usage').get().n, 0);
+  } finally { db.close(); }
+  const booking = { resourceId: first.body.resource.id, scope: 'machine', gpuIds: [], inventoryVersion: 1,
+    startMode: 'now', endAt: new Date(clock + 60_000).toISOString(), purpose: 'Synthetic now' };
+  const denied = await call('/api/reservations', { method: 'POST', device: adminDevice, body: booking });
+  assert.equal(denied.status, 409); assert.equal(denied.body.error.code, 'GPU_BUSY');
+  assert.equal((await call('/api/auth/device-logout', { method: 'POST', device: second, body: {} })).status, 200);
+  assert.equal((await call('/api/resources', { device: adminDevice })).body.resources[0].usage.state, 'free');
+  const accepted = await call('/api/reservations', { method: 'POST', device: adminDevice, body: { ...booking, requestId: 'same-now-request' } });
+  assert.equal(accepted.status, 201, accepted.text); assert.equal(accepted.body.reservation.startAt, new Date(clock).toISOString());
+  clock += 1000;
+  const repeated = await call('/api/reservations', { method: 'POST', device: adminDevice, body: { ...booking, requestId: 'same-now-request' } });
+  assert.equal(repeated.body.reservation.id, accepted.body.reservation.id); assert.equal(repeated.body.reservation.startAt, accepted.body.reservation.startAt);
+});
+
+test('member reports cannot bind aliases or mutate inventory and revoked grants stop both writes and read projection', async t => {
+  let clock = NOW;
+  const { call, admin, adminDevice, add, create, dbPath } = await fixture(t, { now: () => clock });
+  const reader = await add('reporting-reader'), server = await create({ memberIds: [reader.member.id] });
+  const path = `/api/servers/${server.id}/telemetry`;
+  const first = await call(path, { method: 'POST', device: adminDevice, body: body() });
+  assert.equal(first.status, 200, first.text);
+  const alias = await create({ name: 'Unbound alias', username: 'second-synthetic-login', memberIds: [reader.member.id] });
+  const noBinding = await call(`/api/servers/${alias.id}/telemetry`, { method: 'POST', device: reader.device, body: body() });
+  assert.equal(noBinding.status, 409); assert.equal(noBinding.body.error.code, 'TELEMETRY_BINDING_REQUIRED');
+  const changed = body({ observedAt: ++clock }); changed.gpus[0].uuid = 'GPU-00000000-0000-4000-8000-000000000099';
+  assert.equal((await call(path, { method: 'POST', device: reader.device, body: changed })).status, 409);
+  const member = await call(path, { method: 'POST', device: reader.device, body: body({ observedAt: ++clock }) });
+  assert.equal(member.status, 200, member.text);
+  const db = new DatabaseSync(dbPath);
+  let before;
+  try { before = db.prepare('SELECT * FROM resource_inventory').all(); } finally { db.close(); }
+  assert.equal((await call(`/api/servers/${server.id}/grants`, { method: 'PUT', browser: admin, body: { version: 1, memberIds: [] } })).status, 200);
+  const denied = await call(path, { method: 'POST', device: reader.device, body: body({ serverVersion: 2, observedAt: ++clock }) });
+  assert.equal(denied.status, 404);
+  const check = new DatabaseSync(dbPath);
+  try { assert.deepEqual(check.prepare('SELECT * FROM resource_inventory').all(), before); } finally { check.close(); }
+  assert.equal((await call('/api/resources', { device: adminDevice })).body.resources[0].usage.state, 'unknown', 'grant update changes directory version and cannot reuse old observations');
 });
 
 test('directory version changes and disabled nodes invalidate cached usage and reject stale uploads', async t => {
@@ -108,7 +169,7 @@ test('HTTP resource and reservation access requires current SSH grants without s
   const synced = await call(`/api/servers/${server.id}/telemetry`, { method: 'POST', device: adminDevice, body: body() });
   const resource = synced.body.resource;
   const draft = { resourceId: resource.id, scope: 'gpus', gpuIds: [resource.gpus[0].id], inventoryVersion: resource.inventoryVersion,
-    startAt: new Date(NOW + 60_000).toISOString(), endAt: new Date(NOW + 3_600_000).toISOString(), purpose: 'Synthetic booked task' };
+    startAt: new Date(NOW + 120_000).toISOString(), endAt: new Date(NOW + 3_600_000).toISOString(), purpose: 'Synthetic booked task' };
   const booked = await call('/api/reservations', { method: 'POST', device: reader.device, body: draft });
   assert.equal(booked.status, 201, booked.text); const reservation = booked.body.reservation;
   for (const device of [peer.device, outside.device]) {
@@ -152,7 +213,7 @@ test('directory identity changes atomically detach only that hardware binding; m
     for (const change of [{ name: 'Renamed safely' }, { password: 'synthetic rotated password' }]) {
       await patch(change);
       assert.equal(db.prepare('SELECT COUNT(*) AS n FROM managed_resource_bindings').get().n, 2);
-      assert.equal(db.prepare('SELECT COUNT(*) AS n FROM resource_usage').get().n, 2);
+      assert.equal(db.prepare('SELECT COUNT(*) AS n FROM resource_usage_sources').get().n, 2);
     }
     const grants = await call(`/api/servers/${server.id}/grants`, { method: 'PUT', browser: admin, body: { version: server.version, memberIds: [] } });
     assert.equal(grants.status, 200, grants.text); server = grants.body.server;
@@ -165,19 +226,19 @@ test('directory identity changes atomically detach only that hardware binding; m
       { jump: { host: 'jump.example.test', port: 2222, username: 'new-bridge' } }, { jump: null }]) {
       await patch(change);
       assert.equal(db.prepare('SELECT 1 FROM managed_resource_bindings WHERE managed_server_id=?').get(server.id), undefined);
-      assert.equal(db.prepare('SELECT 1 FROM resource_usage WHERE managed_server_id=?').get(server.id), undefined);
+      assert.equal(db.prepare('SELECT 1 FROM resource_usage_sources WHERE managed_server_id=?').get(server.id), undefined);
       assert.equal(db.prepare('SELECT COUNT(*) AS n FROM managed_resource_bindings WHERE managed_server_id=?').get(alias.id).n, 1);
       assert.equal(db.prepare('SELECT COUNT(*) AS n FROM resources').get().n, 1);
       assert.equal((await sync(server, ++observation)).id, resource.id, 'same complete hardware can be verified anew');
     }
     assert.equal(db.prepare('SELECT gpus FROM resource_inventory WHERE resource_id=?').get(resource.id).gpus, inventoryBefore.gpus);
     const beforeBindings = db.prepare('SELECT * FROM managed_resource_bindings ORDER BY managed_server_id').all();
-    const beforeUsage = db.prepare('SELECT * FROM resource_usage ORDER BY managed_server_id').all();
+    const beforeUsage = db.prepare('SELECT * FROM resource_usage_sources ORDER BY managed_server_id').all();
     db.exec("CREATE TRIGGER fail_endpoint_audit BEFORE INSERT ON managed_server_audit BEGIN SELECT RAISE(ABORT,'synthetic rollback'); END");
     const failed = await call(`/api/servers/${server.id}`, { method: 'PATCH', browser: admin, body: { version: server.version, port: 2022 } });
     assert.equal(failed.status, 500);
     assert.deepEqual(db.prepare('SELECT * FROM managed_resource_bindings ORDER BY managed_server_id').all(), beforeBindings);
-    assert.deepEqual(db.prepare('SELECT * FROM resource_usage ORDER BY managed_server_id').all(), beforeUsage);
+    assert.deepEqual(db.prepare('SELECT * FROM resource_usage_sources ORDER BY managed_server_id').all(), beforeUsage);
     assert.equal(db.prepare('SELECT version FROM managed_servers WHERE id=?').get(server.id).version, server.version);
   } finally { db.close(); }
 });

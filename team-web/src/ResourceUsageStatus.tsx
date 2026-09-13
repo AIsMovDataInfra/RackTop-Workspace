@@ -9,7 +9,7 @@ function usageText(state: UsageState, t: Translate) {
 }
 function systemUsers(users: string[]) { return [...new Set(users.map(user => user.trim()).filter(Boolean))] }
 
-export function ResourceUsageStatus({ resource, locale, t }: { resource: Resource; locale: Locale; t: Translate }) {
+export function ResourceUsageStatus({ resource, locale, t, summaryOnly = false }: { resource: Resource; locale: Locale; t: Translate; summaryOnly?: boolean }) {
   const [now, setNow] = useState(Date.now)
   useEffect(() => {
     const refresh = () => setNow(Date.now())
@@ -29,7 +29,7 @@ export function ResourceUsageStatus({ resource, locale, t }: { resource: Resourc
   return <section className={`resource-usage resource-usage--${usage.state}`} aria-label={t('当前实际占用', 'Current actual usage')}>
     <div className="resource-usage-heading"><strong>{t('当前实际占用', 'Current actual usage')}</strong><span className="resource-usage-state">{usageText(usage.state, t)}</span></div>
     {usage.state === 'busy' && <p>{t('系统用户', 'System users')}：{users.length ? users.join('、') : t('匿名用户', 'Anonymous user')}</p>}
-    {usage.gpus.length > 0 && <ul>{usage.gpus.map(gpu => <li key={gpu.id || gpu.uuid || gpu.index}>
+    {!summaryOnly && usage.gpus.length > 0 && <ul>{usage.gpus.map(gpu => <li key={gpu.id || gpu.uuid || gpu.index}>
       <span>GPU {gpu.index}</span><strong className={`usage-text--${gpu.state}`}>{usageText(gpu.state, t)}</strong>
       {gpu.state === 'busy' && <span>{systemUsers(gpu.users).length ? systemUsers(gpu.users).join('、') : t('匿名用户', 'Anonymous user')}</span>}
       <small>{gpu.utilization != null ? `${t('利用率', 'Utilization')} ${gpu.utilization.toLocaleString(locale, { maximumFractionDigits: 1 })}%` : ''}{gpu.utilization != null && gpu.memoryUsedMb != null ? ' · ' : ''}{gpu.memoryUsedMb != null ? `${t('已用显存', 'Memory used')} ${(gpu.memoryUsedMb / 1024).toLocaleString(locale, { maximumFractionDigits: 1 })} GiB` : ''}</small>

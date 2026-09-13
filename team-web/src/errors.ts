@@ -26,6 +26,7 @@ export function errorText(error: unknown, t: Translate) {
       INVENTORY_CONFLICT: ['GPU 清单发生变化，请联系管理员核验后再预约。', 'The GPU inventory changed. Ask an administrator to review it before booking.'],
       GPU_BUSY: ['所选 GPU 当前被占用，请选择其他 GPU 或未来时段。预约不会停止现有任务。', 'The selected GPUs are occupied. Choose other GPUs or a future slot. Reservations do not stop running jobs.'],
       GPU_USAGE_UNKNOWN: ['所选 GPU 当前占用未知，请刷新确认，或选择未来时段。', 'Current usage of the selected GPUs is unknown. Refresh to confirm, or choose a future slot.'],
+      SCHEDULE_TOO_SOON: ['未来预约须至少提前 1 分钟，请调整开始时间或选择“现在使用”。', 'Future bookings must start at least 1 minute from now. Adjust the start or choose Use now.'],
       RESOURCE_UNAVAILABLE: ['此资源已停用或当前账号不再有预约权限。输入已保留，请联系管理员确认。', 'This resource is disabled or no longer available to your account. Your input is preserved; check with your administrator.'],
       RESOURCE_HAS_RESERVATIONS: ['请先与预约人协调并取消或结束现有预约，再确认新的 GPU 清单。', 'Coordinate with reservation owners and cancel or finish active bookings before accepting the new GPU inventory.'],
     }

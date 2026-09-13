@@ -464,7 +464,7 @@ function App() {
     const stillCurrent = () => managedGeneration === (managedGenerations.current.get(serverId) ?? 0)
     if (quiet && serverConfig) {
       const fastStatusView = mainView === 'fleet' || (mainView === 'server' && selectedTab === 'overview' && selectedServerId === serverId)
-      const refreshIntervalMs = statusRefreshIntervalMs(fastStatusView, document.hidden, serverConfig.samplingIntervalSeconds, settings?.backgroundSamplingIntervalSeconds ?? 15)
+      const refreshIntervalMs = statusRefreshIntervalMs(fastStatusView, document.hidden, serverConfig.samplingIntervalSeconds, settings?.backgroundSamplingIntervalSeconds ?? 15, Boolean(serverConfig.managed))
       if (nowMs - (lastAttemptAt.current[serverId] ?? 0) < refreshIntervalMs || shouldDeferConnection(nextRetryAt.current[serverId], nowMs)) return
     }
     lastAttemptAt.current[serverId] = nowMs

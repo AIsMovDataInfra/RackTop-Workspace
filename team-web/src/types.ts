@@ -18,7 +18,8 @@ export interface Session {
   user: User | null; csrfToken: string | null; authMode: 'demo' | 'feishu' | 'account'; feishuConfigured: boolean
   demoUsers?: User[]; notifications: { configured: boolean }; timezone: 'Asia/Shanghai'
 }
-export interface BookingDraft { resourceId: string; scope: 'machine' | 'gpus'; gpuIndices: number[]; startAt: string; endAt: string; purpose: string; gpuIds?: string[]; inventoryVersion?: number; requestId?: string }
+export type BookingStartMode = 'now' | 'scheduled'
+export interface BookingDraft { resourceId: string; scope: 'machine' | 'gpus'; gpuIndices: number[]; startMode?: BookingStartMode; startAt?: string; endAt: string; purpose: string; gpuIds?: string[]; inventoryVersion?: number; requestId?: string }
 export interface ResourceDraft { company?: Company | ''; companyVersion?: number; cluster: string; name: string; gpuModel: string; gpuCount: number; notes: string; enabled?: boolean }
 export type EquipmentStatus = 'available' | 'in_use' | 'maintenance' | 'retired'
 export interface EquipmentStats {

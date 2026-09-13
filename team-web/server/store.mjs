@@ -2,6 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
+import { deviceTelemetrySource } from './telemetry-source.mjs';
 
 const DAY = 86_400_000;
 const companies = new Set(['A公司', 'B公司', 'C公司', '西浦']);
@@ -130,6 +131,16 @@ export function createStore({ dbPath, now = Date.now, notificationsConfigured = 
       status TEXT NOT NULL, inventory_complete INTEGER NOT NULL, process_query_ok INTEGER NOT NULL,
       gpu_usage_valid INTEGER NOT NULL, gpus TEXT NOT NULL,
       PRIMARY KEY(resource_id,managed_server_id)
+    );
+    -- Keep legacy observations unchanged. They have no device identity and
+    -- cannot safely participate in current multi-device availability.
+    CREATE TABLE IF NOT EXISTS resource_usage_sources (
+      resource_id TEXT NOT NULL REFERENCES resources(id), managed_server_id TEXT NOT NULL,
+      source_id TEXT NOT NULL, reporter_id TEXT NOT NULL,
+      server_version INTEGER NOT NULL, observed_at INTEGER NOT NULL, received_at INTEGER NOT NULL,
+      status TEXT NOT NULL, inventory_complete INTEGER NOT NULL, process_query_ok INTEGER NOT NULL,
+      gpu_usage_valid INTEGER NOT NULL, gpus TEXT NOT NULL,
+      PRIMARY KEY(resource_id,managed_server_id,source_id)
     );
   `);
   const reservationColumns = new Set(db.prepare('PRAGMA table_info(reservations)').all().map(column => column.name));
@@ -303,14 +314,21 @@ export function createStore({ dbPath, now = Date.now, notificationsConfigured = 
       if (scope === 'machine' && gpuIndices.length) invalid('整机预约不应指定 GPU 编号');
       if (scope === 'gpus' && (!resource.gpuCount || !gpuIndices.length)) invalid('此资源需要选择至少一张有效 GPU；CPU 资源只能预约整机');
     }
-    const start = parseDate(input.startAt, '开始时间'), end = parseDate(input.endAt, '结束时间');
     const oldStart = original ? Date.parse(original.startAt) : null;
+    if (own(input, 'startMode') && !['now', 'scheduled'].includes(input.startMode)) invalid('请选择现在使用或未来预约');
+    const start = input.startMode === 'now' ? (original && oldStart <= timestamp ? oldStart : timestamp) : parseDate(input.startAt, '开始时间');
+    const end = parseDate(input.endAt, '结束时间');
+    if (input.startMode === 'scheduled' && start < timestamp + 60_000) throw new ApiError(422, 'SCHEDULE_TOO_SOON', '未来预约请至少提前一分钟；立即使用请选择现在使用');
     if (original && oldStart <= timestamp && start !== oldStart) invalid('已经开始的预约不能修改开始时间');
     if ((!original || oldStart > timestamp) && start < timestamp - 60_000) invalid('开始时间不能早于当前时间');
     if (end <= start || end <= timestamp) invalid('结束时间必须晚于开始时间及当前时间');
     if (end - start > 7 * DAY) invalid('单次预约最长 7 天');
     if (start > timestamp + 90 * DAY || end > timestamp + 90 * DAY) invalid('只能预约未来 90 天内的时间');
-    return { scope, gpuIndices, gpuIds, inventoryVersion, start, end, purpose: text(input.purpose, '用途', 500) };
+    // Old clients supplied only a timestamp. Treat their next-minute requests
+    // as immediate availability checks; retain explicit later legacy schedules.
+    const checkLiveUsage = input.startMode === 'now' || start <= timestamp
+      || (!input.startMode && start <= timestamp + 60_000);
+    return { scope, gpuIndices, gpuIds, inventoryVersion, start, end, checkLiveUsage, purpose: text(input.purpose, '用途', 500) };
   }
   function checkConflicts(resourceId, booking, excludedId = '') {
     const existing = db.prepare(`${selectReservation} WHERE r.resource_id=? AND r.status='confirmed' AND r.start_at < ? AND r.end_at > ? AND r.id != ? ORDER BY r.start_at`).all(resourceId, booking.end, booking.start, excludedId);
@@ -318,7 +336,7 @@ export function createStore({ dbPath, now = Date.now, notificationsConfigured = 
     if (conflicts.length) throw new ApiError(409, 'RESERVATION_CONFLICT', '所选资源在这个时间段已有预约，请调整时间或 GPU', conflicts.slice(0, 50));
   }
   function checkCurrentUsage(resource, booking, timestamp, original) {
-    if (!enforceCompanies || !resource.gpuCount || booking.start > timestamp) return;
+    if (!enforceCompanies || !resource.gpuCount || !booking.checkLiveUsage) return;
     const identities = value => value.scope === 'machine' ? resource.gpus.map(gpu => gpu.id) : value.gpuIds;
     let selected = identities(booking);
     if (original && Date.parse(original.startAt) <= timestamp && timestamp < Date.parse(original.endAt)) {
@@ -387,21 +405,40 @@ export function createStore({ dbPath, now = Date.now, notificationsConfigured = 
     db.prepare("UPDATE resource_inventory SET gpus=?,pending_gpus=NULL,state='synced',revision=revision+1 WHERE resource_id=?").run(JSON.stringify(gpus), id);
     db.prepare('UPDATE resources SET gpu_model=?,gpu_count=?,updated_at=? WHERE id=?').run([...new Set(gpus.map(gpu => gpu.model))].join(' / ').slice(0, 100), gpus.length, timestamp, id);
   }
+  function liveTelemetrySources(timestamp) {
+    const tables = ['account_sessions', 'account_users', 'account_user_companies', 'managed_servers', 'managed_server_grants'];
+    if (tables.some(name => !db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name))) return new Map();
+    return new Map(db.prepare(`SELECT s.token_hash,s.user_id,s.active_company,a.role,a.is_super_admin
+      FROM account_sessions s JOIN account_users a ON a.id=s.user_id
+      WHERE s.kind='device' AND s.expires_at>? AND a.deleted_at IS NULL AND a.role IN ('admin','member')`)
+      .all(timestamp).map(row => [deviceTelemetrySource(row.token_hash), row]));
+  }
+  function mayReport(source, managed) {
+    if (!source || !managed || !managed.enabled) return false;
+    if (!source.is_super_admin && (source.active_company !== managed.company
+      || !db.prepare('SELECT 1 FROM account_user_companies WHERE user_id=? AND company=?').get(source.user_id, managed.company))) return false;
+    return source.role === 'admin' || Boolean(db.prepare('SELECT 1 FROM managed_server_grants WHERE server_id=? AND user_id=?').get(managed.id, source.user_id));
+  }
   function usageView(resource, inventory, gpus) {
-    const reports = db.prepare('SELECT * FROM resource_usage WHERE resource_id=? ORDER BY observed_at DESC,received_at DESC,managed_server_id').all(resource.id);
+    const reports = db.prepare('SELECT * FROM resource_usage_sources WHERE resource_id=? ORDER BY received_at DESC,observed_at DESC,managed_server_id,source_id').all(resource.id);
     const timestamp = now();
+    const sources = reports.length ? liveTelemetrySources(timestamp) : new Map();
     // The catalog may change the SSH destination or disable it after a report.
     // Stored observations from that previous directory version are not current.
-    const hasDirectory = reports.length && db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='managed_servers'").get();
     const fresh = reports.filter(report => {
       if (timestamp - Math.min(report.observed_at, report.received_at) >= 90_000 || report.status !== 'online') return false;
-      if (hasDirectory && !db.prepare('SELECT 1 FROM managed_servers WHERE id=? AND company=? AND version=? AND enabled=1').get(report.managed_server_id, resource.company, report.server_version)) return false;
-      return true;
+      const source = sources.get(report.source_id);
+      if (!source || source.user_id !== report.reporter_id) return false;
+      const managed = db.prepare(`SELECT s.id,s.company,s.enabled FROM managed_servers s
+        JOIN managed_resource_bindings b ON b.managed_server_id=s.id
+        WHERE s.id=? AND s.company=? AND s.version=? AND b.resource_id=?`).get(report.managed_server_id, resource.company, report.server_version, resource.id);
+      return mayReport(source, managed);
     }).map(report => ({ ...report, gpus: JSON.parse(report.gpus) }));
     const selectedTimes = [];
     const devices = gpus.map(gpu => {
       const empty = { id: gpu.id, uuid: gpu.uuid, index: gpu.index, state: 'unknown', users: [], utilization: null, memoryUsedMb: null };
       if (inventory?.state === 'conflict') return empty;
+      let idle;
       for (const report of fresh) {
         const observed = report.gpus.find(value => value.uuid === gpu.uuid);
         if (!observed) continue;
@@ -409,9 +446,13 @@ export function createStore({ dbPath, now = Date.now, notificationsConfigured = 
         const free = report.inventory_complete && sameHardware(gpus, report.gpus) && report.process_query_ok && report.gpu_usage_valid
           && observed.utilization === 0 && observed.memoryUsedMb === 0 && !observed.hasProcesses && observed.users.length === 0;
         if (!busy && !free) continue;
-        selectedTimes.push(Math.min(report.observed_at, report.received_at));
-        return { ...empty, state: busy ? 'busy' : 'free', users: observed.users, utilization: observed.utilization, memoryUsedMb: observed.memoryUsedMb };
+        const candidate = { value: { ...empty, state: busy ? 'busy' : 'free', users: observed.users, utilization: observed.utilization, memoryUsedMb: observed.memoryUsedMb }, at: Math.min(report.observed_at, report.received_at) };
+        // Device clocks are not comparable. A valid fresh busy observation from
+        // any authorized source must win over another device's idle snapshot.
+        if (busy) { selectedTimes.push(candidate.at); return candidate.value; }
+        idle ??= candidate;
       }
+      if (idle) { selectedTimes.push(idle.at); return idle.value; }
       return empty;
     });
     return {
@@ -452,8 +493,8 @@ export function createStore({ dbPath, now = Date.now, notificationsConfigured = 
     if (input.status === 'online' && input.inventoryComplete && !gpus.length) invalid('GPU 资源必须包含完整硬件清单，不能从空清单推断 CPU');
     return { ...input, observedAt, gpus };
   }
-  function syncManagedTelemetry(input, user, managed) {
-    requireAdmin(user);
+  function syncManagedTelemetry(input, user, managed, sourceId) {
+    userIdentity(user);
     const timestamp = now(), report = telemetryFields(input, timestamp);
     // managed is server-derived metadata from authorizeTelemetry, never body data.
     if (!managed || managed.enabled !== true || managed.version !== input.serverVersion || !companies.has(managed.company)) throw new ApiError(409, 'SERVER_CHANGED', '服务器资源已变化，请刷新目录');
@@ -461,7 +502,12 @@ export function createStore({ dbPath, now = Date.now, notificationsConfigured = 
     if (enforceCompanies && !user.isSuperAdmin && user.company !== managed.company) missing('资源');
     const complete = report.status === 'online' && report.inventoryComplete && report.gpus.length > 0 && timestamp - report.observedAt < 90_000;
     const result = transaction(() => {
+      const source = typeof sourceId === 'string' && liveTelemetrySources(timestamp).get(sourceId);
+      const current = db.prepare('SELECT id,company,enabled,version FROM managed_servers WHERE id=?').get(managed.id);
+      if (!source || source.user_id !== user.id || !mayReport(source, current)) throw new ApiError(403, 'TELEMETRY_FORBIDDEN', '当前设备或 SSH 权限已变化，不能上报占用');
+      if (current.company !== managed.company || current.version !== managed.version) throw new ApiError(409, 'SERVER_CHANGED', '服务器资源已变化，请刷新目录');
       const binding = db.prepare('SELECT * FROM managed_resource_bindings WHERE managed_server_id=?').get(managed.id);
+      if (user.role !== 'admin' && !binding) throw new ApiError(409, 'TELEMETRY_BINDING_REQUIRED', '此服务器尚未绑定硬件，请由管理员连接并完成首次核验');
       // A failed first connection is not a CPU node or a new empty resource.
       if (!binding && !complete) return { resource: null };
       const claimed = new Set(report.gpus.map(gpu => db.prepare('SELECT resource_id FROM gpu_identity WHERE uuid=?').get(gpu.uuid)?.resource_id).filter(Boolean));
@@ -472,6 +518,9 @@ export function createStore({ dbPath, now = Date.now, notificationsConfigured = 
       if (resource && resource.company && resource.company !== managed.company) throw new ApiError(409, 'RESOURCE_COMPANY_CONFLICT', '该硬件已属于其他组织，不能自动转移');
       if (resource && !inventory) throw new ApiError(409, 'INVENTORY_CHANGED', '现有资源缺少稳定 GPU 清单，不能自动绑定');
       const originalGpus = inventory ? JSON.parse(inventory.gpus) : [];
+      if (user.role !== 'admin' && (!resource?.company || inventory?.state !== 'synced' || !sameHardware(originalGpus, report.gpus))) {
+        throw new ApiError(409, 'TOPOLOGY_CONFLICT', '成员只能上报已绑定且 UUID 清单完全一致的硬件占用，请由管理员核验清单');
+      }
       if (resource && !binding && (!complete || !sameHardware(originalGpus, report.gpus))) throw new ApiError(409, 'TOPOLOGY_CONFLICT', '新连接必须提供现有资源完整且完全相同的 GPU 清单');
       if (resource && !resource.company) {
         if (!user.isSuperAdmin) throw new ApiError(403, 'SUPERADMIN_REQUIRED', '未分配硬件须由超级管理员确认所属组织');
@@ -493,8 +542,8 @@ export function createStore({ dbPath, now = Date.now, notificationsConfigured = 
           .run(id, `managed:${managed.id}`, managed.id, JSON.stringify(identified), timestamp, report.observedAt, 'online');
         inventory = db.prepare('SELECT * FROM resource_inventory WHERE resource_id=?').get(id);
       }
-      const previous = db.prepare('SELECT observed_at FROM resource_usage WHERE resource_id=? AND managed_server_id=?').get(id, managed.id);
-      if (previous && report.observedAt <= previous.observed_at) return { resource: getResource(id) };
+      const previous = db.prepare('SELECT observed_at,server_version FROM resource_usage_sources WHERE resource_id=? AND managed_server_id=? AND source_id=?').get(id, managed.id, sourceId);
+      if (previous?.server_version === managed.version && report.observedAt <= previous.observed_at) return { resource: getResource(id) };
       if (binding && complete && !sameHardware(originalGpus, report.gpus)) {
         const pending = inventoryShape(report.gpus), changed = inventory.pending_gpus !== pending || inventory.state !== 'conflict';
         db.prepare("UPDATE resource_inventory SET pending_gpus=?,state='conflict',revision=revision+? WHERE resource_id=?").run(pending, changed ? 1 : 0, id);
@@ -504,7 +553,7 @@ export function createStore({ dbPath, now = Date.now, notificationsConfigured = 
       // A newer, complete observation can refresh descriptors for exactly the
       // same physical GPUs. Stable IDs keep every booking attached to its card;
       // names, ownership and a pending topology review are never overwritten.
-      if (complete && inventory?.state === 'synced' && report.observedAt > inventory.observed_at && sameHardware(originalGpus, report.gpus)) {
+      if (user.role === 'admin' && complete && inventory?.state === 'synced' && report.observedAt > inventory.observed_at && sameHardware(originalGpus, report.gpus)) {
         const descriptors = report.gpus.map(({ uuid, index, model, memoryTotalMb }) => ({ uuid, index, model, memoryTotalMb }));
         const changed = inventoryShape(originalGpus) !== inventoryShape(descriptors);
         const identified = assignGpuIdentities(id, descriptors);
@@ -513,11 +562,12 @@ export function createStore({ dbPath, now = Date.now, notificationsConfigured = 
         if (changed) db.prepare('UPDATE resources SET gpu_model=?,updated_at=? WHERE id=?')
           .run([...new Set(descriptors.map(gpu => gpu.model))].join(' / ').slice(0, 100), timestamp, id);
       }
-      db.prepare('INSERT OR IGNORE INTO managed_resource_bindings(managed_server_id,resource_id,created_at) VALUES(?,?,?)').run(managed.id, id, timestamp);
-      db.prepare(`INSERT INTO resource_usage(resource_id,managed_server_id,server_version,observed_at,received_at,status,inventory_complete,process_query_ok,gpu_usage_valid,gpus)
-        VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(resource_id,managed_server_id) DO UPDATE SET server_version=excluded.server_version,observed_at=excluded.observed_at,
+      if (user.role === 'admin') db.prepare('INSERT OR IGNORE INTO managed_resource_bindings(managed_server_id,resource_id,created_at) VALUES(?,?,?)').run(managed.id, id, timestamp);
+      db.prepare(`INSERT INTO resource_usage_sources(resource_id,managed_server_id,source_id,reporter_id,server_version,observed_at,received_at,status,inventory_complete,process_query_ok,gpu_usage_valid,gpus)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(resource_id,managed_server_id,source_id) DO UPDATE SET reporter_id=excluded.reporter_id,server_version=excluded.server_version,observed_at=excluded.observed_at,
         received_at=excluded.received_at,status=excluded.status,inventory_complete=excluded.inventory_complete,process_query_ok=excluded.process_query_ok,gpu_usage_valid=excluded.gpu_usage_valid,gpus=excluded.gpus`)
-        .run(id, managed.id, managed.version, report.observedAt, timestamp, report.status, report.inventoryComplete ? 1 : 0, report.processQueryOk ? 1 : 0, report.gpuUsageValid ? 1 : 0, JSON.stringify(report.gpus));
+        .run(id, managed.id, sourceId, user.id, managed.version, report.observedAt, timestamp, report.status, report.inventoryComplete ? 1 : 0, report.processQueryOk ? 1 : 0, report.gpuUsageValid ? 1 : 0, JSON.stringify(report.gpus));
+      db.prepare('DELETE FROM resource_usage_sources WHERE received_at < ?').run(timestamp - DAY);
       return { resource: getResource(id) };
     });
     if (result.error) throw result.error;
@@ -630,7 +680,7 @@ export function createStore({ dbPath, now = Date.now, notificationsConfigured = 
   }
   function createReservation(input, user) {
     userIdentity(user);
-    object(input, ['resourceId', 'scope', 'gpuIndices', 'gpuIds', 'inventoryVersion', 'requestId', 'startAt', 'endAt', 'purpose']);
+    object(input, ['resourceId', 'scope', 'gpuIndices', 'gpuIds', 'inventoryVersion', 'requestId', 'startMode', 'startAt', 'endAt', 'purpose']);
     const requestId = own(input, 'requestId') ? identifier(input.requestId) : null;
     const requestHash = requestId ? createHash('sha256').update(JSON.stringify(Object.keys(input).filter(key => key !== 'requestId').sort().map(key => [key, input[key]]))).digest('hex') : null;
     return transaction(() => {
@@ -655,7 +705,7 @@ export function createStore({ dbPath, now = Date.now, notificationsConfigured = 
     });
   }
   function updateReservation(id, input, user) {
-    object(input, ['version', 'startAt', 'endAt', 'purpose', 'scope', 'gpuIndices', 'gpuIds', 'inventoryVersion']);
+    object(input, ['version', 'startMode', 'startAt', 'endAt', 'purpose', 'scope', 'gpuIndices', 'gpuIds', 'inventoryVersion']);
     if (Object.keys(input).length < 2) invalid('请提供要修改的预约字段');
     return transaction(() => {
       const original = getReservation(id); checkPermission(original, user, input.version);

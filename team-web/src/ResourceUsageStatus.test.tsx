@@ -17,7 +17,7 @@ afterEach(() => { act(() => root.unmount()); container.remove(); vi.useRealTimer
 it('shows system users separately from reservation owners and keeps the future reservation action available', async () => {
   const booking: Reservation = { id: 'future', resourceId: resource.id, resourceName: resource.name, cluster: '上海', ownerName: '未来预约同学', scope: 'machine', gpuIndices: [], startAt: '2030-09-10T02:00:00Z', endAt: '2030-09-10T03:00:00Z', status: 'confirmed', createdAt: new Date(now).toISOString(), updatedAt: new Date(now).toISOString(), version: 1 }
   const reserve = vi.fn()
-  await act(async () => root.render(<ResourceCard resource={resource} reservations={[booking]} start={booking.startAt} end={booking.endAt} locale="zh-CN" t={t} complete onReserve={reserve} onDetails={vi.fn()} />))
+  await act(async () => root.render(<ResourceCard mode="scheduled" resource={resource} reservations={[booking]} start={booking.startAt} end={booking.endAt} locale="zh-CN" t={t} complete onReserve={reserve} onDetails={vi.fn()} />))
   const usage = container.querySelector('[aria-label="当前实际占用"]')!
   expect(usage.textContent).toContain('linux-worker')
   expect(usage.textContent).not.toContain('未来预约同学')
@@ -26,7 +26,7 @@ it('shows system users separately from reservation owners and keeps the future r
   const button = container.querySelector<HTMLButtonElement>('article > header > button')!
   expect(button.disabled).toBe(false)
   await act(async () => button.click())
-  expect(reserve).toHaveBeenCalledWith()
+  expect(reserve).toHaveBeenCalledWith(undefined, 'scheduled')
 })
 
 it('uses anonymous user when a busy sample has no names, then expires without a network refresh', async () => {

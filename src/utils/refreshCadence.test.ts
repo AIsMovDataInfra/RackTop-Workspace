@@ -17,6 +17,17 @@ describe('refresh cadence', () => {
     expect(statusRefreshIntervalMs(true, true, 60, 30)).toBe(60_000)
   })
 
+  it('caps managed sampling at thirty seconds in the background and outside fast status views', () => {
+    for (const hidden of [false, true]) {
+      expect(statusRefreshIntervalMs(false, hidden, 120, 120, true)).toBe(30_000)
+      expect(statusRefreshIntervalMs(false, hidden, 120, 120, false)).toBe(120_000)
+    }
+    expect(statusRefreshIntervalMs(true, true, 5, 120, true)).toBe(30_000)
+    expect(statusRefreshIntervalMs(false, false, 10, 120, true)).toBe(10_000)
+    expect(statusRefreshIntervalMs(true, false, 120, 120, true)).toBe(FOREGROUND_STATUS_INTERVAL_MS)
+    expect(shouldRecordHistory(10_000, 40_000, 120)).toBe(false)
+  })
+
   it('records the first successful snapshot', () => {
     expect(shouldRecordHistory(undefined, 10_000, 10)).toBe(true)
   })

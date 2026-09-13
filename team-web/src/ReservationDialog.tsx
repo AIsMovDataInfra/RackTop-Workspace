@@ -6,10 +6,12 @@ import { currentGpuRestriction } from './resource-usage'
 import { useAvailabilityTime } from './use-availability-time'
 import { useReservationResource } from './use-reservation-resource'
 import { ResourceUsageStatus } from './ResourceUsageStatus'
+import { GpuUsageLabel } from './GpuUsageLabel'
+import { BookingModePicker } from './BookingModePicker'
 import { Dialog } from './Dialog'
 import { errorText } from './errors'
-import { beijingInput, bookingPayload, formatTime, inputToIso } from './time'
-import type { Locale, Reservation, Resource, Translate } from './types'
+import { beijingInput, bookingPayload, formatTime, initialWindow, inputToIso } from './time'
+import type { BookingStartMode, Locale, Reservation, Resource, Translate } from './types'
 
 export function ConflictNotice({ error, locale, t }: { error: unknown; locale: Locale; t: Translate }) {
   if (!error) return null
@@ -17,15 +19,16 @@ export function ConflictNotice({ error, locale, t }: { error: unknown; locale: L
   return <div className="error" role="alert"><strong><AlertCircle size={17} />{apiError?.status === 409 ? t('预约未保存，请调整后重试', 'Not saved. Adjust the booking and retry') : t('操作未完成', 'Could not complete the request')}</strong><span>{errorText(error, t)}</span>{apiError?.conflicts.length ? <ul className="conflict-list">{apiError.conflicts.map((conflict) => <li key={conflict.id}><strong>{conflict.ownerName} · {conflict.scope === 'machine' ? t('整机', 'Whole machine') : `GPU ${conflict.gpuIndices.join(', ')}`}</strong><span>{formatTime(conflict.startAt, locale)} → {formatTime(conflict.endAt, locale)}</span><span>{conflict.purpose}</span></li>)}</ul> : null}{apiError?.status === 409 && <small>{t('输入已保留。资源可能已被其他成员预约，或此预约已在别处更新；请刷新查看最新排期。', 'Your input is preserved. Another member may have booked the slot, or this booking changed elsewhere. Refresh to see the latest schedule.')}</small>}</div>
 }
 
-export function ReservationDialog({ resource, start, end, initialGpu, t, locale, onClose, onSaved }: { resource: Resource; start: string; end: string; initialGpu?: number; t: Translate; locale: Locale; onClose: () => void; onSaved: () => void }) {
+export function ReservationDialog({ resource, start, end, initialGpu, initialMode = 'now', t, locale, onClose, onSaved }: { resource: Resource; start: string; end: string; initialGpu?: number; initialMode?: BookingStartMode; t: Translate; locale: Locale; onClose: () => void; onSaved: () => void }) {
   const live = useReservationResource(resource.id)
   const current = live.resource ?? { ...resource, usage: undefined }
   const devices = resource.gpus?.length ? resource.gpus : Array.from({ length: resource.gpuCount }, (_, index) => ({ index, id: '', model: '', memoryTotalMb: 0 }))
   const request = useRef<{ payload: string; id: string } | null>(null)
   const [scope, setScope] = useState<'machine' | 'gpus'>(resource.gpuCount > 0 && initialGpu !== undefined ? 'gpus' : 'machine')
   const [gpuIndices, setGpuIndices] = useState<number[]>(resource.gpuCount > 0 && initialGpu !== undefined ? [initialGpu] : [])
-  const [startInput, setStartInput] = useState(start)
-  const [endInput, setEndInput] = useState(end)
+  const [startMode, setStartMode] = useState<BookingStartMode>(initialMode)
+  const [startInput, setStartInput] = useState(() => initialMode === 'now' ? beijingInput() : Date.parse(inputToIso(start)) > Date.now() + 60_000 ? start : initialWindow('scheduled').start)
+  const [endInput, setEndInput] = useState(() => Date.parse(inputToIso(end)) > Math.max(Date.now(), Date.parse(inputToIso(startInput))) ? end : initialWindow(initialMode).end)
   const [purpose, setPurpose] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<unknown>(null)
@@ -34,20 +37,22 @@ export function ReservationDialog({ resource, start, end, initialGpu, t, locale,
   const now = useAvailabilityTime(current, startIso)
   const inventoryChanged = (latest: Resource) => latest.inventoryVersion !== resource.inventoryVersion || latest.gpuCount !== resource.gpuCount || JSON.stringify(latest.gpus?.map(gpu => [gpu.id, gpu.index])) !== JSON.stringify(resource.gpus?.map(gpu => [gpu.id, gpu.index]))
   const inventoryError = current.inventoryState === 'conflict' || (live.resource && inventoryChanged(live.resource))
-  const restriction = currentGpuRestriction(current, startIso, scope === 'gpus' ? gpuIndices : undefined, now)
+  const restrictionStart = startMode === 'now' ? new Date(now).toISOString() : startIso
+  const restriction = currentGpuRestriction(current, restrictionStart, scope === 'gpus' ? gpuIndices : undefined, now)
   const restrictionError = restriction ? new ApiError('', 409, restriction) : null
-  const cannotSubmit = !live.resource || live.loading || Boolean(live.error) || Boolean(inventoryError) || Boolean(restriction)
+  const timeError = startMode === 'scheduled' && (!startIso || Date.parse(startIso) < now + 60_000) ? new ApiError('', 409, 'SCHEDULE_TOO_SOON') : null
+  const cannotSubmit = !live.resource || live.loading || Boolean(live.error) || Boolean(inventoryError) || Boolean(restriction) || Boolean(timeError)
   async function submit(event: React.FormEvent) {
     event.preventDefault()
     if (busy) return
     setError(null)
     try {
       const requestedScope = resource.gpuCount > 0 ? scope : 'machine'
-      const payload = bookingPayload({ resourceId: resource.id, scope: requestedScope, gpuIndices: requestedScope === 'machine' ? [] : gpuIndices, start: startInput, end: endInput, purpose })
+      const payload = bookingPayload({ resourceId: resource.id, scope: requestedScope, gpuIndices: requestedScope === 'machine' ? [] : gpuIndices, start: startInput, end: endInput, purpose, startMode })
       setBusy(true)
       const latest = await live.refresh()
       if (latest.inventoryState === 'conflict' || inventoryChanged(latest)) throw new ApiError('', 409, 'INVENTORY_CHANGED')
-      const usageRestriction = currentGpuRestriction(latest, payload.startAt, requestedScope === 'gpus' ? gpuIndices : undefined)
+      const usageRestriction = currentGpuRestriction(latest, startMode === 'now' ? new Date().toISOString() : payload.startAt!, requestedScope === 'gpus' ? gpuIndices : undefined)
       if (usageRestriction) throw new ApiError('', 409, usageRestriction)
       if (latest.inventoryVersion) { payload.inventoryVersion = latest.inventoryVersion; payload.gpuIds = requestedScope === 'machine' ? [] : devices.filter(gpu => gpuIndices.includes(gpu.index)).map(gpu => gpu.id) }
       const signature = JSON.stringify(payload)
@@ -60,24 +65,27 @@ export function ReservationDialog({ resource, start, end, initialGpu, t, locale,
   return <Dialog title={t('新建预约', 'New reservation')} subtitle={`${resource.cluster} · ${resource.name}`} onClose={onClose} busy={busy} t={t}>
     <form onSubmit={event => void submit(event)}><div className="dialog-body">
       <div className="resource-summary"><span className="resource-icon"><Clock3 size={21} /></span><div><strong>{resource.name}</strong><p>{resource.gpuCount ? `${resource.gpuCount} × ${resource.gpuModel || 'GPU'}` : t('CPU 服务器 · 整机预约', 'CPU server · Whole machine')}</p></div></div>
-      <InventoryStatus resource={current} locale={locale} t={t} /><ResourceUsageStatus resource={current} locale={locale} t={t} />
+      <InventoryStatus resource={current} locale={locale} t={t} /><ResourceUsageStatus resource={current} locale={locale} t={t} summaryOnly={scope === 'gpus'} />
       <div className="reservation-refresh"><span role="status">{live.loading ? t('正在核对资源与权限…', 'Checking resource and access…') : t('资源与权限每 30 秒刷新，输入会保留。', 'Resource and access refresh every 30 seconds. Your input is kept.')}</span><button type="button" disabled={busy || live.loading} onClick={() => void live.refresh().catch(() => {})}>{t('刷新状态', 'Refresh status')}</button></div>
       {live.error ? <div className="error" role="alert">{errorText(live.error, t)}<small>{t('状态核对失败，暂不能确认预约。输入已保留，请刷新重试。', 'Verification failed, so booking is paused. Your input is kept; refresh to retry.')}</small></div> : null}
       {inventoryError && <p className="error" role="alert">{t('GPU 清单待核验或已变化，请关闭弹窗并刷新后重新选择。', 'The GPU inventory needs review or has changed. Close this dialog, refresh and select again.')}</p>}
       <fieldset disabled={busy || Boolean(inventoryError)}><legend>{t('预约范围', 'Scope')}</legend>
         <div className="scope-options"><label><input type="radio" name="scope" value="machine" checked={scope === 'machine'} onChange={() => setScope('machine')} />{t('整台服务器', 'Whole machine')}</label>{resource.gpuCount > 0 && <label><input type="radio" name="scope" value="gpus" checked={scope === 'gpus'} onChange={() => setScope('gpus')} />{t('指定 GPU', 'Select GPUs')}</label>}</div>
         {scope === 'gpus' && <div className="gpu-picker">{devices.map(({ index, id, model, memoryTotalMb }) => {
-          const blocked = currentGpuRestriction(current, startIso, [index], now)
-          return <label key={id || index} className={gpuIndices.includes(index) ? 'is-selected' : ''}><input type="checkbox" checked={gpuIndices.includes(index)} disabled={Boolean(blocked) && !gpuIndices.includes(index)} onChange={event => setGpuIndices(previous => event.target.checked ? [...previous, index] : previous.filter(gpu => gpu !== index))} /><span>GPU {index}{model && <small>{model}{memoryTotalMb > 0 ? ` · ${(memoryTotalMb / 1024).toLocaleString(locale, { maximumFractionDigits: 1 })} GiB` : ''}</small>}{blocked && <small>{blocked === 'GPU_BUSY' ? t('当前被占用', 'Occupied now') : t('当前状态未知', 'Usage unknown')}</small>}</span></label>
+          const blocked = currentGpuRestriction(current, restrictionStart, [index], now)
+          return <label key={id || index} className={gpuIndices.includes(index) ? 'is-selected' : ''}><input type="checkbox" checked={gpuIndices.includes(index)} disabled={Boolean(blocked) && !gpuIndices.includes(index)} onChange={event => setGpuIndices(previous => event.target.checked ? [...previous, index] : previous.filter(gpu => gpu !== index))} /><span>GPU {index}{model && <small>{model}{memoryTotalMb > 0 ? ` · ${(memoryTotalMb / 1024).toLocaleString(locale, { maximumFractionDigits: 1 })} GiB` : ''}</small>}<GpuUsageLabel resource={current} index={index} now={now} t={t} /></span></label>
         })}</div>}
       </fieldset>
-      <div className="field-pair"><label>{t('开始时间', 'Start time')}<input aria-label={t('开始时间', 'Start time')} type="datetime-local" required value={startInput} disabled={busy} onChange={event => setStartInput(event.target.value)} /></label><label>{t('结束时间', 'End time')}<input aria-label={t('结束时间', 'End time')} type="datetime-local" required value={endInput} disabled={busy} onChange={event => setEndInput(event.target.value)} /></label></div>
-      <p className="field-help">{t('北京时间（UTC+8）· 单次最长 7 天，可预约未来 90 天', 'Beijing time (UTC+8) · Up to 7 days per booking, within 90 days')}</p>
+      <BookingModePicker mode={startMode} disabled={busy} t={t} onChange={mode => { if (mode === startMode) return; setStartMode(mode); if (mode === 'scheduled' && (!startIso || Date.parse(startIso) < Date.now() + 60_000)) { const next = initialWindow('scheduled'); setStartInput(next.start); try { if (Date.parse(inputToIso(endInput)) <= Date.parse(inputToIso(next.start))) setEndInput(next.end) } catch { /* Preserve an incomplete end-time draft. */ } } }} />
+      {startMode === 'now' && <p className="field-help">{t('确认后按服务器当前时间开始；不会因填写表单而保留旧起点。', 'Starts at the server’s current time when confirmed; time spent editing does not leave an old start time.')}</p>}
+      <div className="field-pair">{startMode === 'scheduled' && <label>{t('开始时间', 'Start time')}<input aria-label={t('开始时间', 'Start time')} type="datetime-local" required value={startInput} disabled={busy} onChange={event => setStartInput(event.target.value)} /></label>}<label>{t('结束时间', 'End time')}<input aria-label={t('结束时间', 'End time')} type="datetime-local" required value={endInput} disabled={busy} onChange={event => setEndInput(event.target.value)} /></label></div>
+      <p className="field-help">{t('北京时间（UTC+8）· 未来时段须至少提前 1 分钟，单次最长 7 天，可预约未来 90 天', 'Beijing time (UTC+8) · Future slots start at least 1 minute ahead; up to 7 days per booking, within 90 days')}</p>
       {restrictionError && <p className="callout" role="status">{errorText(restrictionError, t)}</p>}
+      {timeError && <p className="callout" role="status">{errorText(timeError, t)}</p>}
       <label>{t('预约用途', 'Purpose')}<textarea aria-label={t('预约用途', 'Purpose')} required rows={3} maxLength={500} placeholder={t('例如：模型训练、实验验证', 'For example: model training or evaluation')} value={purpose} disabled={busy} onChange={event => setPurpose(event.target.value)} /></label>
       <ConflictNotice error={error} t={t} locale={locale} />
       <p className="field-help">{t('未预约不代表当前空闲。提交时检查所选时段的预约冲突；当前占用不阻止未来排期，预约不会自动停止现有任务。', 'Unreserved does not mean idle now. Submission checks booking conflicts; current use does not block future slots, and reservations never stop running jobs.')}</p>
-    </div><footer><button type="button" disabled={busy} onClick={onClose}>{t('取消', 'Cancel')}</button><button className="primary" type="submit" disabled={busy || cannotSubmit}>{busy ? t('正在提交…', 'Submitting…') : t('确认预约', 'Reserve')}<ArrowRight size={16} /></button></footer></form>
+    </div><footer><button type="button" disabled={busy} onClick={onClose}>{t('取消', 'Cancel')}</button><button className="primary" type="submit" disabled={busy || cannotSubmit}>{busy ? t('正在提交…', 'Submitting…') : startMode === 'now' ? t('确认现在使用', 'Confirm use now') : t('确认未来预约', 'Confirm future booking')}<ArrowRight size={16} /></button></footer></form>
   </Dialog>
 }
 

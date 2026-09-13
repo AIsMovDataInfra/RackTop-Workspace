@@ -29,3 +29,19 @@
 .reservation-refresh button { flex: none; }
 .gpu-picker label:has(input:disabled) { color: var(--muted); }
 .gpu-picker small { overflow-wrap: anywhere; }
+
+.booking-mode { flex: 0 1 auto; flex-wrap: wrap; min-width: 0; max-width: 100%; }
+.time-filter { flex-wrap: wrap; }
+.time-filter .booking-mode { flex: 0 1 auto; justify-content: flex-start; }
+.time-filter .booking-mode button { flex: 1 1 auto; width: auto; min-width: 0; white-space: normal; margin-top: 0; }
+.time-filter label { min-width: 0; max-width: 100%; }
+.time-filter input { min-width: 0; width: 100%; }
+.gpu-current-usage { display: grid; gap: 4px; width: 100%; font-size: .73rem; text-align: center; overflow-wrap: anywhere; }
+.gpu-current-usage small { color: inherit; font-size: .68rem; }
+.gpu-tile > .gpu-current-usage { color: var(--muted); }
+.gpu-tile > .usage-text--busy { color: var(--orange); }
+.gpu-tile > .usage-text--free { color: var(--green); }
+.gpu-tile .gpu-booking-label { padding-top: 6px; border-top: 1px solid var(--border); color: var(--muted); font-size: .7rem; }
+.gpu-picker .gpu-current-usage { margin-top: 5px; text-align: left; }
+.gpu-tiles--cpu .gpu-current-usage { grid-column: 2; text-align: left; }
+@media (max-width: 390px) { .booking-mode { width: 100%; }.booking-mode button { flex: 1; white-space: normal; }.resource-card > header > button { max-width: 120px; white-space: normal; } }

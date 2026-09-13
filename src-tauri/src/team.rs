@@ -83,6 +83,7 @@ struct ScopedBindings {
 #[derive(Clone)]
 struct UsageSample {
     generation: u64,
+    epoch: i64,
     remote_id: String,
     company: String,
     body: Value,
@@ -158,11 +159,16 @@ impl Stored {
     }
     fn cached_usage(&self, server: &Server, timestamp: i64) -> Option<&Value> {
         let managed = server.managed.as_ref().filter(|managed| managed.available)?;
-        if !self.is_admin() || check_credential_session(self, managed).is_err() { return None; }
+        if !self.can_report_usage(server) { return None; }
         let sample = self.usage_samples.get(&server.id)?;
-        (sample.generation == self.generation && sample.remote_id == managed.remote_id
+        (sample.generation == self.generation && sample.epoch == managed.epoch && sample.remote_id == managed.remote_id
             && sample.company == managed.company && sample.body["serverVersion"].as_u64() == Some(managed.version)
             && usage_sample_is_fresh(&sample.body, timestamp)).then_some(&sample.body)
+    }
+    fn can_report_usage(&self, server: &Server) -> bool {
+        let Some(managed) = server.managed.as_ref().filter(|managed| managed.available) else { return false; };
+        self.server_list_scope().is_some_and(|scope| scope.account_id == managed.account_id
+            && scope.company.as_ref().is_none_or(|company| company == &managed.company))
     }
     fn begin_login(&mut self) -> u64 {
         self.advance();
@@ -737,38 +743,43 @@ impl TeamManager {
         self.status()
     }
     pub(crate) fn usage_generation(&self, server: &Server) -> Option<u64> {
-        let managed = server.managed.as_ref().filter(|managed| managed.available)?;
         let state = self.read().ok()?;
-        (state.is_admin() && check_credential_session(&state, managed).is_ok()).then_some(state.generation)
+        state.can_report_usage(server).then_some(state.generation)
     }
     pub(crate) fn record_usage(&self, generation: Option<u64>, server: &Server, snapshot: &Snapshot) {
         let Some(generation) = generation else { return; };
         let Some(managed) = server.managed.as_ref().filter(|managed| managed.available) else { return; };
         if snapshot.managed_server_version != Some(managed.version) { return; }
+        if self.app.get().is_some_and(|app| app.state::<Database>().check_managed_server(server).is_err()) { return; }
         let timestamp = now_ms();
         let Ok(body) = managed_telemetry_payload(server, Some(snapshot), timestamp) else { return; };
         // This path deliberately never persists a Snapshot or a keyring update.
         let _ = self.update(false, |state| {
-            if state.generation != generation || !state.is_admin() || check_credential_session(state, managed).is_err() {
+            if state.generation != generation || !state.can_report_usage(server) {
                 return Ok(());
             }
             state.usage_samples.retain(|_, sample| usage_sample_is_fresh(&sample.body, timestamp));
             if state.usage_samples.get(&server.id).is_some_and(|previous|
-                previous.body["serverVersion"].as_u64() > body["serverVersion"].as_u64()
-                    || (previous.body["serverVersion"] == body["serverVersion"]
-                        && previous.body["observedAt"].as_i64() > body["observedAt"].as_i64())) { return Ok(()); }
+                previous.epoch > managed.epoch || (previous.epoch == managed.epoch
+                    && (previous.body["serverVersion"].as_u64() > body["serverVersion"].as_u64()
+                        || (previous.body["serverVersion"] == body["serverVersion"]
+                            && previous.body["observedAt"].as_i64() > body["observedAt"].as_i64())))) { return Ok(()); }
             if state.usage_samples.len() >= 256 && !state.usage_samples.contains_key(&server.id) {
                 if let Some(oldest) = state.usage_samples.iter().min_by_key(|(_, sample)| sample.body["observedAt"].as_i64()).map(|(id, _)| id.clone()) {
                     state.usage_samples.remove(&oldest);
                 }
             }
             state.usage_samples.insert(server.id.clone(), UsageSample {
-                generation, remote_id: managed.remote_id.clone(), company: managed.company.clone(), body,
+                generation, epoch: managed.epoch, remote_id: managed.remote_id.clone(), company: managed.company.clone(), body,
             });
             Ok(())
         });
     }
     async fn sync(&self, servers: Vec<Server>, snapshots: Vec<Snapshot>) -> Result<Value, String> {
+        let database = self.app.get().map(|app| app.state::<Database>());
+        self.sync_with_database(servers, snapshots, database.as_deref()).await
+    }
+    async fn sync_with_database(&self, servers: Vec<Server>, snapshots: Vec<Snapshot>, database: Option<&Database>) -> Result<Value, String> {
         let Ok(_lock) = self.sync_lock.try_lock() else {
             return self.status();
         };
@@ -776,7 +787,7 @@ impl TeamManager {
         let Some(token) = state.token.as_deref() else {
             return self.status();
         };
-        if !state.is_admin() {
+        if !state.is_admin() && state.server_list_scope().is_none() {
             return self.status();
         }
         for (id, binding) in &state.bindings {
@@ -831,25 +842,29 @@ impl TeamManager {
                 Ok(())
             })?;
         }
-        // Managed connections already carry administrator authorization and are
-        // not personal inventory bindings. Publish only a bounded usage summary.
+        // Members may report activity for their authorized managed connections.
+        // Only the service can bind resources; personal inventory remains admin-only.
         for server in servers.iter().filter(|server| server.managed.is_some()) {
             let mut changes = self.changes.subscribe();
             let current = self.read()?;
-            if !current.matches_session(&state) || !current.is_admin() { break; }
+            if !current.matches_session(&state) { break; }
             let managed = server.managed.as_ref().unwrap();
-            if !managed.available || check_credential_session(&current, managed).is_err() { continue; }
+            if !current.can_report_usage(server) { continue; }
+            // Persisted history has no session/authorization epoch. Wait for a
+            // fresh successful collection from this session instead of replaying it.
+            let Some(body) = current.cached_usage(server, now_ms()).cloned() else { continue; };
             let operation = async {
-                let timestamp = now_ms();
-                let body = current.cached_usage(server, timestamp)
-                    .map(|body| Ok(body.clone()))
-                    .unwrap_or_else(|| managed_telemetry_payload(server, snapshots.iter().find(|s| s.server_id == server.id), timestamp))?;
-                self.request_with_scope(reqwest::Method::POST,
-                    &format!("/api/servers/{}/telemetry", managed.remote_id), Some(token), Some(body), Some(&state)).await
+                let path = format!("/api/servers/{}/telemetry", managed.remote_id);
+                let request = self.request_with_scope(reqwest::Method::POST,
+                    &path, Some(token), Some(body), Some(&state));
+                if let Some(database) = database {
+                    crate::managed_servers::authorized(database, &[server], request).await
+                } else { request.await }
             };
             let result = tokio::select! { biased; _ = changes.changed() => break, result = operation => result };
+            if database.is_some_and(|database| database.check_managed_server(server).is_err()) { continue; }
             self.update(false, |value| {
-                if !value.matches_session(&state) || !value.is_admin() { return Ok(()); }
+                if !value.matches_session(&state) || !value.can_report_usage(server) { return Ok(()); }
                 let binding = value.usage_sync.entry(server.id.clone()).or_default();
                 match result {
                     Ok(response) => {
@@ -1156,7 +1171,7 @@ fn user_has_company_access(user: &Value) -> bool {
 
 fn usage_sample_is_fresh(body: &Value, now: i64) -> bool {
     body["observedAt"].as_i64().is_some_and(|observed| observed >= 0
-        && observed <= now.saturating_add(60_000) && now.saturating_sub(observed) <= 90_000)
+        && observed <= now.saturating_add(60_000) && now.saturating_sub(observed) < 90_000)
 }
 
 pub fn managed_telemetry_payload(server: &Server, snapshot: Option<&Snapshot>, now: i64) -> Result<Value, String> {
@@ -1172,7 +1187,7 @@ pub fn managed_telemetry_payload(server: &Server, snapshot: Option<&Snapshot>, n
         "inventoryComplete":false,"gpuUsageValid":false,"processQueryOk":false,"gpus":[]});
     if snapshot.managed_server_version != Some(managed.version)
         || snapshot.accelerator_vendor != "nvidia" || snapshot.nvidia_smi != "available"
-        || !matches!(snapshot.status.as_str(), "online" | "warning") || now.saturating_sub(observed_at) > 90_000
+        || !matches!(snapshot.status.as_str(), "online" | "warning") || now.saturating_sub(observed_at) >= 90_000
         || snapshot.gpus.is_empty() { return Ok(body); }
     // Reuse strict full NVIDIA UUID/topology validation without admitting the
     // managed connection into the separate personal-inventory sync path.
@@ -1854,29 +1869,36 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn managed_usage_uses_admin_device_scope_without_personal_binding_or_persistence() {
-        let (_dir, _db, mut manager, server, _) = shared_fixture();
-        let (_, mut snapshot) = fixture(); snapshot.server_id = server.id.clone(); snapshot.managed_server_version = Some(1); snapshot.timestamp = now_ms() / 1000;
-        let (url, http) = serve_shared_response(json!({"resource":{"id":"00000000-0000-4000-8000-000000000099"}}), 200, Duration::ZERO);
-        manager.test_url = Some(url);
-        let status = manager.sync(vec![server.clone()], vec![snapshot.clone()]).await.unwrap();
-        let request = http.join().unwrap();
-        assert!(request.starts_with("POST /api/servers/00000000-0000-4000-8000-000000000001/telemetry HTTP/1.1"));
-        assert!(request.to_lowercase().contains("authorization: bearer fixture-shared-token"));
-        assert!(request.to_lowercase().contains("x-racktop-company: a%e5%85%ac%e5%8f%b8"));
-        assert!(status["bindings"].as_object().unwrap().is_empty());
-        assert_eq!(status["usageSync"][&server.id]["resourceId"], "00000000-0000-4000-8000-000000000099");
-        let stored = manager.read().unwrap(); assert!(!serde_json::to_string(&stored).unwrap().contains("usageSync"));
-        manager.value.lock().unwrap().as_mut().unwrap().user.as_mut().unwrap()["role"] = json!("member");
-        manager.value.lock().unwrap().as_mut().unwrap().advance();
-        let status = manager.sync(vec![server], vec![snapshot]).await.unwrap();
-        assert!(status["usageSync"].as_object().unwrap().is_empty());
+    async fn managed_usage_uses_member_and_admin_device_scope_without_persisting_samples() {
+        for role in ["member", "admin"] {
+            let (_dir, _db, mut manager, server, _) = shared_fixture();
+            {
+                let mut state = manager.value.lock().unwrap(); let state = state.as_mut().unwrap();
+                state.user.as_mut().unwrap()["role"] = json!(role);
+                // A former admin's personal selections cannot be published by a member.
+                if role == "member" { state.bindings.insert("connection-a".into(), Binding::default()); }
+            }
+            let (personal, mut snapshot) = fixture(); snapshot.server_id = server.id.clone(); snapshot.managed_server_version = Some(1); snapshot.timestamp = now_ms() / 1000;
+            manager.record_usage(manager.usage_generation(&server), &server, &snapshot);
+            let (url, http) = serve_shared_response(json!({"resource":{"id":"00000000-0000-4000-8000-000000000099"}}), 200, Duration::ZERO);
+            manager.test_url = Some(url);
+            let status = manager.sync(vec![personal, server.clone()], vec![snapshot]).await.unwrap();
+            let request = http.join().unwrap();
+            assert!(request.starts_with("POST /api/servers/00000000-0000-4000-8000-000000000001/telemetry HTTP/1.1"), "{role}");
+            assert!(request.to_lowercase().contains("authorization: bearer fixture-shared-token"));
+            assert!(request.to_lowercase().contains("x-racktop-company: a%e5%85%ac%e5%8f%b8"));
+            assert_eq!(status["usageSync"][&server.id]["resourceId"], "00000000-0000-4000-8000-000000000099");
+            if role == "member" { assert!(status["bindings"]["connection-a"]["lastSyncedAt"].is_null()); }
+            let stored = manager.read().unwrap(); let persisted = serde_json::to_string(&stored).unwrap();
+            assert!(!persisted.contains("usageSync")); assert!(!persisted.contains("usageSamples"));
+        }
     }
 
     #[tokio::test]
     async fn managed_usage_live_samples_publish_without_snapshot_history() {
         for (record_history, history_enabled) in [(false, true), (true, false)] {
             let (_dir, db, mut manager, server, _) = shared_fixture();
+            manager.value.lock().unwrap().as_mut().unwrap().user.as_mut().unwrap()["role"] = json!("member");
             let mut settings = db.get_settings().unwrap(); settings.history_enabled = history_enabled;
             db.save_settings(&settings).unwrap();
             let (_, mut snapshot) = fixture(); snapshot.server_id = server.id.clone();
@@ -1933,17 +1955,127 @@ mod tests {
         assert!(changed_scope.cached_usage(&server, now_ms()).is_none());
         let mut member = manager.read().unwrap();
         member.user.as_mut().unwrap()["role"] = json!("member");
-        assert!(member.cached_usage(&server, now_ms()).is_none());
+        assert!(member.cached_usage(&server, now_ms()).is_some());
+        let mut next_epoch = server.clone(); next_epoch.managed.as_mut().unwrap().epoch += 1;
+        assert!(member.cached_usage(&next_epoch, now_ms()).is_none());
+        manager.record_usage(generation, &next_epoch, &snapshot);
+        manager.record_usage(generation, &server, &snapshot);
+        assert!(manager.read().unwrap().cached_usage(&next_epoch, now_ms()).is_some());
+        assert!(manager.read().unwrap().cached_usage(&server, now_ms()).is_none());
         manager.value.lock().unwrap().as_mut().unwrap().clear_login();
         manager.record_usage(generation, &server, &snapshot);
         assert!(manager.read().unwrap().usage_samples.is_empty());
         assert!(manager.usage_generation(&server).is_none());
     }
 
+    #[test]
+    fn managed_usage_members_require_the_current_account_company_and_active_session() {
+        let (_dir, _db, manager, server, _) = shared_fixture();
+        let mut member = manager.read().unwrap(); member.user.as_mut().unwrap()["role"] = json!("member");
+        assert!(member.can_report_usage(&server));
+        assert!(!member.can_report_usage(&fixture().0));
+        for change in ["account", "identity", "company", "role", "fake-superadmin", "login-pending", "scope-pending", "logout"] {
+            let mut state = member.clone();
+            match change {
+                "account" => state.account_id = Some("other-account".into()),
+                "identity" => state.user.as_mut().unwrap()["id"] = json!("other-account"),
+                "company" => state.user.as_mut().unwrap()["company"] = json!("B公司"),
+                "role" => state.user.as_mut().unwrap()["role"] = json!("viewer"),
+                "fake-superadmin" => state.user.as_mut().unwrap()["isSuperAdmin"] = json!(true),
+                "login-pending" => { state.begin_login(); },
+                "scope-pending" => state.scope_pending = true,
+                _ => { state.clear_login(); },
+            }
+            assert!(!state.can_report_usage(&server), "{change}");
+        }
+        let mut unavailable = server.clone(); unavailable.managed.as_mut().unwrap().available = false;
+        assert!(!member.can_report_usage(&unavailable));
+        let mut other_account = server.clone(); other_account.managed.as_mut().unwrap().account_id = "previous-account".into();
+        assert!(!member.can_report_usage(&other_account));
+        let mut superadmin = member.clone(); superadmin.user.as_mut().unwrap()["role"] = json!("admin");
+        superadmin.user.as_mut().unwrap()["isSuperAdmin"] = json!(true);
+        let mut other_company = server.clone(); other_company.managed.as_mut().unwrap().company = "B公司".into();
+        assert!(superadmin.can_report_usage(&other_company));
+        assert!(!superadmin.can_report_usage(&other_account));
+    }
+
+    #[tokio::test]
+    async fn managed_usage_never_replays_persisted_history_after_startup_or_session_change() {
+        for role in ["member", "admin"] {
+            let (_dir, _db, mut manager, server, _) = shared_fixture();
+            manager.test_url = Some("http://127.0.0.1:9".into());
+            manager.value.lock().unwrap().as_mut().unwrap().user.as_mut().unwrap()["role"] = json!(role);
+            let (_, mut snapshot) = fixture(); snapshot.server_id = server.id.clone();
+            snapshot.managed_server_version = Some(1); snapshot.timestamp = now_ms() / 1000;
+            let status = manager.sync(vec![server.clone()], vec![snapshot.clone()]).await.unwrap();
+            assert!(status["usageSync"].as_object().unwrap().is_empty());
+            let generation = manager.usage_generation(&server);
+            manager.record_usage(generation, &server, &snapshot);
+            manager.value.lock().unwrap().as_mut().unwrap().advance();
+            manager.record_usage(generation, &server, &snapshot);
+            let status = manager.sync(vec![server], vec![snapshot]).await.unwrap();
+            assert!(status["usageSync"].as_object().unwrap().is_empty());
+        }
+    }
+
+    #[test]
+    fn managed_usage_expires_at_exactly_ninety_seconds_and_keeps_positive_memory_evidence() {
+        let (_dir, _db, _manager, server, _) = shared_fixture();
+        let (_, mut snapshot) = fixture(); snapshot.server_id = server.id.clone(); snapshot.managed_server_version = Some(1);
+        snapshot.gpus[0].utilization = 0.0; snapshot.gpus[0].memory_used_mb = 512.0;
+        snapshot.gpu_process_query_ok = false;
+        let body = managed_telemetry_payload(&server, Some(&snapshot), 1_089_999).unwrap();
+        assert_eq!(body["status"], "online"); assert_eq!(body["gpus"][0]["memoryUsedMb"], 512.0);
+        assert_eq!(body["gpus"][0]["utilization"], 0.0); assert_eq!(body["processQueryOk"], false);
+        assert!(usage_sample_is_fresh(&body, 1_089_999)); assert!(!usage_sample_is_fresh(&body, 1_090_000));
+        assert_eq!(managed_telemetry_payload(&server, Some(&snapshot), 1_090_000).unwrap()["status"], "unknown");
+    }
+
+    #[tokio::test]
+    async fn managed_usage_upload_cannot_commit_after_scope_change_or_revoke_regrant() {
+        for change in ["scope", "regrant", "logout"] {
+            let (_dir, db, mut manager, server, row) = shared_fixture();
+            manager.value.lock().unwrap().as_mut().unwrap().user.as_mut().unwrap()["role"] = json!("member");
+            let (_, mut snapshot) = fixture(); snapshot.server_id = server.id.clone();
+            snapshot.managed_server_version = Some(1); snapshot.timestamp = now_ms() / 1000;
+            manager.record_usage(manager.usage_generation(&server), &server, &snapshot);
+            let (url, http, received, respond) = serve_shared_response_notified(json!({"resource":{"id":"00000000-0000-4000-8000-000000000099"}}), 200, Duration::ZERO);
+            manager.test_url = Some(url);
+            let upload = manager.sync_with_database(vec![server.clone()], vec![snapshot], Some(&db));
+            let revoke = async {
+                received.await.unwrap();
+                if change == "regrant" {
+                    db.invalidate_managed("fixture-revoke").unwrap();
+                    let directory = crate::managed_servers::Directory::parse(json!({"schemaVersion":2,"revision":"a".repeat(64),"servers":[row]}), "A公司").unwrap();
+                    db.apply_directory("fixture-account", &directory, now_ms()).unwrap();
+                } else {
+                    manager.update(false, |state| {
+                        if change == "logout" { state.clear_login(); }
+                        else { state.user.as_mut().unwrap()["company"] = json!("B公司"); state.advance(); }
+                        Ok(())
+                    }).unwrap();
+                }
+                respond.send(()).unwrap();
+            };
+            let (result, ()) = tokio::join!(upload, revoke);
+            assert!(result.unwrap()["usageSync"].as_object().unwrap().is_empty(), "{change}");
+            assert!(http.join().unwrap().starts_with("POST /api/servers/"));
+            let current = db.list_servers().unwrap().pop().unwrap();
+            assert!(manager.read().unwrap().cached_usage(&current, now_ms()).is_none(), "{change}");
+        }
+    }
+
     // Loopback HTTP bytes exercise the production reqwest path without reading a
     // real keyring, changing a user profile, or connecting to the team service.
     fn serve_shared_response(value: Value, status: u16, delay: Duration) -> (String, std::thread::JoinHandle<String>) {
+        let (url, handle, _, _) = serve_shared_response_notified(value, status, delay);
+        (url, handle)
+    }
+
+    fn serve_shared_response_notified(value: Value, status: u16, delay: Duration) -> (String, std::thread::JoinHandle<String>, tokio::sync::oneshot::Receiver<()>, std::sync::mpsc::Sender<()>) {
         use std::io::{Read,Write};
+        let (sent, received) = tokio::sync::oneshot::channel();
+        let (respond, response_ready) = std::sync::mpsc::channel();
         let listener=std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let url=format!("http://{}",listener.local_addr().unwrap());
         let handle=std::thread::spawn(move || {
@@ -1963,12 +2095,14 @@ mod tests {
                     if bytes.len()>=end+4+length { break; }
                 }
             }
+            let _ = sent.send(());
+            let _ = response_ready.recv_timeout(Duration::from_secs(3));
             std::thread::sleep(delay);
             let body=value.to_string();let response=format!("HTTP/1.1 {status} Fixture\r\nContent-Type: application/json\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n{body}",body.len());
             let _=stream.write_all(response.as_bytes());
             String::from_utf8(bytes).unwrap()
         });
-        (url,handle)
+        (url,handle,received,respond)
     }
 
     #[tokio::test]
