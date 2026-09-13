@@ -6,7 +6,7 @@
 
 ## 安装
 
-**当前桌面安装包：2.8.0 测试版（Pre-release）。** Ubuntu 20.04 / 22.04 推荐在终端运行统一安装命令；Mac 打开下载页，按芯片选择 DMG。无需下载源码或配置开发环境。管理员可在网页分配现有 SSH 登录密码；成员在桌面登录团队账号后即可使用获授权的服务器。
+**当前桌面安装包：2.8.2 测试版（Pre-release）。** Ubuntu 20.04 / 22.04 推荐在终端运行统一安装命令；Mac 打开下载页，按芯片选择 DMG。无需下载源码或配置开发环境。管理员可在网页分配现有 SSH 登录密码；成员在桌面登录团队账号后即可使用获授权的服务器。
 
 SSH 连接和文件传输继续通过成员本机网络直连目标服务器。2.7.3 的客户端加固减少密码意外暴露，但不能阻止获授权成员主动取得密码。
 
@@ -18,16 +18,16 @@ curl --proto '=https' --proto-redir '=https' -fL https://136.0.110.161/downloads
 
 | 电脑 | 云端安装包 | GitHub 备用 |
 | --- | --- | --- |
-| Ubuntu 20.04，Intel / AMD 64 位 | [Flatpak 离线套件](https://136.0.110.161/downloads/RackTop_2.8.0_linux-amd64-flatpak-offline.tar.gz) | [下载](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.8.0/RackTop_2.8.0_linux-amd64-flatpak-offline.tar.gz) |
-| Ubuntu 22.04，Intel / AMD 64 位 | [DEB 安装包](https://136.0.110.161/downloads/RackTop_2.8.0_linux-amd64.deb) | [下载](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.8.0/RackTop_2.8.0_linux-amd64.deb) |
-| Mac，M 系列芯片 | [Apple Silicon DMG](https://136.0.110.161/downloads/RackTop_2.8.0_macos-arm64-unsigned.dmg) | [下载](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.8.0/RackTop_2.8.0_macos-arm64-unsigned.dmg) |
-| Mac，Intel 芯片 | [Intel DMG](https://136.0.110.161/downloads/RackTop_2.8.0_macos-x64-unsigned.dmg) | [下载](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.8.0/RackTop_2.8.0_macos-x64-unsigned.dmg) |
+| Ubuntu 20.04，Intel / AMD 64 位 | [Flatpak 离线套件](https://136.0.110.161/downloads/RackTop_2.8.2_linux-amd64-flatpak-offline.tar.gz) | [下载](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.8.2/RackTop_2.8.2_linux-amd64-flatpak-offline.tar.gz) |
+| Ubuntu 22.04，Intel / AMD 64 位 | [DEB 安装包](https://136.0.110.161/downloads/RackTop_2.8.2_linux-amd64.deb) | [下载](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.8.2/RackTop_2.8.2_linux-amd64.deb) |
+| Mac，M 系列芯片 | [Apple Silicon DMG](https://136.0.110.161/downloads/RackTop_2.8.2_macos-arm64-unsigned.dmg) | [下载](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.8.2/RackTop_2.8.2_macos-arm64-unsigned.dmg) |
+| Mac，Intel 芯片 | [Intel DMG](https://136.0.110.161/downloads/RackTop_2.8.2_macos-x64-unsigned.dmg) | [下载](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.8.2/RackTop_2.8.2_macos-x64-unsigned.dmg) |
 
 旧 2.2.2 Flatpak 先用统一安装器升级一次，再使用新版应用内更新；已有 Flatpak 会保留原用户级或系统级安装范围。[安装步骤、资料保留与升级说明](docs/DOWNLOADS.md)。
 
 ## 开始使用
 
-**2.8.0 团队网页和桌面安装包已发布。** 新增 GPU 占用摘要需要管理员升级到 2.8.0 并持续采集；没有新观测时显示未知。[本轮更新范围](docs/Version_overview.md)。
+**桌面 2.8.2 修复账号切换时的组织连接混用，团队网页继续运行 2.8.1。** 团队连接按当前账号及组织筛选，超级管理员可查看本账号的跨组织连接；个人连接及历史资料保留。GPU 占用摘要需管理员使用 2.8.0 或更新的桌面并持续采集，没有新观测时显示未知。[本轮更新范围](docs/Version_overview.md)。
 
 - **管理服务器**：打开桌面 RackTop，添加 SSH 连接，查看 GPU / CPU、使用终端、同步项目和管理任务。
 - **团队协作**：打开在线工作台，登录后选择当前组织，使用「资产设备管理」登记资产、打印扫码标签，通过「办公设备申请」提交需求，并预约算力。

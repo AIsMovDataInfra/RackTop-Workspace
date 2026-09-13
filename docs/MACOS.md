@@ -1,6 +1,8 @@
 # macOS 安装与构建说明
 
-RackTop 当前分发为 **2.5.0 测试版（Pre-release）**，与 Linux 共用版本、标签和 Release，分别提供 Apple Silicon 与 Intel 安装包。推荐从[统一下载页](https://136.0.110.161/downloads/)按芯片选择，也可使用 [v2.5.0 GitHub Release](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/tag/v2.5.0)。桌面名称仍为 RackTop，保留 SSH、本机密钥管理、共享网关及团队工作台。项目沿用 Tongzh-SEU 原作和旧 AIsMov 维护版的历史、[GPL-3.0](../LICENSE)及[来源说明](../NOTICE.md)。
+**桌面 2.8.2 测试版（Pre-release）已发布，安装包与公开下载已验收。当前云端业务服务仍为 2.8.1。管理员 GPU 占用上报从桌面 2.8.0 起已支持，需要管理员登录并持续采集。**
+
+本安装说明的目标版本为 **2.8.2 测试版（Pre-release）**，与 Linux 共用版本、标签和 Release，分别提供 Apple Silicon 与 Intel 安装包。推荐从[统一下载页](https://136.0.110.161/downloads/)按芯片选择，也可使用 [v2.8.2 GitHub Release](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/tag/v2.8.2)。桌面名称仍为 RackTop，保留 SSH、本机密钥管理、共享网关及团队工作台。项目沿用 Tongzh-SEU 原作和旧 AIsMov 维护版的历史、[GPL-3.0](../LICENSE)及[来源说明](../NOTICE.md)。
 
 ## 下载与系统要求
 
@@ -8,8 +10,8 @@ RackTop 当前分发为 **2.5.0 测试版（Pre-release）**，与 Linux 共用�
 
 | Mac 机型 | 云端安装包 | GitHub 备用 |
 | --- | --- | --- |
-| Apple Silicon（M 系列） | [2.5.0 arm64 DMG](https://136.0.110.161/downloads/RackTop_2.5.0_macos-arm64-unsigned.dmg) | [下载](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.5.0/RackTop_2.5.0_macos-arm64-unsigned.dmg) |
-| Intel 处理器 | [2.5.0 x64 DMG](https://136.0.110.161/downloads/RackTop_2.5.0_macos-x64-unsigned.dmg) | [下载](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.5.0/RackTop_2.5.0_macos-x64-unsigned.dmg) |
+| Apple Silicon（M 系列） | [2.8.2 arm64 DMG](https://136.0.110.161/downloads/RackTop_2.8.2_macos-arm64-unsigned.dmg) | [下载](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.8.2/RackTop_2.8.2_macos-arm64-unsigned.dmg) |
+| Intel 处理器 | [2.8.2 x64 DMG](https://136.0.110.161/downloads/RackTop_2.8.2_macos-x64-unsigned.dmg) | [下载](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.8.2/RackTop_2.8.2_macos-x64-unsigned.dmg) |
 
 云端与 GitHub 提供对应源码、许可证、NOTICE 和 `SHA256SUMS`，集中链接见[下载说明](DOWNLOADS.md)。
 
@@ -17,7 +19,7 @@ RackTop 当前分发为 **2.5.0 测试版（Pre-release）**，与 Linux 共用�
 
 ## 安装与首次打开
 
-1. 下载对应的 DMG；如需校验，同时下载同一 Release 的 `SHA256SUMS` 文件，在下载目录运行 `shasum -a 256 RackTop_2.5.0_macos-arm64-unsigned.dmg`。在 `SHA256SUMS` 中找到文件名完全匹配的那一行，确认其第一列摘要与命令输出一致。Intel 版替换为对应的 `x64` 文件名。
+1. 下载对应的 DMG；如需校验，同时下载同一 Release 的 `SHA256SUMS` 文件，在下载目录运行 `shasum -a 256 RackTop_2.8.2_macos-arm64-unsigned.dmg`。在 `SHA256SUMS` 中找到文件名完全匹配的那一行，确认其第一列摘要与命令输出一致。Intel 版替换为对应的 `x64` 文件名。
 2. 打开 DMG，将 **RackTop** 拖入 **应用程序**。升级已有安装时，先退出 RackTop 再替换应用。
 3. 从「应用程序」启动 RackTop。
 4. 如果 macOS 提示无法验证开发者或无法检查恶意软件，确认下载来源后，打开「系统设置 → 隐私与安全性」，在本次被阻止的应用旁选择「仍要打开」，再确认「打开」。此入口通常需要先尝试打开一次才出现。操作依据 [Apple 的安全打开 App 说明](https://support.apple.com/zh-cn/102445)。
@@ -28,15 +30,15 @@ RackTop 当前分发为 **2.5.0 测试版（Pre-release）**，与 Linux 共用�
 
 - **直接连接服务器**：在「添加服务器」填写 SSH 主机、端口和用户名，选择本机 SSH Agent、私钥或密码，并核对服务器 Host Key 指纹。已有私钥可通过「密钥管理」导入引用；Mac 需要能访问所选文件。保存密码使用本机系统钥匙串。
 - **通过邀请码访问共享资源**：在共享访客入口连接网关并输入资源所有者提供的邀请码，使用获准的监控、终端和文件能力。2.2.0 允许同一码在到期前依次绑定多台独立授权设备，撤销成员时轮换邀请码；分享者仅在访客在线时看到公网出口 IP，并会提示 NAT、VPN 或代理可能让多人显示同一地址。共享依赖资源所有者的 RackTop 和电脑持续在线；Mac 客户端不需要复制所有者的私钥。
-- **团队预约**：连接同一个在线预约服务，用成员名称和密码注册或登录；普通成员需由超级管理员分配一个或多个组织后使用，并选择当前组织。无需安装 RackTop 也可以在浏览器查看排期和预约；管理员可在桌面端将选中的个人服务器 GPU 清单同步到预约资源；组织服务器目录独立管理。个人资源上传不包含 SSH 地址或私钥。预约属于排期协调，不会自动授予 SSH 权限，也不会强制占用 GPU。详细流程见 [团队预约使用说明](../team-web/README.md)。
+- **团队预约**：连接同一个在线预约服务，用成员名称和密码注册或登录；普通成员需由超级管理员分配一个或多个组织后使用，并选择当前组织。无需安装 RackTop 也可以在浏览器查看排期和预约；GPU 预约资源须关联有效的组织服务器资源，并按组织和 SSH 授权显示；个人清单同步本身不使资源成为可预约项。个人资源上传不包含 SSH 地址或私钥。预约属于排期协调，不会自动授予 SSH 权限，也不会强制占用 GPU。详细流程见 [团队预约使用说明](../team-web/README.md)。
 
 ## 更新
 
-首次从旧维护版迁入 2.5.0，请退出 RackTop 后，用对应架构的 DMG 替换应用。旧仓库与旧更新清单不变；新分发使用专用更新签名与 [RackTop-Workspace Releases](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases)，保留原应用标识及用户资料。不要先删除应用数据或系统钥匙串。
+首次从旧维护版迁入 2.8.2，请退出 RackTop 后，用对应架构的 DMG 替换应用。旧仓库与旧更新清单不变；新分发使用专用更新签名与 [RackTop-Workspace Releases](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases)，保留原应用标识及用户资料。不要先删除应用数据或系统钥匙串。
 
 应用内更新通过新仓库 `updater/macos.json` 的 `darwin-aarch64` / `darwin-x86_64` 选择对应架构归档并验证签名。平台运行及实际升级验收以本版[版本信息](VERSION_INFOS.md)记录为准，不能用文末旧版结果替代。
 
-Tauri 更新签名与 Apple Developer ID / 公证是两套机制。更新包具备 Tauri 签名，不代表其通过 Apple 公证。自动更新不可用时，退出应用后手动下载并安装本机架构对应的 DMG。应用数据与安装包分开存放，替换前可先在设置中导出配置备份。
+Tauri 更新签名与 Apple Developer ID / 公证是两套机制。更新包具备 Tauri 签名，不代表其通过 Apple 公证。自动更新不可用时，退出应用后手动下载并安装本机架构对应的 DMG。应用数据与安装包分开存放。替换前可通过「SSH 配置 → 导出配置」保存连接配置，但该文件不包含密码、私钥或历史，不能替代完整资料备份；升级前备份范围见[下载说明](DOWNLOADS.md#升级与资料)。
 
 ## 从源码构建
 
@@ -67,13 +69,23 @@ RACKTOP_MACOS_TARGET=x86_64-apple-darwin RACKTOP_REQUIRE_UPDATER=0 npm run bundl
 
 ## 团队工作台
 
-「密钥管理」与「日志」之间的 **团队工作台** 可以悬停、键盘焦点或点击展开，包含服务器目录、设备管理、周报与绩效、算力预约和设备申请与领取，主按钮打开在线首页。原「团队预约」桌面页面继续同步本机资源。网页用一个名称和密码注册，超管可为成员勾选多个组织；成员在网页或桌面选择当前组织，各项业务仍按当前组织隔离。超管保持跨组织管理。2.5.0 桌面同步获授权的组织服务器连接元数据，密码或私钥由用户在本机配置。设备照片缩略图、资产标签和账号头像都在网页中管理。详见[工作台指南](WORKSPACE.md)、[账号管理](TEAM_ACCOUNTS.md)和[设备管理](EQUIPMENT.md)。
+### 2.8.2：只显示当前账号的团队连接
+
+桌面服务器列表和搜索只显示当前登录账号的团队连接。普通成员和组织管理员只显示当前组织；超级管理员可查看自己账号下的跨组织连接。以前登录过的其他账号记录不再混入当前列表，同名服务器也按各自的账号记录区分。
+
+当前账号下暂时离线或尚未配置本机认证的服务器仍保留，方便查看和编辑；“刷新全部”跳过当前不可连接的团队项，并按实际参与的连接显示进度。退出登录、切换账号或组织期间，以及无法读取本机安全存储确认账号时，只显示个人连接。切换会清除旧账号在界面中的采样、历史缓存和相关弹窗，迟到结果不再恢复旧视图。这里只调整显示范围，原本机连接记录与历史不删除，个人连接继续保留。
+
+普通服务器名称或目录元数据更新只重读目录，不会按账号切换处理；地址、认证或授权变更仍按原规则停止受影响的连接。
+
+「密钥管理」与「日志」之间的 **团队工作台** 可以悬停、键盘焦点或点击展开，包含服务器资源、资产设备管理、算力预约和办公设备申请，主按钮打开在线首页。原「团队预约」桌面页面继续同步本机资源。网页用一个名称和密码注册，超管可为成员勾选多个组织；成员在网页或桌面选择当前组织，各项业务仍按当前组织隔离。超管保持跨组织管理。桌面同步获授权的组织服务器连接元数据；管理员已设置的共享密码会在连接时使用，未设置时由用户在本机配置认证。管理员 GPU 占用上报从 2.8.0 起已支持，须使用管理员身份并持续采集。当前云端业务服务仍为 2.8.1。设备照片缩略图、资产标签和账号头像都在网页中管理。详见[工作台指南](WORKSPACE.md)、[账号管理](TEAM_ACCOUNTS.md)和[设备管理](EQUIPMENT.md)。
 
 SSH 导入与导出合并到 **SSH 配置**，导出可勾选特定连接，不包含密码、私钥或本机私钥路径。GPU 通知选择关闭后立即抑制后续派发，设置保存到本机；通知与团队业务数据的具体边界见 [Linux 指南](LINUX.md#团队工作台与通知)。
 
 ## 验证范围
 
-2.5.0 的实际检查范围以[版本信息](VERSION_INFOS.md)对应条目及本版 Release 为准；以下旧版记录只证明各版本当时的结果。
+2.8.2 的[正式标签工作流](https://github.com/AIsMovDataInfra/RackTop-Workspace/actions/runs/34731161697)在 Linux、Mac Apple Silicon、Mac Intel 和统一发布任务全部成功。共用桌面前端 357 项、Linux release 库 236 项及生产构建通过，3 项既有外部依赖测试忽略。11 个 Release 附件、四目标更新签名、标签源码及 15 个公开下载文件均已核验。
+
+两种 Mac 架构完成 DMG 挂载、应用架构和签名、DMG 与更新归档内容一致性、更新签名及 SSH 回归检查；分别在隔离资料目录原生启动至少 8 秒并创建数据库，2.8.2 截图已查看。包仍为 **ad-hoc 签名、未经 Apple 公证**。这些是 CI 原生启动与截图检查，不是用户 Mac 上的完整 GUI 交互；首次 Gatekeeper 放行、真实钥匙串权限、真实用户账号切换及自动更新替换仍需单独验证。Mac SSH 检查不包含 Linux `/proc` 参数与环境采样。详见[本轮版本信息](VERSION_INFOS.md)，以下旧版记录仅保留各版本当时的结果。
 
 ### 历史 2.2.0 验证记录
 

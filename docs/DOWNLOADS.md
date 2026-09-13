@@ -1,8 +1,8 @@
 # 安装 RackTop
 
-**[统一下载页](https://136.0.110.161/downloads/)提供 2.8.0 测试版（Pre-release）。** 安装的是现成程序，无需源码、Rust、Cargo 或 WebKit 开发包。
+**[统一下载页](https://136.0.110.161/downloads/)提供 2.8.2 测试版（Pre-release）。** 安装的是现成程序，无需源码、Rust、Cargo 或 WebKit 开发包。
 
-2.8.0 团队网页、Linux 与两种 Mac 安装包均已发布，下面的云端与 GitHub 下载已完成对应产物核验。下载新版不会自动升级尚在运行的旧程序；新增 GPU 占用需要管理员安装新版并持续采集。
+桌面 2.8.2 的 Linux 与两种 Mac 安装包已发布，下面的云端与 GitHub 下载已完成对应产物核验；团队网页继续运行 2.8.1。下载新版后需完成安装并重启旧程序。GPU 占用摘要需要管理员使用 2.8.0 或更新的桌面并持续采集。
 
 ## Ubuntu 一键安装
 
@@ -22,12 +22,12 @@ curl --proto '=https' --proto-redir '=https' -fL https://136.0.110.161/downloads
 
 | 电脑 | 云端下载 | GitHub 备用 |
 | --- | --- | --- |
-| Ubuntu 20.04，Intel / AMD 64 位 | [Flatpak 离线套件](https://136.0.110.161/downloads/RackTop_2.8.0_linux-amd64-flatpak-offline.tar.gz) | [下载](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.8.0/RackTop_2.8.0_linux-amd64-flatpak-offline.tar.gz) |
-| Ubuntu 22.04，Intel / AMD 64 位 | [DEB 安装包](https://136.0.110.161/downloads/RackTop_2.8.0_linux-amd64.deb) | [下载](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.8.0/RackTop_2.8.0_linux-amd64.deb) |
-| Mac，M 系列芯片 | [Apple Silicon DMG](https://136.0.110.161/downloads/RackTop_2.8.0_macos-arm64-unsigned.dmg) | [下载](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.8.0/RackTop_2.8.0_macos-arm64-unsigned.dmg) |
-| Mac，Intel 芯片 | [Intel DMG](https://136.0.110.161/downloads/RackTop_2.8.0_macos-x64-unsigned.dmg) | [下载](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.8.0/RackTop_2.8.0_macos-x64-unsigned.dmg) |
+| Ubuntu 20.04，Intel / AMD 64 位 | [Flatpak 离线套件](https://136.0.110.161/downloads/RackTop_2.8.2_linux-amd64-flatpak-offline.tar.gz) | [下载](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.8.2/RackTop_2.8.2_linux-amd64-flatpak-offline.tar.gz) |
+| Ubuntu 22.04，Intel / AMD 64 位 | [DEB 安装包](https://136.0.110.161/downloads/RackTop_2.8.2_linux-amd64.deb) | [下载](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.8.2/RackTop_2.8.2_linux-amd64.deb) |
+| Mac，M 系列芯片 | [Apple Silicon DMG](https://136.0.110.161/downloads/RackTop_2.8.2_macos-arm64-unsigned.dmg) | [下载](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.8.2/RackTop_2.8.2_macos-arm64-unsigned.dmg) |
+| Mac，Intel 芯片 | [Intel DMG](https://136.0.110.161/downloads/RackTop_2.8.2_macos-x64-unsigned.dmg) | [下载](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.8.2/RackTop_2.8.2_macos-x64-unsigned.dmg) |
 
-全部为同一 2.8.0 测试版；[GitHub Release](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/tag/v2.8.0)和[历史版本](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases)继续保留。团队工作台可[直接在浏览器打开](https://136.0.110.161/)。
+全部为同一 2.8.2 测试版；[GitHub Release](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/tag/v2.8.2)和[历史版本](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases)继续保留。团队工作台可[直接在浏览器打开](https://136.0.110.161/)。
 
 ### Ubuntu 20.04 手动安装
 
@@ -37,7 +37,7 @@ curl --proto '=https' --proto-redir '=https' -fL https://136.0.110.161/downloads
 sudo apt install flatpak
 ```
 
-下载并解压 `RackTop_2.8.0_linux-amd64-flatpak-offline.tar.gz`，进入 **`RackTop_2.8.0_flatpak_offline`** 文件夹，在空白处右键选择“在终端打开”，运行：
+下载并解压 `RackTop_2.8.2_linux-amd64-flatpak-offline.tar.gz`，进入 **`RackTop_2.8.2_flatpak_offline`** 文件夹，在空白处右键选择“在终端打开”，运行：
 
 ```bash
 bash install.sh
@@ -52,7 +52,7 @@ bash install.sh
 退出旧程序，在下载目录运行：
 
 ```bash
-sudo apt install ./RackTop_2.8.0_linux-amd64.deb
+sudo apt install ./RackTop_2.8.2_linux-amd64.deb
 ```
 
 APT 会补齐运行组件。安装成功后从应用菜单打开 RackTop，或运行 `racktop`。已有 Flatpak 请用统一安装器继续原格式；Ubuntu 20.04 请使用兼容套件。
@@ -67,22 +67,26 @@ APT 会补齐运行组件。安装成功后从应用菜单打开 RackTop，或�
 
 升级前退出 RackTop。同格式升级继续使用原资料；不要先在应用内删除服务器，也不要删除应用资料目录、SSH 密钥或系统钥匙串。
 
-旧 2.2.2 Flatpak 先通过上方统一安装器升级到 2.8.0，无需卸载。此后应用内更新只下载已签名的 `.flatpak` 应用包，复用 GNOME 50 运行时，并保留原安装范围与数据。
+旧 2.2.2 Flatpak 先通过上方统一安装器升级到 2.8.2，无需卸载。此后应用内更新只下载已签名的 `.flatpak` 应用包，复用 GNOME 50 运行时，并保留原安装范围与数据。
 
 DEB 默认资料在 `~/.local/share/com.racktop.desktop`，Flatpak 默认在 `~/.var/app/com.racktop.desktop/data/com.racktop.desktop`。两者不自动迁移；切换格式前先备份并核对服务器连接，团队账号和共享身份可能需要重新登录或绑定。不要让两个客户端同时读写同一数据库。
 
+### 切换团队账号
+
+2.8.2 中，服务器列表、搜索和总览只显示当前账号及组织的组织连接；超级管理员可查看本账号获授权的跨组织连接。切换账号后，旧账号团队连接对应的选中项、终端和界面采样会清除；其连接资料及历史仍留在本机，切回后可重新显示，连接前仍需通过当前授权检查。当前账号尚未配置认证或暂时离线的连接仍显示；“刷新全部”跳过当前不可连接的条目。个人手动连接不随团队账号切换自动删除。
+
 ## 管理员分配的 SSH 密码
 
-网页管理员在「服务器资源 → 编辑」填写服务器现有密码并保存，再分配成员权限。成员升级到 2.8.0 后登录团队账号、选择组织，连接时自动领取密码。网页保存密码不会修改远端服务器账号的密码；私钥继续在本机配置。
+网页管理员在「服务器资源 → 编辑」填写服务器现有密码并保存，再分配成员权限。成员升级到 2.8.2 后登录团队账号、选择组织，连接时自动领取密码。网页保存密码不会修改远端服务器账号的密码；私钥继续在本机配置。
 
 SSH 连接和文件传输继续通过成员本机网络直连目标服务器。2.7.3 的客户端加固减少密码意外暴露，但不能阻止获授权成员主动取得密码。
 
 ## 校验、源码与帮助
 
-手动下载后可用同目录 [SHA256SUMS](https://136.0.110.161/downloads/SHA256SUMS) 核验摘要；[GitHub 校验清单](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.8.0/SHA256SUMS)对应 Release 附件。校验失败时重新下载，不要跳过校验。
+手动下载后可用同目录 [SHA256SUMS](https://136.0.110.161/downloads/SHA256SUMS) 核验摘要；[GitHub 校验清单](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.8.2/SHA256SUMS)对应 Release 附件。校验失败时重新下载，不要跳过校验。
 
-- 2.8.0 对应源码：[云端](https://136.0.110.161/downloads/RackTop_2.8.0_source.tar.gz) · [GitHub](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.8.0/RackTop_2.8.0_source.tar.gz)。
-- GPL-3.0 许可证：[云端](https://136.0.110.161/downloads/LICENSE) · [GitHub](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.8.0/LICENSE)。
-- 来源与署名：[云端 NOTICE](https://136.0.110.161/downloads/NOTICE.md) · [GitHub NOTICE](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.8.0/NOTICE.md)。
+- 2.8.2 对应源码：[云端](https://136.0.110.161/downloads/RackTop_2.8.2_source.tar.gz) · [GitHub](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.8.2/RackTop_2.8.2_source.tar.gz)。
+- GPL-3.0 许可证：[云端](https://136.0.110.161/downloads/LICENSE) · [GitHub](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.8.2/LICENSE)。
+- 来源与署名：[云端 NOTICE](https://136.0.110.161/downloads/NOTICE.md) · [GitHub NOTICE](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.8.2/NOTICE.md)。
 
 下载失败可使用表格中的 GitHub 备用链接；找不到资料时先核对安装格式。连接问题见 [Linux 指南](LINUX.md)，其他问题可[反馈](https://github.com/AIsMovDataInfra/RackTop-Workspace/issues)。构建和发布流程见[维护者说明](MAINTAINERS.md)。
