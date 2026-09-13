@@ -1,16 +1,16 @@
 {
-  "version": "2.8.1",
-  "notes": "- 预约资源与启用的服务器资源及 SSH 授权一致，移除目录后不再出现在预约看板，历史预约保留。\n- 区分「当前空闲」和「所选时段未预约」，占用中的机器保留展示，仍可安排未来时段。\n- 开始当前 GPU 预约前检查所选卡的实时占用，数据未知或过期时提示刷新确认。\n- 预约弹窗持续更新资源状态，目录撤权或状态过期时保留输入并提示处理。",
-  "pub_date": "2026-09-13T00:40:11Z",
+  "version": "2.8.2",
+  "notes": "- 修复切换账号后搜索和总览仍混入旧账号组织连接的问题。\n- 修复切换账号后保留旧选中连接或旧采样画面的问题。\n- 修复刷新全部时失效连接的无权限提示干扰正常连接反馈的问题。",
+  "pub_date": "2026-09-13T02:19:59Z",
   "platforms": {
     "linux-x86_64-deb": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTVThDMjZnT3Yrc3Z3LzdsU2xZb2g3Z1Q0eFhmWWNGK1U0ak9tSXdteWk1eXpmbElOZy9KVFlmNmZhMFBISGhVOFlheXFMYXBHbmxlOXcxeUh0TTAvTUkxRTRJYlQxQ1EwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg5MjU4OTEwCWZpbGU6UmFja1RvcF8yLjguMV9saW51eC1hbWQ2NC5kZWIKc3U3VkhrLzRRTkpLQXVPNnJsUmlYR3dIRGRqdlBqNzFnd2NySXZJanpHRGdoUmkvSExmUFNFcHRHNis3TzJkeHl6S3BXLzZzOUV0OGltS2c2a3p3Q3c9PQo=",
-      "url": "https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.8.1/RackTop_2.8.1_linux-amd64.deb"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTVThDMjZnT3Yrc3I3ai84dm92SHNMSGFPMjBCa1dIVVU4S21BS0N1Mm1oTHdHTnhpSU5zSDZHcDhMMFgxdkI5ODhNTEp5YW9YMElEZXZQMStyMERtZDhpS28xalVGdFFjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg5MjY0NDY4CWZpbGU6UmFja1RvcF8yLjguMl9saW51eC1hbWQ2NC5kZWIKU3FEd1IvdVI1REdaK3I0MkxkNUF5YXpKakdVWXRGQ05nTWluVytDdmh0TjJicWtyKzJEbHh1OXZvQzlqdGxmM0NPQUFsWGw1VHJlZTRXOFl3aE56RGc9PQo=",
+      "url": "https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.8.2/RackTop_2.8.2_linux-amd64.deb"
     },
     "linux-x86_64-flatpak": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTVThDMjZnT3Yrc3NmYU1ZSmFaU1llamZpMnoxZTc5OC9SUC93akNCZUdRVk14ajQrYmNVaFpIeVdWc2s0ZXJ4QTk5em1BTWpUTTZPVUtsVG92aTc1cHRvQXZmRzgyQlF3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg5MjU5MjEzCWZpbGU6UmFja1RvcF8yLjguMV9saW51eC1hbWQ2NC5mbGF0cGFrCk0xaG42dnF3ZGpxdnMvVERVaGh3anlwMGUrRlIxL1Y1L293aXJCYW9wUnowWEtFSERDZk43R28xYWpyMUFySlN0MnpmNE1VcnNmMk5XL21NK3NnK0JBPT0K",
-      "commit": "3362915cd46244c1985ad9fc8d22479be57d5e903c805544b54bc3e57eff6226",
-      "url": "https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.8.1/RackTop_2.8.1_linux-amd64.flatpak"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTVThDMjZnT3Yrc3NXU3N6ZWdJYTRKVWVpNGxXVFcvTTB1ZU01TUh0RGgvUGdZZGxpOEhkWnVtL2JzdTd0TnNaaXRKVkxLM3pIR2NvOFJ3RGxTVTRaK0VxeUJuVnN5cGdzPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg5MjY0ODEzCWZpbGU6UmFja1RvcF8yLjguMl9saW51eC1hbWQ2NC5mbGF0cGFrCksrd3lhRnRYcDl0anl6OU8wYk1JNmNoM1BiVTduZ3RrQ29zY1l2QU1zK04wUGN1dWRpcFl0ZWhsTk01dHhvZ0d3eDU2TzRKdTlRbHRnL0xiQVlGRkR3PT0K",
+      "commit": "c86fe0131d1000081b39b01e1c607a6a23ab33778640f503f31244e1497b4f55",
+      "url": "https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.8.2/RackTop_2.8.2_linux-amd64.flatpak"
     }
   }
 }
