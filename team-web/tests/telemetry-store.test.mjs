@@ -20,9 +20,23 @@ function fixture(t) {
   let clock = base;
   const store = createStore({ dbPath: path, now: () => clock, enforceCompanies: true });
   const db = new DatabaseSync(path);
+  db.exec(`CREATE TABLE account_users(id TEXT PRIMARY KEY,role TEXT,is_super_admin INTEGER,deleted_at INTEGER);
+    CREATE TABLE account_user_companies(user_id TEXT,company TEXT,PRIMARY KEY(user_id,company));
+    CREATE TABLE managed_servers(id TEXT PRIMARY KEY,company TEXT,version INTEGER,enabled INTEGER);
+    CREATE TABLE managed_server_grants(server_id TEXT,user_id TEXT,PRIMARY KEY(server_id,user_id));`);
+  const addActor = actor => {
+    db.prepare('INSERT INTO account_users VALUES(?,?,?,NULL)').run(actor.id, actor.role, actor.isSuperAdmin ? 1 : 0);
+    if (actor.company) db.prepare('INSERT INTO account_user_companies VALUES(?,?)').run(actor.id, actor.company);
+    return actor;
+  };
+  [admin, superAdmin, member, { ...member, id: 'another-member' }].forEach(addActor);
   t.after(() => { db.close(); store.close(); rmSync(dir, { recursive: true, force: true }); });
-  const sync = (data = report(), managed = server(), user = admin) => store.syncManagedTelemetry(data, user, managed);
-  return { store, db, sync, setClock: value => { clock = value; } };
+  const sync = (data = report(), managed = server(), user = admin) => {
+    db.prepare('INSERT OR IGNORE INTO managed_servers VALUES(?,?,?,?)').run(managed.id, managed.company, managed.version, managed.enabled ? 1 : 0);
+    for (const id of [member.id, 'another-member']) db.prepare('INSERT OR IGNORE INTO managed_server_grants VALUES(?,?)').run(managed.id, id);
+    return store.syncManagedTelemetry(data, user, managed);
+  };
+  return { store, db, sync, addActor, setClock: value => { clock = value; } };
 }
 function booking(resource) {
   return { resourceId: resource.id, scope: 'gpus', gpuIds: [resource.gpus[0].id], inventoryVersion: resource.inventoryVersion,
@@ -48,7 +62,12 @@ test('complete telemetry creates stable GPU inventory and returns only minimal c
   assert.deepEqual(Object.keys(resource.gpus[0]).sort(), ['id', 'uuid', 'index', 'model', 'memoryTotalMb'].sort());
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM managed_resource_bindings').get().n, 1);
   assert.equal(store.listResources(member)[0].id, resource.id);
-  assert.deepEqual(store.listResources({ ...member, company: 'B公司' }), []);
+  assert.deepEqual(store.listResources(fixtureOutsider()), []);
+  function fixtureOutsider() {
+    db.prepare("INSERT INTO account_users VALUES('reader-b','member',0,NULL)").run();
+    db.prepare("INSERT INTO account_user_companies VALUES('reader-b','B公司')").run();
+    return { ...member, id: 'reader-b', company: 'B公司' };
+  }
 });
 
 test('free requires complete valid metrics and process query; positive usage remains busy without a known user', t => {
@@ -106,12 +125,14 @@ test('only superadmin may claim unassigned exact hardware and all old identity, 
   const { sync, store, db } = fixture(t);
   let resource = store.syncResource({ sourceId: 'legacy-personal', serverId: 'legacy-login', cluster: '旧集群', name: '旧资源名称', notes: '保留备注', gpus: hardware([gpu()]), observedAt: base, status: 'online' }, superAdmin);
   const inventory = db.prepare('SELECT * FROM resource_inventory').get();
-  resource = store.updateResource(resource.id, { enabled: false }, superAdmin);
+  db.prepare('UPDATE resources SET enabled=0 WHERE id=?').run(resource.id);
+  resource = { ...resource, enabled: false };
   // A legacy unassigned booking predates company enforcement; preserve it on first assignment.
   db.prepare(`INSERT INTO reservations(id,resource_id,owner_id,owner_name,scope,gpu_indices,gpu_ids,inventory_version,start_at,end_at,purpose,status,created_at,updated_at,company,resource_name_snapshot,cluster_snapshot)
     VALUES('legacy-reservation',?,'legacy-user','历史成员','gpus','[0]',?,1,?,?,'历史用途','confirmed',?,?,'',?,?)`).run(resource.id, JSON.stringify([resource.gpus[0].id]), base - 60_000, base + 60_000, base, base, resource.name, resource.cluster);
   fail(() => sync(), 'SUPERADMIN_REQUIRED');
-  assert.equal(store.getResource(resource.id, superAdmin).company, '');
+  fail(() => store.getResource(resource.id, superAdmin), 'NOT_FOUND');
+  assert.equal(db.prepare('SELECT company FROM resources WHERE id=?').get(resource.id).company, '');
   const claimed = sync(report(), server(), superAdmin);
   assert.equal(claimed.id, resource.id); assert.equal(claimed.company, 'A公司'); assert.equal(claimed.companyVersion, resource.companyVersion + 1);
   for (const key of ['name', 'cluster', 'notes', 'enabled', 'gpus', 'inventoryVersion']) assert.deepEqual(claimed[key], resource[key], key);
@@ -189,4 +210,127 @@ test('strict telemetry contract rejects extra secret/process fields and invalid 
   }
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM resource_usage').get().n, 0);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM resources').get().n, 0);
+});
+
+test('inventory access follows live directory grants while explicit manual resources retain company policy', t => {
+  const { sync, store, addActor, db } = fixture(t);
+  const ungranted = addActor({ ...member, id: 'no-grant' });
+  const outside = addActor({ ...member, id: 'other-org', company: 'B公司' });
+  const resource = sync(report({ gpus: [gpu(1, { hasProcesses: true })] }));
+  const manual = store.createResource({ cluster: 'CPU', name: 'Explicit CPU', gpuCount: 0 }, admin);
+  for (const user of [member, admin, superAdmin]) assert.deepEqual(store.getResource(resource.id, user).usage, resource.usage);
+  assert.deepEqual(store.listResources(ungranted).map(value => value.id), [manual.id]);
+  assert.deepEqual(store.listResources(outside), []);
+  for (const user of [ungranted, outside]) {
+    fail(() => store.getResource(resource.id, user), 'NOT_FOUND');
+    fail(() => store.createReservation(booking(resource), user), 'NOT_FOUND');
+  }
+  assert.equal(store.createReservation({ resourceId: manual.id, scope: 'machine', gpuIndices: [], startAt: new Date(base).toISOString(),
+    endAt: new Date(base + 60_000).toISOString(), purpose: 'Explicit CPU' }, ungranted).status, 'confirmed');
+  store.updateResource(manual.id, { enabled: false }, admin);
+  fail(() => store.createReservation({ resourceId: manual.id, scope: 'machine', gpuIndices: [], startAt: new Date(base).toISOString(),
+    endAt: new Date(base + 60_000).toISOString(), purpose: 'disabled' }, member), 'INVALID_INPUT');
+  for (const forged of [{ ...member, role: 'admin' }, { ...member, isSuperAdmin: true }]) fail(() => store.listResources(forged), 'ACCOUNT_CHANGED');
+  db.prepare("UPDATE account_users SET deleted_at=1 WHERE id=?").run(member.id);
+  fail(() => store.getResource(resource.id, member), 'ACCOUNT_CHANGED');
+});
+
+test('legacy unassigned inventory stays outside the active catalog without deleting any history', t => {
+  const { store, db } = fixture(t);
+  const legacy = store.syncResource({ sourceId: 'legacy', serverId: 'old-a100', cluster: 'old', name: 'old A100',
+    gpus: hardware([gpu()]), observedAt: base, status: 'online' }, superAdmin);
+  const before = db.prepare('SELECT * FROM resource_inventory WHERE resource_id=?').get(legacy.id);
+  assert.deepEqual(store.listResources(superAdmin), []);
+  fail(() => store.getResource(legacy.id, superAdmin), 'NOT_FOUND');
+  fail(() => store.updateResource(legacy.id, { enabled: true }, superAdmin), 'NOT_FOUND');
+  assert.deepEqual(db.prepare('SELECT * FROM resource_inventory WHERE resource_id=?').get(legacy.id), before);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM resources').get().n, 1);
+});
+
+test('one authorized alias shares identity and usage; revocation hides board history but keeps the owner receipt and release', t => {
+  const { sync, store, db, addActor } = fixture(t);
+  const stranger = addActor({ ...member, id: 'no-grant' });
+  const resource = sync(), alias = server({ id: 'second-login' });
+  sync(report(), alias);
+  const draft = { ...booking(resource), requestId: 'same-request' };
+  const first = store.createReservation(draft, member);
+  db.prepare('DELETE FROM managed_server_grants WHERE server_id=? AND user_id=?').run(server().id, member.id);
+  assert.equal(store.listResources(member).length, 1, 'the second authorized alias is sufficient');
+  assert.equal(store.getResource(resource.id, member).id, resource.id);
+  db.prepare('DELETE FROM managed_server_grants WHERE user_id=?').run(member.id);
+  assert.deepEqual(store.listResources(member), []);
+  assert.deepEqual(store.listReservations({}, member), []);
+  assert.deepEqual(store.listReservations({}, stranger), []);
+  assert.equal(store.listReservations({ mine: true }, member)[0].id, first.id);
+  assert.equal(store.getReservation(first.id, member).id, first.id);
+  assert.equal(store.createReservation(draft, member).id, first.id, 'idempotent owner receipt creates no new allocation');
+  fail(() => store.createReservation({ ...draft, requestId: 'new-request' }, member), 'NOT_FOUND');
+  fail(() => store.updateReservation(first.id, { version: 1, endAt: new Date(base + 7_200_000).toISOString(), inventoryVersion: 1 }, member), 'NOT_FOUND');
+  fail(() => store.getReservation(first.id, stranger), 'NOT_FOUND');
+  fail(() => store.createReservation(draft, stranger), 'NOT_FOUND');
+  assert.equal(store.cancelReservation(first.id, { version: 1 }, member).status, 'cancelled');
+  assert.equal(store.getReservation(first.id, admin).status, 'cancelled');
+});
+
+test('disabled directory entries and removed organization membership immediately remove access', t => {
+  const { sync, store, db } = fixture(t);
+  const resource = sync(), first = store.createReservation(booking(resource), member);
+  db.prepare('UPDATE managed_servers SET enabled=0').run();
+  assert.deepEqual(store.listResources(member), []); assert.deepEqual(store.listResources(superAdmin), []);
+  fail(() => store.createReservation(booking(resource), admin), 'NOT_FOUND');
+  db.prepare('UPDATE managed_servers SET enabled=1').run();
+  db.prepare('DELETE FROM account_user_companies WHERE user_id=?').run(member.id);
+  for (const read of [() => store.listResources(member), () => store.listReservations({ mine: true }, member),
+    () => store.getReservation(first.id, member), () => store.cancelReservation(first.id, { version: 1 }, member)]) fail(read, 'ACCOUNT_CHANGED');
+  assert.equal(db.prepare('SELECT status FROM reservations WHERE id=?').get(first.id).status, 'confirmed');
+});
+
+test('busy and unknown GPUs block current allocations consistently while future schedules remain possible', t => {
+  const { sync, store } = fixture(t);
+  const resource = sync(report({ gpus: [gpu(1, { hasProcesses: true }), gpu(2), gpu(3, { utilization: null })] }));
+  const current = { ...booking(resource), startAt: new Date(base).toISOString() };
+  for (const user of [member, admin, superAdmin]) {
+    fail(() => store.createReservation(current, user), 'GPU_BUSY');
+    fail(() => store.createReservation({ ...current, scope: 'machine', gpuIds: [] }, user), 'GPU_BUSY');
+    fail(() => store.createReservation({ ...current, gpuIds: [resource.gpus[2].id] }, user), 'GPU_USAGE_UNKNOWN');
+  }
+  assert.equal(store.createReservation({ ...current, gpuIds: [resource.gpus[1].id] }, member).status, 'confirmed');
+  assert.equal(store.createReservation(booking(resource), admin).status, 'confirmed', 'busy has no invented future end time');
+  fail(() => store.createReservation(booking(resource), superAdmin), 'RESERVATION_CONFLICT');
+});
+
+test('90 seconds is the shared strict expiry boundary and manual GPUs cannot assert current availability', t => {
+  const { sync, store, setClock } = fixture(t);
+  const resource = sync();
+  setClock(base + 90_000);
+  assert.equal(store.getResource(resource.id, member).usage.state, 'unknown');
+  fail(() => store.createReservation({ ...booking(resource), startAt: new Date(base + 90_000).toISOString() }, member), 'GPU_USAGE_UNKNOWN');
+  const manual = store.createResource({ cluster: 'manual', name: 'Explicit GPU', gpuCount: 1, gpuModel: 'Synthetic' }, admin);
+  fail(() => store.createReservation({ resourceId: manual.id, scope: 'gpus', gpuIndices: [0], startAt: new Date(base + 90_000).toISOString(),
+    endAt: new Date(base + 3_600_000).toISOString(), purpose: 'unknown' }, member), 'GPU_USAGE_UNKNOWN');
+});
+
+test('ongoing notes and same-allocation extensions survive own busy usage; added GPUs are checked', t => {
+  const { sync, store, setClock } = fixture(t);
+  const resource = sync(report({ gpus: [gpu(), gpu(2)] }));
+  let reserved = store.createReservation({ ...booking(resource), startAt: new Date(base).toISOString() }, member);
+  setClock(base + 1000);
+  sync(report({ observedAt: base + 1000, gpus: [gpu(1, { hasProcesses: true }), gpu(2, { hasProcesses: true })] }));
+  reserved = store.updateReservation(reserved.id, { version: reserved.version, inventoryVersion: 1, purpose: 'running own task' }, member);
+  reserved = store.updateReservation(reserved.id, { version: reserved.version, inventoryVersion: 1, endAt: new Date(base + 180_000).toISOString() }, member);
+  reserved = store.updateReservation(reserved.id, { version: reserved.version, inventoryVersion: 1, endAt: new Date(base + 240_000).toISOString() }, member);
+  fail(() => store.updateReservation(reserved.id, { version: reserved.version, inventoryVersion: 1, gpuIds: resource.gpus.map(gpu => gpu.id) }, member), 'GPU_BUSY');
+  setClock(base + 2000);
+  sync(report({ observedAt: base + 2000, gpus: [gpu(1, { hasProcesses: true }), gpu(2)] }));
+  reserved = store.updateReservation(reserved.id, { version: reserved.version, inventoryVersion: 1, gpuIds: resource.gpus.map(gpu => gpu.id) }, member);
+  assert.equal(reserved.gpuIds.length, 2, 'only the newly added free card is checked');
+  assert.equal(store.finishReservation(reserved.id, { version: reserved.version }, member).status, 'completed');
+});
+
+test('moving a future booking into the current interval must recheck every selected GPU', t => {
+  const { sync, store } = fixture(t);
+  const resource = sync(report({ gpus: [gpu(1, { hasProcesses: true })] }));
+  const future = store.createReservation(booking(resource), member);
+  fail(() => store.updateReservation(future.id, { version: 1, inventoryVersion: 1, startAt: new Date(base).toISOString() }, member), 'GPU_BUSY');
+  assert.equal(store.getReservation(future.id, member).startAt, future.startAt);
 });

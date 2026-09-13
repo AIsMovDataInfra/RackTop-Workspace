@@ -16,7 +16,7 @@ const reservation: Reservation = { id: 'reservation-1', resourceId: resource.id,
 let container: HTMLDivElement
 let root: ReturnType<typeof createRoot>
 
-beforeEach(() => { container = document.createElement('div'); document.body.append(container); root = createRoot(container); window.history.replaceState({}, '', '/') })
+beforeEach(() => { vi.spyOn(api, 'resources').mockResolvedValue({ resources: [resource] }); container = document.createElement('div'); document.body.append(container); root = createRoot(container); window.history.replaceState({}, '', '/') })
 afterEach(() => { act(() => root.unmount()); container.remove(); vi.restoreAllMocks() })
 
 async function click(text: string) { const button = [...container.querySelectorAll<HTMLButtonElement>('button')].find((item) => item.textContent === text); expect(button, text).toBeDefined(); await act(async () => button!.click()) }
@@ -31,6 +31,7 @@ describe('reservation interactions', () => {
   it('permits a future whole-machine booking for a busy CPU resource without carrying a stale GPU selection', async () => {
     const reserve = vi.spyOn(api, 'reserve').mockResolvedValue({ reservation })
     const cpu: Resource = { ...resource, gpuCount: 0, gpuModel: '', usage: { state: 'busy', observedAt: new Date().toISOString(), gpus: [] } }
+    vi.mocked(api.resources).mockResolvedValue({ resources: [cpu] })
     await act(async () => root.render(<ReservationDialog resource={cpu} initialGpu={3} start="2030-09-09T10:00" end="2030-09-09T11:00" t={t} locale="zh-CN" onClose={vi.fn()} onSaved={vi.fn()} />))
     expect(container.querySelector('.resource-usage-state')?.textContent).toBe('被占用')
     expect(container.textContent).toContain('匿名用户')
@@ -58,6 +59,7 @@ describe('reservation interactions', () => {
   it('uses stable GPU identities and keeps a request ID across an uncertain network retry', async () => {
     const reserve = vi.spyOn(api, 'reserve').mockRejectedValue(new TypeError('Network error'))
     const synced: Resource = { ...resource, inventoryVersion: 4, inventoryState: 'synced', gpuCount: 1, gpus: [{ id: 'gpu-stable', uuid: 'GPU-physical', index: 7, model: 'A100', memoryTotalMb: 81920 }] }
+    vi.mocked(api.resources).mockResolvedValue({ resources: [synced] })
     await act(async () => root.render(<ReservationDialog resource={synced} initialGpu={7} start="2030-09-09T10:00" end="2030-09-09T11:00" t={t} locale="zh-CN" onClose={vi.fn()} onSaved={vi.fn()} />))
     enter('textarea', '稳定 GPU 预约')
     await submit(); await submit()
@@ -69,6 +71,7 @@ describe('reservation interactions', () => {
   })
   it('prevents new bookings while the synchronized GPU inventory requires review', async () => {
     const reserve = vi.spyOn(api, 'reserve')
+    vi.mocked(api.resources).mockResolvedValue({ resources: [{ ...resource, inventoryState: 'conflict', inventoryVersion: 2 }] })
     await act(async () => root.render(<ReservationDialog resource={{ ...resource, inventoryState: 'conflict', inventoryVersion: 2 }} start="2030-09-09T10:00" end="2030-09-09T11:00" t={t} locale="zh-CN" onClose={vi.fn()} onSaved={vi.fn()} />))
     enter('textarea', '无法提交'); await submit()
     expect(reserve).not.toHaveBeenCalled()
@@ -87,6 +90,7 @@ describe('reservation interactions', () => {
   it('extends a reservation using the current inventory version after GPU indices change', async () => {
     const renew = vi.spyOn(api, 'renew').mockResolvedValue({ reservation })
     const currentResource = { ...resource, inventoryVersion: 8, inventoryState: 'synced' as const }
+    vi.mocked(api.resources).mockResolvedValue({ resources: [currentResource] })
     await act(async () => root.render(<RenewalDialog reservation={{ ...reservation, inventoryVersion: 2 }} resource={currentResource} t={t} locale="zh-CN" onClose={vi.fn()} onSaved={vi.fn()} />))
     enter('input', '2030-09-09T13:00'); await submit()
     expect(renew).toHaveBeenCalledWith(expect.objectContaining({ inventoryVersion: 2 }), '2030-09-09T05:00:00.000Z', 8)
@@ -108,7 +112,7 @@ describe('reservation interactions', () => {
     expect(container.querySelector('nav')?.textContent).not.toContain('资源管理')
     expect(container.querySelector('.resource-usage-state')?.textContent).toBe('未知')
     expect(container.textContent).toContain('预约不会自动启动或停止任务')
-    await click('预约')
+    await click('选择时段')
     expect(container.querySelector('[role="dialog"]')?.contains(document.activeElement)).toBe(true)
     act(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
     expect(container.querySelector('[role="dialog"]')).toBeNull()

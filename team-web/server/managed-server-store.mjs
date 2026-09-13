@@ -247,6 +247,16 @@ export function createManagedServerStore({ dbPath, now = Date.now, serverCredent
         const data = definition({ ...view(previous, user), ...input });
         const at = new Date(now()).toISOString();
         const changed = updateCredentials(previous, data, input);
+        const previousConnection = { ...previous, jump: previous.jump_json ? JSON.parse(previous.jump_json) : null };
+        if (connectionKey(previousConnection) !== connectionKey(data)) {
+          // A reused directory id must not grant the new target access to the
+          // old target's GPUs. Preserve resources and all historical bookings.
+          for (const table of ['managed_resource_bindings', 'resource_usage']) {
+            if (db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table)) {
+              db.prepare(`DELETE FROM ${table} WHERE managed_server_id=?`).run(id);
+            }
+          }
+        }
         db.prepare('UPDATE managed_servers SET name=?,host=?,port=?,username=?,jump_json=?,enabled=?,version=version+1,updated_at=? WHERE id=?')
           .run(data.name, data.host, data.port, data.username, data.jump ? JSON.stringify(data.jump) : null, data.enabled ? 1 : 0, at, id);
         audit(id, previous.company, user, 'updated', previous.version + 1, at);

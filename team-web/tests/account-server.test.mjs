@@ -113,7 +113,7 @@ test('account HTTP writes require CSRF and members can only alter their own book
 
 test('actual HTTP admin device sync carries GPU identities and member device cannot manage resources', async t => {
   const { call, register, device, setClock } = await fixture(t);
-  await register('owner'); await register();
+  await register('owner'); const reader = await register();
   const adminToken = await device(), memberToken = await device('member');
   assert.equal((await call('/api/resources/sync', { method: 'POST', bearer: memberToken, body: inventory() })).status, 403);
   assert.equal((await call('/api/resources/sync', { method: 'POST', bearer: adminToken, headers: { origin: undefined }, body: inventory() })).status, 403);
@@ -126,6 +126,16 @@ test('actual HTTP admin device sync carries GPU identities and member device can
   assert.match(resource.gpus[0].id, /^[0-9a-f-]{36}$/); assert.equal(resource.gpus[0].uuid, gpu(1).uuid.toLowerCase());
   const alias = await call('/api/resources/sync', { method: 'POST', bearer: adminToken, body: inventory({ sourceId: 'second-computer', serverId: 'another-ssh-user', name: 'Alias' }) });
   assert.equal(alias.status, 200); assert.equal(alias.body.resource.id, resource.id); assert.equal(alias.body.resource.binding.authoritative, false);
+  assert.deepEqual((await call('/api/resources', { bearer: memberToken })).body.resources, [], 'legacy inventory alone is not SSH authorization');
+  assert.equal((await call(`/api/resources/${resource.id}`, { bearer: memberToken })).status, 404);
+  const catalog = await call('/api/servers', { method: 'POST', bearer: adminToken,
+    body: { company: reader.user.company, name: 'Authorized GPU', host: 'fixture.example.test', port: 22, username: 'fixture', memberIds: [reader.user.id] } });
+  assert.equal(catalog.status, 201, catalog.text);
+  const linked = await call(`/api/servers/${catalog.body.server.id}/telemetry`, { method: 'POST', bearer: adminToken,
+    headers: { 'x-racktop-company': encodeURIComponent(reader.user.company) }, body: { serverVersion: 1, observedAt: BASE, status: 'online',
+      inventoryComplete: true, processQueryOk: true, gpuUsageValid: true,
+      gpus: inventory().gpus.map(value => ({ ...value, utilization: 0, memoryUsedMb: 0, users: [], hasProcesses: false })) } });
+  assert.equal(linked.status, 200, linked.text); assert.equal(linked.body.resource.id, resource.id);
   assert.equal((await call('/api/resources', { bearer: memberToken })).body.resources.length, 1);
   const reserved = await call('/api/reservations', { method: 'POST', bearer: memberToken, body: booking(resource, { scope: 'gpus', gpuIds: [resource.gpus[0].id] }) });
   assert.equal(reserved.status, 201, reserved.text);

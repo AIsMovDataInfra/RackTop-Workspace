@@ -166,6 +166,15 @@ export function createStore({ dbPath, now = Date.now, notificationsConfigured = 
   function companyScope(user) {
     if (!enforceCompanies) return null;
     userIdentity(user);
+    if (db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='account_users'").get()) {
+      const live = db.prepare('SELECT role,is_super_admin,deleted_at FROM account_users WHERE id=?').get(user.id);
+      if (!live || live.deleted_at !== null || live.role !== user.role || Boolean(live.is_super_admin) !== Boolean(user.isSuperAdmin)) {
+        throw new ApiError(403, 'ACCOUNT_CHANGED', '账号权限已变化，请刷新');
+      }
+      if (!live.is_super_admin && !db.prepare('SELECT 1 FROM account_user_companies WHERE user_id=? AND company=?').get(user.id, user.company ?? '')) {
+        throw new ApiError(403, 'ACCOUNT_CHANGED', '当前组织权限已变化，请刷新');
+      }
+    }
     if (user.isSuperAdmin === true) return null;
     if (!companies.has(user.company)) throw new ApiError(403, 'COMPANY_REQUIRED', '请联系超级管理员分配公司');
     return user.company;
@@ -174,6 +183,43 @@ export function createStore({ dbPath, now = Date.now, notificationsConfigured = 
     const company = companyScope(user);
     if (company !== null && value.company !== company) missing(kind);
     return value;
+  }
+  function hasResourceAccess(resource, user) {
+    // Manual resources have no SSH identity; retain their explicit company policy.
+    if (!enforceCompanies || resource.inventoryState === 'manual') return true;
+    const tables = ['managed_servers', 'managed_server_grants', 'account_users', 'account_user_companies'];
+    if (tables.some(name => !db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name))) return false;
+    const live = db.prepare('SELECT role,is_super_admin,deleted_at FROM account_users WHERE id=?').get(user.id);
+    if (!live || live.deleted_at !== null || live.role !== user.role || Boolean(live.is_super_admin) !== Boolean(user.isSuperAdmin)) {
+      throw new ApiError(403, 'ACCOUNT_CHANGED', '账号权限已变化，请刷新');
+    }
+    if (!live.is_super_admin && (resource.company !== user.company
+      || !db.prepare('SELECT 1 FROM account_user_companies WHERE user_id=? AND company=?').get(user.id, resource.company))) return false;
+    // Several SSH identities may address the same physical GPUs. One current
+    // authorized entry grants access to that shared resource, not a new copy.
+    return Boolean(db.prepare(`SELECT 1 FROM managed_resource_bindings b
+      JOIN managed_servers s ON s.id=b.managed_server_id
+      WHERE b.resource_id=? AND s.company=? AND s.enabled=1
+        AND (?=1 OR EXISTS(SELECT 1 FROM managed_server_grants g WHERE g.server_id=s.id AND g.user_id=?)) LIMIT 1`)
+      .get(resource.id, resource.company, live.role === 'admin' ? 1 : 0, user.id));
+  }
+  function checkResourceAccess(resource, user) {
+    checkCompany(resource, user);
+    if (!hasResourceAccess(resource, user)) missing('资源');
+    return resource;
+  }
+  function canReadReservation(reservation, user) {
+    if (!enforceCompanies) return true;
+    if (companyScope(user) !== null && reservation.company !== user.company) return false;
+    // Keep the owner's receipt and release actions after SSH access is revoked.
+    // Administrators retain organization-scoped historical management.
+    return reservation.ownerId === user.id || user.role === 'admin'
+      || hasResourceAccess(getResource(reservation.resourceId), user);
+  }
+  function checkReservationAccess(reservation, user) {
+    checkCompany(reservation, user, '预约');
+    if (!canReadReservation(reservation, user)) missing('预约');
+    return reservation;
   }
   function resourceCompany(input, user, previous) {
     companyScope(user);
@@ -195,7 +241,7 @@ export function createStore({ dbPath, now = Date.now, notificationsConfigured = 
       inventoryState: inventory?.state ?? 'manual', pendingGpus: inventory?.pending_gpus ? JSON.parse(inventory.pending_gpus) : null,
       lastSeenAt: inventory ? new Date(inventory.last_seen_at).toISOString() : null,
       observedAt: inventory ? new Date(inventory.observed_at).toISOString() : null,
-      status: usage.state !== 'unknown' ? 'online' : inventory && now() - inventory.observed_at <= 90_000 ? inventory.status : 'unknown',
+      status: usage.state !== 'unknown' ? 'online' : inventory && now() - inventory.observed_at < 90_000 ? inventory.status : 'unknown',
       usage,
     };
   }
@@ -271,6 +317,32 @@ export function createStore({ dbPath, now = Date.now, notificationsConfigured = 
     const conflicts = existing.filter(row => booking.scope === 'machine' || row.scope === 'machine' || (booking.inventoryVersion > 0 && row.inventory_version > 0 ? JSON.parse(row.gpu_ids).some(gpu => booking.gpuIds.includes(gpu)) : JSON.parse(row.gpu_indices).some(gpu => booking.gpuIndices.includes(gpu)))).map(viewReservation);
     if (conflicts.length) throw new ApiError(409, 'RESERVATION_CONFLICT', '所选资源在这个时间段已有预约，请调整时间或 GPU', conflicts.slice(0, 50));
   }
+  function checkCurrentUsage(resource, booking, timestamp, original) {
+    if (!enforceCompanies || !resource.gpuCount || booking.start > timestamp) return;
+    const identities = value => value.scope === 'machine' ? resource.gpus.map(gpu => gpu.id) : value.gpuIds;
+    let selected = identities(booking);
+    if (original && Date.parse(original.startAt) <= timestamp && timestamp < Date.parse(original.endAt)) {
+      const previous = new Set(identities(original));
+      // Existing allocation covers the owner's current task. Its future
+      // extension is checked against bookings; only newly added GPUs need live
+      // availability. Moving a future booking to now never gets this exemption.
+      selected = selected.filter(id => !previous.has(id));
+      if (!selected.length && resource.inventoryState !== 'manual') return;
+      if (resource.inventoryState === 'manual') {
+        const before = new Set(original.scope === 'machine' ? Array.from({ length: resource.gpuCount }, (_, index) => index) : original.gpuIndices);
+        const after = booking.scope === 'machine' ? Array.from({ length: resource.gpuCount }, (_, index) => index) : booking.gpuIndices;
+        if (after.every(index => before.has(index))) return;
+      }
+    }
+    const observed = Date.parse(resource.usage?.observedAt);
+    if (!Number.isFinite(observed) || timestamp - observed >= 90_000 || observed > timestamp
+      || resource.inventoryState === 'manual' || !selected.length) {
+      throw new ApiError(409, 'GPU_USAGE_UNKNOWN', '所选 GPU 当前状态未知，请刷新确认或预约未来时段');
+    }
+    const states = selected.map(id => resource.usage.gpus.find(gpu => gpu.id === id)?.state ?? 'unknown');
+    if (states.includes('busy')) throw new ApiError(409, 'GPU_BUSY', '所选 GPU 当前被占用，请调整时段或预约范围');
+    if (states.some(state => state !== 'free')) throw new ApiError(409, 'GPU_USAGE_UNKNOWN', '所选 GPU 当前状态未知，请刷新确认或预约未来时段');
+  }
   function enqueue(type, reservation, timestamp) {
     const event = { type, reservation, resource: getResource(reservation.resourceId) };
     db.prepare('INSERT OR IGNORE INTO notification_outbox(reservation_id,version,event_type,payload,status,available_at,created_at) VALUES (?,?,?,?,?,?,?)')
@@ -322,7 +394,7 @@ export function createStore({ dbPath, now = Date.now, notificationsConfigured = 
     // Stored observations from that previous directory version are not current.
     const hasDirectory = reports.length && db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='managed_servers'").get();
     const fresh = reports.filter(report => {
-      if (timestamp - Math.min(report.observed_at, report.received_at) > 90_000 || report.status !== 'online') return false;
+      if (timestamp - Math.min(report.observed_at, report.received_at) >= 90_000 || report.status !== 'online') return false;
       if (hasDirectory && !db.prepare('SELECT 1 FROM managed_servers WHERE id=? AND company=? AND version=? AND enabled=1').get(report.managed_server_id, resource.company, report.server_version)) return false;
       return true;
     }).map(report => ({ ...report, gpus: JSON.parse(report.gpus) }));
@@ -387,7 +459,7 @@ export function createStore({ dbPath, now = Date.now, notificationsConfigured = 
     if (!managed || managed.enabled !== true || managed.version !== input.serverVersion || !companies.has(managed.company)) throw new ApiError(409, 'SERVER_CHANGED', '服务器资源已变化，请刷新目录');
     companyScope(user);
     if (enforceCompanies && !user.isSuperAdmin && user.company !== managed.company) missing('资源');
-    const complete = report.status === 'online' && report.inventoryComplete && report.gpus.length > 0 && timestamp - report.observedAt <= 90_000;
+    const complete = report.status === 'online' && report.inventoryComplete && report.gpus.length > 0 && timestamp - report.observedAt < 90_000;
     const result = transaction(() => {
       const binding = db.prepare('SELECT * FROM managed_resource_bindings WHERE managed_server_id=?').get(managed.id);
       // A failed first connection is not a CPU node or a new empty resource.
@@ -477,7 +549,7 @@ export function createStore({ dbPath, now = Date.now, notificationsConfigured = 
         return { ...getResource(id), binding: { sourceId, serverId, authoritative: false } };
       }
       if (!inventory) {
-        if (input.status !== 'online' || timestamp - observedAt > 90_000) throw new ApiError(409, 'INVENTORY_CHANGED', '首次登记需要最近 90 秒内在线采集的完整 GPU 清单');
+        if (input.status !== 'online' || timestamp - observedAt >= 90_000) throw new ApiError(409, 'INVENTORY_CHANGED', '首次登记需要最近 90 秒内在线采集的完整 GPU 清单');
         if (id && hasUpcomingReservations(id, timestamp)) throw new ApiError(409, 'INVENTORY_CHANGED', '现有手工资源仍有预约，无法依据当前编号推断当时的 GPU；请先处理预约再绑定硬件');
         checkResourceName(cluster, name, id ?? '', company);
         if (!id) {
@@ -532,7 +604,7 @@ export function createStore({ dbPath, now = Date.now, notificationsConfigured = 
     object(input, ['cluster', 'name', 'gpuModel', 'gpuCount', 'notes', 'enabled', 'acceptInventoryVersion', 'company', 'companyVersion']);
     if (!Object.keys(input).length) invalid('请提供要修改的资源字段');
     return transaction(() => {
-      let original = checkCompany(getResource(id), user);
+      let original = checkResourceAccess(getResource(id), user);
       const company = resourceCompany(input, user, original);
       if (company !== original.company && input.companyVersion !== original.companyVersion) throw new ApiError(409, 'VERSION_CONFLICT', '资源公司已变化，请刷新后再分配');
       const timestamp = now();
@@ -566,14 +638,15 @@ export function createStore({ dbPath, now = Date.now, notificationsConfigured = 
         const previous = db.prepare('SELECT * FROM reservation_requests WHERE owner_id=? AND request_id=?').get(user.id, requestId);
         if (previous) {
           if (previous.payload_hash !== requestHash) throw new ApiError(409, 'IDEMPOTENCY_CONFLICT', '同一预约请求不能更改内容，请刷新后重新提交');
-          return checkCompany(getReservation(previous.reservation_id), user, '预约');
+          return checkReservationAccess(getReservation(previous.reservation_id), user);
         }
       }
-      const resource = checkCompany(getResource(input.resourceId), user), timestamp = now();
+      const resource = checkResourceAccess(getResource(input.resourceId), user), timestamp = now();
       if (enforceCompanies && !companies.has(resource.company)) invalid('请先为资源分配公司再预约');
       if (!resource.enabled) invalid('此资源已停用，不能新建预约');
       const booking = bookingFields(input, resource, timestamp);
       checkConflicts(resource.id, booking);
+      checkCurrentUsage(resource, booking, timestamp);
       const id = randomUUID();
       db.prepare("INSERT INTO reservations(id,resource_id,owner_id,owner_name,scope,gpu_indices,gpu_ids,inventory_version,start_at,end_at,purpose,status,created_at,updated_at,company,resource_name_snapshot,cluster_snapshot) VALUES (?,?,?,?,?,?,?,?,?,?,?,'confirmed',?,?,?,?,?)")
         .run(id, resource.id, user.id, user.name, booking.scope, JSON.stringify(booking.gpuIndices), JSON.stringify(booking.gpuIds), booking.inventoryVersion, booking.start, booking.end, booking.purpose, timestamp, timestamp, resource.company, resource.name, resource.cluster);
@@ -586,7 +659,7 @@ export function createStore({ dbPath, now = Date.now, notificationsConfigured = 
     if (Object.keys(input).length < 2) invalid('请提供要修改的预约字段');
     return transaction(() => {
       const original = getReservation(id); checkPermission(original, user, input.version);
-      const resource = checkCompany(getResource(original.resourceId), user), timestamp = now();
+      const resource = checkResourceAccess(getResource(original.resourceId), user), timestamp = now();
       if (Date.parse(original.endAt) <= timestamp) throw new ApiError(409, 'RESERVATION_ELAPSED', '此预约时间已结束，不能再修改');
       if (!resource.enabled) invalid('此资源已停用，不能修改预约；仍可取消或提前结束');
       const merged = { ...original, ...input };
@@ -594,6 +667,7 @@ export function createStore({ dbPath, now = Date.now, notificationsConfigured = 
       if (input.scope === 'machine') { merged.gpuIndices = []; merged.gpuIds = []; }
       const booking = bookingFields(merged, resource, timestamp, original);
       checkConflicts(resource.id, booking, id);
+      checkCurrentUsage(resource, booking, timestamp, original);
       db.prepare('UPDATE reservations SET scope=?,gpu_indices=?,gpu_ids=?,inventory_version=?,start_at=?,end_at=?,purpose=?,updated_at=?,version=version+1 WHERE id=? AND version=?')
         .run(booking.scope, JSON.stringify(booking.gpuIndices), JSON.stringify(booking.gpuIds), booking.inventoryVersion, booking.start, booking.end, booking.purpose, timestamp, id, input.version);
       const reservation = getReservation(id); enqueue('updated', reservation, timestamp); return reservation;
@@ -622,7 +696,15 @@ export function createStore({ dbPath, now = Date.now, notificationsConfigured = 
     if (query.mine !== undefined && !['true', 'false', true, false].includes(query.mine)) invalid('mine 参数无效');
     const mine = query.mine === true || query.mine === 'true';
     const company = companyScope(user);
-    return db.prepare(`${selectReservation} WHERE r.start_at < ? AND r.end_at > ? ${mine ? 'AND r.owner_id=?' : ''} ${company === null ? '' : 'AND r.company=?'} ORDER BY r.start_at,r.created_at LIMIT 1000`).all(to, from, ...(mine ? [user.id] : []), ...(company === null ? [] : [company])).map(viewReservation);
+    const tables = ['managed_servers', 'managed_server_grants', 'account_users', 'account_user_companies'];
+    const directoryReady = !enforceCompanies || tables.every(name => db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name));
+    const access = !enforceCompanies || mine ? '' : `AND (NOT EXISTS(SELECT 1 FROM resource_inventory i WHERE i.resource_id=s.id)
+      ${directoryReady ? `OR EXISTS(SELECT 1 FROM managed_resource_bindings b JOIN managed_servers m ON m.id=b.managed_server_id
+        WHERE b.resource_id=s.id AND m.company=s.company AND s.company=r.company AND m.enabled=1
+          AND (?=1 OR EXISTS(SELECT 1 FROM managed_server_grants g WHERE g.server_id=m.id AND g.user_id=?)))` : ''})`;
+    return db.prepare(`${selectReservation} WHERE r.start_at < ? AND r.end_at > ? ${mine ? 'AND r.owner_id=?' : ''} ${company === null ? '' : 'AND r.company=?'} ${access} ORDER BY r.start_at,r.created_at LIMIT 1000`)
+      .all(to, from, ...(mine ? [user.id] : []), ...(company === null ? [] : [company]),
+        ...(enforceCompanies && !mine && directoryReady ? [user.role === 'admin' ? 1 : 0, user.id] : [])).map(viewReservation);
   }
   function enqueueEnding() {
     return transaction(() => {
@@ -686,10 +768,10 @@ export function createStore({ dbPath, now = Date.now, notificationsConfigured = 
     });
   }
   return {
-    getResource: (id, user) => checkCompany(getResource(id), user),
-    getReservation: (id, user) => checkCompany(getReservation(id), user, '预约'),
+    getResource: (id, user) => checkResourceAccess(getResource(id), user),
+    getReservation: (id, user) => checkReservationAccess(getReservation(id), user),
     createResource, updateResource, syncResource, syncManagedTelemetry,
-    listResources: user => { const company = companyScope(user); return db.prepare(`SELECT * FROM resources ${company === null ? '' : 'WHERE company=?'} ORDER BY cluster,name,id`).all(...(company === null ? [] : [company])).map(resourceView); },
+    listResources: user => { const company = companyScope(user); return db.prepare(`SELECT * FROM resources ${company === null ? '' : 'WHERE company=?'} ORDER BY cluster,name,id`).all(...(company === null ? [] : [company])).map(resourceView).filter(resource => hasResourceAccess(resource, user)); },
     createReservation, updateReservation, listReservations,
     cancelReservation: (id, input, user) => transition(id, input, user, false),
     finishReservation: (id, input, user) => transition(id, input, user, true),

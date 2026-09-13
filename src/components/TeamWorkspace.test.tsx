@@ -279,3 +279,28 @@ describe('team workspace',()=>{
     expect(container.textContent).not.toContain('团队资源')
   })
 })
+
+it('expires GPU usage while a later resource request is pending and keeps the booking link available', async () => {
+  vi.useFakeTimers()
+  const now = Date.now()
+  vi.mocked(teamApi.status).mockResolvedValue(member)
+  vi.mocked(teamApi.data).mockResolvedValue({ ...privateData, resources: [{ ...privateData.resources[0], usage: { state: 'free', observedAt: new Date(now).toISOString() } }] })
+  await mount()
+  expect(container.textContent).toContain('当前空闲')
+  vi.mocked(teamApi.data).mockImplementation(() => new Promise(() => {}))
+  await act(async () => vi.advanceTimersByTimeAsync(90_001))
+  expect(container.textContent).not.toContain('当前空闲')
+  expect(container.textContent).toContain('占用状态未知')
+  expect(container.querySelector('.team-resource')?.textContent).toContain('查看与预约')
+})
+
+it('explains an empty enabled catalog without hiding future reservation history for a withdrawn resource', async () => {
+  vi.mocked(teamApi.status).mockResolvedValue(member)
+  vi.mocked(teamApi.data).mockResolvedValue({ ...privateData, resources: [{ ...privateData.resources[0], enabled: false }] })
+  await mount()
+  expect(container.querySelectorAll('.team-resource')).toHaveLength(0)
+  expect(container.textContent).toContain('当前组织暂无已启用的预约资源')
+  expect(container.textContent).toContain('已有 SSH 权限时，请联系管理员核对预约资源关联')
+  expect(container.textContent).toContain('成员预约记录')
+  expect(container.textContent).toContain('未来 30 天 · 最多 50 条')
+})

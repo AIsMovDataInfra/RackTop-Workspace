@@ -13,6 +13,17 @@ export function currentResourceUsage(resource: Pick<Resource, 'usage'>, now = Da
   return usage
 }
 
+export function currentGpuRestriction(resource: Resource, start: string, indices?: number[], now = Date.now()): 'GPU_BUSY' | 'GPU_USAGE_UNKNOWN' | null {
+  if (!resource.gpuCount || Date.parse(start) > now) return null
+  const usage = currentResourceUsage(resource, now)
+  const devices = resource.gpus?.length ? resource.gpus : Array.from({ length: resource.gpuCount }, (_, index) => ({ id: '', index }))
+  const selected = indices === undefined ? devices : devices.filter(gpu => indices.includes(gpu.index))
+  const states = selected.map(gpu => usage.gpus.find(sample => gpu.id ? sample.id === gpu.id : sample.index === gpu.index)?.state ?? 'unknown')
+  if (states.includes('busy')) return 'GPU_BUSY'
+  if (selected.length === 0 || (indices && selected.length !== indices.length) || states.some(state => state !== 'free')) return 'GPU_USAGE_UNKNOWN'
+  return null
+}
+
 export function resourceClusterGroups(resources: Resource[]) {
   return (['gpu', 'cpu'] as const).map(kind => {
     const members = resources.filter(resource => resource.enabled && resourceKind(resource) === kind)

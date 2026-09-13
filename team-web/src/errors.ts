@@ -24,6 +24,9 @@ export function errorText(error: unknown, t: Translate) {
       CSRF_REJECTED: ['页面会话已更新，请刷新页面后重试。', 'This page session changed. Refresh the page and try again.'],
       INVENTORY_CHANGED: ['GPU 清单已变化，请关闭弹窗并刷新；若清单待核验，请联系管理员。', 'The GPU inventory changed. Close this dialog and refresh. If review is required, contact your administrator.'],
       INVENTORY_CONFLICT: ['GPU 清单发生变化，请联系管理员核验后再预约。', 'The GPU inventory changed. Ask an administrator to review it before booking.'],
+      GPU_BUSY: ['所选 GPU 当前被占用，请选择其他 GPU 或未来时段。预约不会停止现有任务。', 'The selected GPUs are occupied. Choose other GPUs or a future slot. Reservations do not stop running jobs.'],
+      GPU_USAGE_UNKNOWN: ['所选 GPU 当前占用未知，请刷新确认，或选择未来时段。', 'Current usage of the selected GPUs is unknown. Refresh to confirm, or choose a future slot.'],
+      RESOURCE_UNAVAILABLE: ['此资源已停用或当前账号不再有预约权限。输入已保留，请联系管理员确认。', 'This resource is disabled or no longer available to your account. Your input is preserved; check with your administrator.'],
       RESOURCE_HAS_RESERVATIONS: ['请先与预约人协调并取消或结束现有预约，再确认新的 GPU 清单。', 'Coordinate with reservation owners and cancel or finish active bookings before accepting the new GPU inventory.'],
     }
     if (messages[error.code]) return t(...messages[error.code])

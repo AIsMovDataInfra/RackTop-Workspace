@@ -39,3 +39,15 @@ it('keeps occupied servers visible and filters the same cluster name independent
   await act(async () => reserve.click())
   expect(container.querySelector('[role="dialog"]')?.textContent).toContain('新建预约')
 })
+
+it('keeps a member’s existing reservations reachable after their resource is withdrawn from the new-booking catalog', async () => {
+  const existing = { id: 'past-access-booking', resourceId: gpu.id, resourceName: '已撤回资源的预约', cluster: gpu.cluster, ownerId: session.user!.id, ownerName: session.user!.name, scope: 'machine' as const, gpuIndices: [], startAt: new Date(Date.now() + 60_000).toISOString(), endAt: new Date(Date.now() + 3_600_000).toISOString(), status: 'confirmed' as const, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), version: 1 }
+  vi.mocked(api.resources).mockResolvedValue({ resources: [] })
+  vi.mocked(api.reservations).mockImplementation(async options => ({ reservations: options?.mine ? [existing] : [] }))
+  await act(async () => root.render(<Workspace session={session} state={state} onLogout={vi.fn()} onSessionExpired={vi.fn()} />))
+  expect(container.querySelectorAll('.resource-card')).toHaveLength(0)
+  expect(container.textContent).toContain('已有 SSH 权限时，请联系管理员核对预约资源关联')
+  await act(async () => [...container.querySelectorAll<HTMLButtonElement>('.main-nav button')].find(button => button.textContent?.includes('我的预约'))!.click())
+  expect(container.textContent).toContain('已撤回资源的预约')
+  expect(container.querySelector('.my-reservations')?.textContent).toContain('取消预约')
+})

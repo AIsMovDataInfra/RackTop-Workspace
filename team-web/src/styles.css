@@ -102,7 +102,7 @@ legend { margin-bottom: 10px; color: var(--muted); font-size: .88rem; }
 .dot-divider { margin: 0 8px; }
 .legend { display: flex; flex-wrap: wrap; gap: 14px; }
 .legend > span { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
-.legend i { width: 8px; height: 8px; border: 1px solid var(--green); border-radius: 2px; background: var(--green-bg); }
+.legend i { width: 8px; height: 8px; border: 1px solid var(--muted); border-radius: 2px; background: var(--subtle); }
 .legend i.reserved { border-color: var(--orange); background: var(--orange-bg); }
 .board-disclaimer { display: flex; align-items: center; gap: 7px; margin-top: -10px; color: var(--muted); font-size: .76rem; }
 .board-disclaimer svg { flex: none; }
@@ -118,7 +118,7 @@ legend { margin-bottom: 10px; color: var(--muted); font-size: .88rem; }
 .resource-hardware > svg { flex: none; }
 .resource-hardware > strong { margin-left: auto; font-size: .74rem; font-weight: 500; white-space: nowrap; }
 .gpu-tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
-.gpu-tile { display: flex; flex-direction: column; gap: 7px; min-width: 0; min-height: 115px; padding: 11px 5px; border: 1px solid color-mix(in srgb, var(--green) 23%, var(--border)); border-radius: 8px; color: var(--green); background: color-mix(in srgb, var(--green-bg) 58%, var(--surface)); }
+.gpu-tile { display: flex; flex-direction: column; gap: 7px; min-width: 0; min-height: 115px; padding: 11px 5px; border: 1px solid var(--border); border-radius: 8px; color: var(--text); background: var(--canvas); }
 .gpu-tile > span { font-size: .72rem; color: var(--text); }
 .gpu-tile > strong { width: 100%; overflow: hidden; font-size: .76rem; font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
 .gpu-tile > small { color: var(--muted); font-size: .65rem; }

@@ -24,3 +24,8 @@
   .sidebar-clusters { align-items: flex-start; }
   .sidebar-cluster-group { flex: none; min-width: 140px; max-width: 220px; margin-top: 0; }
 }
+
+.reservation-refresh { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin: 10px 0; font-size: .75rem; color: var(--muted); }
+.reservation-refresh button { flex: none; }
+.gpu-picker label:has(input:disabled) { color: var(--muted); }
+.gpu-picker small { overflow-wrap: anywhere; }
