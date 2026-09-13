@@ -179,10 +179,15 @@ export function createTeamServer(overrides = {}) {
       // Every business route, including equipment and photos, requires membership.
       const user = requireBusinessMember(session);
       if (['POST', 'PATCH', 'PUT', 'DELETE'].includes(req.method)) auth.verifyWrite(req, session);
+      if (url.pathname === '/api/admin/server-connectivity-log') {
+        if (req.method !== 'GET' || url.search) throw new ApiError(422, 'INVALID_INPUT', '连接失败日志接口不接受查询参数');
+        if (!managedServerStore) throw new ApiError(403, 'ACCOUNT_REQUIRED', '请使用团队账号登录服务器目录');
+        json(res, 200, managedServerStore.listConnectivityFailures(user)); return;
+      }
       if (url.pathname === '/api/servers' || url.pathname.startsWith('/api/servers/')) {
         if (!managedServerStore) throw new ApiError(403, 'ACCOUNT_REQUIRED', '请使用团队账号登录服务器目录');
         const canFilter = req.method === 'GET' && ['/api/servers', '/api/servers/members'].includes(url.pathname);
-        const canSelectSchema = url.pathname !== '/api/servers/members' && !url.pathname.endsWith('/credentials') && !url.pathname.endsWith('/telemetry');
+        const canSelectSchema = url.pathname !== '/api/servers/members' && !url.pathname.endsWith('/credentials') && !url.pathname.endsWith('/telemetry') && !url.pathname.endsWith('/connectivity-failures');
         if ([...url.searchParams.keys()].some(key => !['company', 'schema'].includes(key))
           || url.searchParams.getAll('company').length > 1 || url.searchParams.getAll('schema').length > 1
           || (url.searchParams.has('company') && (!canFilter || !ACCOUNT_COMPANIES.includes(url.searchParams.get('company'))))
@@ -199,7 +204,7 @@ export function createTeamServer(overrides = {}) {
         if (url.pathname === '/api/servers/import' && req.method === 'POST') {
           json(res, 200, managedServerStore.importServers(body, user, schema)); return;
         }
-        const serverMatch = /^\/api\/servers\/([a-f0-9-]{36})(?:\/(grants|credentials|telemetry))?$/.exec(url.pathname);
+        const serverMatch = /^\/api\/servers\/([a-f0-9-]{36})(?:\/(grants|credentials|telemetry|connectivity-failures))?$/.exec(url.pathname);
         if (serverMatch) {
           const [, id, action] = serverMatch;
           if (!action && req.method === 'GET') { json(res, 200, { server: managedServerStore.get(id, user, schema) }); return; }
@@ -210,6 +215,11 @@ export function createTeamServer(overrides = {}) {
             if (typeof req.headers['x-racktop-company'] !== 'string') throw new ApiError(409, 'COMPANY_CHANGED', '请刷新当前组织后重试');
             const managed = managedServerStore.authorizeTelemetry(id, user, body.serverVersion);
             json(res, 200, { resource: store.syncManagedTelemetry(body, user, managed, auth.telemetrySource(req)) }); return;
+          }
+          if (action === 'connectivity-failures' && req.method === 'POST') {
+            if (session.kind !== 'device') throw new ApiError(403, 'DEVICE_REQUIRED', '连接失败日志仅供已登录的桌面客户端上报');
+            if (typeof req.headers['x-racktop-company'] !== 'string') throw new ApiError(409, 'COMPANY_CHANGED', '请刷新当前组织后重试');
+            json(res, 200, managedServerStore.recordConnectivityFailure(id, body, user)); return;
           }
           if (action === 'credentials' && req.method === 'POST') {
             if (session.kind !== 'device') throw new ApiError(403, 'DEVICE_REQUIRED', '共享密码仅供已登录的桌面客户端连接使用');

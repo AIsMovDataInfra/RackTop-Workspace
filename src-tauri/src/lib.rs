@@ -427,6 +427,10 @@ async fn collect_server(database: State<'_, Database>, team: State<'_, TeamState
     let password = match team.0.ssh_passwords(&database, &server, allow_credential_prompt).await {
         Ok(password) => password,
         Err(error) => {
+            let manager = team.0.clone();
+            let failed_server = server.clone();
+            let failure = error.clone();
+            tauri::async_runtime::spawn(async move { manager.report_connectivity_failure(&failed_server, &failure).await; });
             logs.finish(log_id, 0, 0, Some(error.clone()));
             return Err(error);
         }
@@ -461,6 +465,10 @@ async fn collect_server(database: State<'_, Database>, team: State<'_, TeamState
             }
         }
         Err(error) => {
+            let manager = team.0.clone();
+            let failed_server = server.clone();
+            let failure = error.clone();
+            tauri::async_runtime::spawn(async move { manager.report_connectivity_failure(&failed_server, &failure).await; });
             logs.finish(log_id, 0, 0, Some(error.clone()));
             Err(error)
         }

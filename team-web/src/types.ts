@@ -55,3 +55,8 @@ export interface ManagedServerDraft {
   jump?: ManagedServer['jump']; enabled?: boolean; memberIds?: string[]
   password?: string | null; jumpPassword?: string | null
 }
+export interface ServerConnectivityFailure {
+  serverId: string; serverName: string; company: Company; hourAt: string
+  firstFailedAt: string; lastFailedAt: string; failureCount: number
+  reason: 'timeout' | 'authentication' | 'host_key' | 'ssh_start' | 'remote_command' | 'credentials' | 'unknown'
+}

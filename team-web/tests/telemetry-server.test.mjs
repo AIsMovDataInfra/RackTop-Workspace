@@ -32,6 +32,10 @@ async function fixture(t, options = {}) {
   const guest = session(await call('/api/session'));
   const login = await call('/api/auth/login', { method: 'POST', browser: guest, body: { username: 'admin', password } });
   assert.equal(login.status, 200, login.text); const admin = session(login);
+  const browserLogin = async username => {
+    const result = await call('/api/auth/login', { method: 'POST', browser: session(await call('/api/session')), body: { username, password } });
+    assert.equal(result.status, 200, result.text); return session(result);
+  };
   const deviceLogin = async username => {
     const result = await call('/api/auth/device-login', { method: 'POST', body: { username, password, deviceName: 'Synthetic telemetry fixture' } });
     assert.equal(result.status, 200, result.text); return result.body;
@@ -47,8 +51,44 @@ async function fixture(t, options = {}) {
     const result = await call('/api/servers', { method: 'POST', browser: admin, body: { company: 'A公司', name: 'Synthetic GPU', host: 'sensitive-host.example.test', port: 22, username: 'sensitive-ssh-user', ...extra } });
     assert.equal(result.status, 201, result.text); return result.body.server;
   };
-  return { app, call, admin, adminDevice, add, create, dbPath, deviceLogin };
+  return { app, call, admin, adminDevice, add, create, dbPath, deviceLogin, browserLogin };
 }
+
+test('super administrator connectivity failures are hourly aggregated and hidden from ordinary users', async t => {
+  let clock = NOW;
+  const { call, admin, adminDevice, add, create, dbPath, browserLogin } = await fixture(t, { now: () => clock });
+  const reader = await add('failure-reader'), maintainer = await add('failure-maintainer', 'A公司', 'admin');
+  const server = await create({ memberIds: [reader.member.id] });
+  const path = `/api/servers/${server.id}/connectivity-failures`;
+  const failure = { serverVersion: server.version, reason: 'timeout' };
+  const first = await call(path, { method: 'POST', device: adminDevice, body: failure });
+  assert.equal(first.status, 200, first.text);
+  const repeated = await call(path, { method: 'POST', device: adminDevice, body: failure });
+  assert.equal(repeated.status, 200, repeated.text);
+  assert.equal((await call(path, { method: 'POST', device: reader.device, body: failure })).status, 403);
+  assert.equal((await call(path, { method: 'POST', device: maintainer.device, body: failure })).status, 403);
+  const db = new DatabaseSync(dbPath);
+  try {
+    assert.equal(db.prepare('SELECT COUNT(*) AS n, MAX(failure_count) AS count FROM managed_server_connectivity_failures').get().n, 1);
+    assert.equal(db.prepare('SELECT MAX(failure_count) AS count FROM managed_server_connectivity_failures').get().count, 2);
+  } finally { db.close(); }
+  clock += 3_600_000;
+  const nextHour = await call(path, { method: 'POST', device: adminDevice, body: failure });
+  assert.equal(nextHour.status, 200, nextHour.text);
+  const log = await call('/api/admin/server-connectivity-log', { browser: admin });
+  assert.equal(log.status, 200, log.text);
+  assert.equal(log.body.failures.length, 2);
+  assert.equal(log.body.failures[0].serverName, 'Synthetic GPU');
+  assert.equal(log.body.failures[0].failureCount, 1);
+  assert.equal(log.body.failures[0].reason, 'timeout');
+  assert.equal(log.text.includes('sensitive-host'), false);
+  assert.equal(log.text.includes('sensitive-ssh-user'), false);
+  assert.equal((await call('/api/admin/server-connectivity-log')).status, 401);
+  assert.equal((await call('/api/admin/server-connectivity-log', { browser: await browserLogin('failure-reader') })).status, 403);
+  for (const reason of ['bogus', 'authentication\nsecret']) {
+    assert.equal((await call(path, { method: 'POST', device: adminDevice, body: { ...failure, reason } })).status, 422);
+  }
+});
 
 test('telemetry route requires live device and company permissions; member cannot create the first binding', async t => {
   const { call, admin, adminDevice, add, create } = await fixture(t);

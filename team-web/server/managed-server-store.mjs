@@ -7,6 +7,7 @@ import { createServerCredentialCipher, credentialsUnavailable } from './server-c
 
 const invalid = message => { throw new ApiError(422, 'INVALID_INPUT', message); };
 const missing = () => { throw new ApiError(404, 'SERVER_NOT_FOUND', '找不到可访问的服务器'); };
+const CONNECTIVITY_FAILURE_REASONS = new Set(['timeout', 'authentication', 'host_key', 'ssh_start', 'remote_command', 'credentials', 'unknown']);
 function fields(input, allowed) {
   if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).some(key => !allowed.includes(key))) invalid('服务器字段无效');
 }
@@ -77,7 +78,19 @@ export function createManagedServerStore({ dbPath, now = Date.now, serverCredent
       slot TEXT NOT NULL CHECK(slot IN ('target','jump')), format_version INTEGER NOT NULL,
       key_id TEXT NOT NULL, identity_hash TEXT NOT NULL, nonce BLOB NOT NULL,
       ciphertext BLOB NOT NULL, auth_tag BLOB NOT NULL, PRIMARY KEY(server_id,slot)
-    );`);
+    );
+    CREATE TABLE IF NOT EXISTS managed_server_connectivity_failures (
+      server_id TEXT NOT NULL REFERENCES managed_servers(id) ON DELETE CASCADE,
+      company TEXT NOT NULL,
+      hour_at INTEGER NOT NULL,
+      first_failed_at INTEGER NOT NULL,
+      last_failed_at INTEGER NOT NULL,
+      failure_count INTEGER NOT NULL DEFAULT 1,
+      reason TEXT NOT NULL CHECK(reason IN ('timeout','authentication','host_key','ssh_start','remote_command','credentials','unknown')),
+      PRIMARY KEY(server_id, hour_at)
+    );
+    CREATE INDEX IF NOT EXISTS managed_server_connectivity_failures_time
+      ON managed_server_connectivity_failures(hour_at DESC, server_id);`);
     if (!db.prepare('PRAGMA table_info(managed_servers)').all().some(column => column.name === 'credential_revision')) {
       db.exec('ALTER TABLE managed_servers ADD COLUMN credential_revision INTEGER NOT NULL DEFAULT 0');
     }
@@ -291,6 +304,47 @@ export function createManagedServerStore({ dbPath, now = Date.now, serverCredent
           result[encrypted.slot === 'target' ? 'password' : 'jumpPassword'] = value;
         }
         return result;
+      }, false);
+    },
+    recordConnectivityFailure(id, input, user) {
+      fields(input, ['serverVersion', 'reason']);
+      if (!Number.isSafeInteger(input.serverVersion) || input.serverVersion < 1) invalid('请提交服务器当前版本');
+      if (typeof input.reason !== 'string' || !CONNECTIVITY_FAILURE_REASONS.has(input.reason)) invalid('连接失败原因无效');
+      return transaction(() => {
+        const row = db.prepare('SELECT * FROM managed_servers WHERE id=?').get(id);
+        if (!row) missing();
+        actor(user, row.company);
+        const live = db.prepare('SELECT role,is_super_admin,deleted_at FROM account_users WHERE id=?').get(user?.id);
+        if (!live?.is_super_admin || live.deleted_at !== null || live.role !== 'admin') {
+          throw new ApiError(403, 'SUPERADMIN_REQUIRED', '仅超级管理员设备可上报服务器连接失败');
+        }
+        if (input.serverVersion !== row.version) throw new ApiError(409, 'VERSION_CONFLICT', '服务器目录已变化，请刷新后重试');
+        if (!row.enabled) throw new ApiError(409, 'SERVER_DISABLED', '服务器已停用，不能上报连接失败');
+        const timestamp = now(), hourAt = Math.floor(timestamp / 3_600_000) * 3_600_000;
+        db.prepare(`INSERT INTO managed_server_connectivity_failures
+          (server_id,company,hour_at,first_failed_at,last_failed_at,failure_count,reason)
+          VALUES(?,?,?,?,?,1,?)
+          ON CONFLICT(server_id,hour_at) DO UPDATE SET
+            last_failed_at=excluded.last_failed_at,
+            failure_count=managed_server_connectivity_failures.failure_count+1,
+            reason=excluded.reason`).run(id, row.company, hourAt, timestamp, timestamp, input.reason);
+        db.prepare('DELETE FROM managed_server_connectivity_failures WHERE hour_at < ?').run(timestamp - 180 * 86_400_000);
+        return { ok: true, hourAt: new Date(hourAt).toISOString() };
+      });
+    },
+    listConnectivityFailures(user) {
+      return transaction(() => {
+        actor(user, undefined, false, true);
+        const rows = db.prepare(`SELECT f.server_id,f.company,f.hour_at,f.first_failed_at,f.last_failed_at,f.failure_count,f.reason,s.name
+          FROM managed_server_connectivity_failures f JOIN managed_servers s ON s.id=f.server_id
+          WHERE f.hour_at >= ? ORDER BY f.hour_at DESC,f.last_failed_at DESC,s.company,s.name,s.id LIMIT 500`).all(now() - 30 * 86_400_000);
+        return { failures: rows.map(row => ({
+          serverId: row.server_id, serverName: row.name, company: row.company,
+          hourAt: new Date(row.hour_at).toISOString(),
+          firstFailedAt: new Date(row.first_failed_at).toISOString(),
+          lastFailedAt: new Date(row.last_failed_at).toISOString(),
+          failureCount: row.failure_count, reason: row.reason,
+        })) };
       }, false);
     },
   };

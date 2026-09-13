@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
-import { Copy, Pencil, Plus, RefreshCw, Server, Upload, Users } from 'lucide-react'
+import { AlertTriangle, Copy, History, Pencil, Plus, RefreshCw, Server, Upload, Users } from 'lucide-react'
 import { api, ApiError } from './api'
 import { Dialog } from './Dialog'
 import { errorText } from './errors'
 import { formatTime } from './time'
-import { COMPANY_OPTIONS, type Company, type ManagedServer, type ManagedServerDraft, type Session } from './types'
+import { COMPANY_OPTIONS, type Company, type ManagedServer, type ManagedServerDraft, type ServerConnectivityFailure, type Session } from './types'
 import type { PreferencesState } from './preferences'
 import { WorkModuleFrame } from './WorkModuleFrame'
 import { SshImportDialog } from './SshImportDialog'
@@ -32,6 +32,10 @@ export function ServersWorkspace(props: Props) {
   const [membersError, setMembersError] = useState(false)
   const [formError, setFormError] = useState<unknown>(null)
   const [busy, setBusy] = useState(false)
+  const [failureLogOpen, setFailureLogOpen] = useState(false)
+  const [failureLogLoading, setFailureLogLoading] = useState(false)
+  const [failureLogError, setFailureLogError] = useState<unknown>(null)
+  const [failures, setFailures] = useState<ServerConnectivityFailure[]>([])
   const generation = useRef(0)
   const pendingLoad = useRef<number | null>(null)
   const admin = session.user?.role === 'admin'
@@ -40,6 +44,7 @@ export function ServersWorkspace(props: Props) {
     if (reason instanceof ApiError && [401,403].includes(reason.status)) {
       generation.current++; pendingLoad.current = null; setLoading(false)
       setServers([]); setEditor(null); setImporting(false)
+      setFailureLogOpen(false)
       if (reason.status === 401) onSessionExpired()
     }
     setError(reason)
@@ -61,12 +66,12 @@ export function ServersWorkspace(props: Props) {
     return () => { generation.current++ }
   }, [session.user?.id, session.user?.company, session.user?.role, session.user?.isSuperAdmin, company])
   useEffect(() => {
-    const refresh = () => { if (!document.hidden && !editor && !importing && !busy) void load(true) }
+    const refresh = () => { if (!document.hidden && !editor && !importing && !failureLogOpen && !busy) void load(true) }
     const timer = window.setInterval(refresh, 30_000)
     window.addEventListener('focus', refresh)
     document.addEventListener('visibilitychange', refresh)
     return () => { window.clearInterval(timer); window.removeEventListener('focus', refresh); document.removeEventListener('visibilitychange', refresh) }
-  }, [company, editor, importing, busy])
+  }, [company, editor, importing, failureLogOpen, busy])
   useEffect(() => {
     const selectedCompany = editor?.draft.company
     if (!editor || editor.mode === 'edit' || !selectedCompany) { setMembers([]); return }
@@ -109,10 +114,25 @@ export function ServersWorkspace(props: Props) {
     try { await navigator.clipboard.writeText(endpoint(server.host, server.port, server.username)); setNotice(t('连接地址已复制。', 'Connection address copied.')) }
     catch { setError(new Error(t('无法复制，请选择并复制页面上的连接地址。', 'Select and copy the connection address on this page.'))) }
   }
+  async function openFailureLog() {
+    setFailureLogOpen(true); setFailureLogLoading(true); setFailureLogError(null)
+    try { setFailures((await api.serverConnectivityFailures()).failures) }
+    catch (reason) { setFailureLogError(reason); if (reason instanceof ApiError && [401, 403].includes(reason.status)) failed(reason) }
+    finally { setFailureLogLoading(false) }
+  }
+  const reasonText = (reason: ServerConnectivityFailure['reason']) => ({
+    timeout: t('超时或服务器不可达', 'Timeout or unreachable'),
+    authentication: t('SSH 认证失败', 'SSH authentication failed'),
+    host_key: t('主机指纹校验失败', 'Host key verification failed'),
+    ssh_start: t('无法启动本机 SSH', 'Could not start local SSH'),
+    remote_command: t('远端采集命令失败', 'Remote collection command failed'),
+    credentials: t('共享凭据不可用', 'Shared credentials unavailable'),
+    unknown: t('其他连接失败', 'Other connection failure'),
+  }[reason])
   const filtered = servers.filter(server => [server.name,server.host,server.username,server.company].join(' ').toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()))
   const form = editor?.draft
   return <>
-    <WorkModuleFrame {...props} section="servers" title={t('服务器资源', 'Server resources')} subtitle={t('统一维护 SSH 地址、用户名和访问成员。', 'Maintain SSH addresses, usernames and member access in one place.')} modal={Boolean(editor) || importing} actions={<><button disabled={loading} onClick={() => void load()}><RefreshCw size={16}/>{t('刷新', 'Refresh')}</button>{superAdmin && <button onClick={() => { setNotice(''); setImporting(true) }}><Upload size={16}/>{t('导入 SSH 配置', 'Import SSH configuration')}</button>}{admin && <button className="primary" onClick={() => open('create')}><Plus size={17}/>{t('添加服务器', 'Add server')}</button>}</>}>
+    <WorkModuleFrame {...props} section="servers" title={t('服务器资源', 'Server resources')} subtitle={t('统一维护 SSH 地址、用户名和访问成员。', 'Maintain SSH addresses, usernames and member access in one place.')} modal={Boolean(editor) || importing || failureLogOpen} actions={<><button disabled={loading} onClick={() => void load()}><RefreshCw size={16}/>{t('刷新', 'Refresh')}</button>{superAdmin && <><button onClick={() => void openFailureLog()}><History size={16}/>{t('连接失败日志', 'Connection failure log')}</button><button onClick={() => { setNotice(''); setImporting(true) }}><Upload size={16}/>{t('导入 SSH 配置', 'Import SSH configuration')}</button></>}{admin && <button className="primary" onClick={() => open('create')}><Plus size={17}/>{t('添加服务器', 'Add server')}</button>}</>}>
           {Boolean(error) && <div className="error" role="alert">{errorText(error,t)}</div>}
           {notice && <div className="callout" role="status">{notice}</div>}
           <div className="server-filters"><label>{t('搜索服务器', 'Search servers')}<input type="search" value={search} onChange={event => setSearch(event.target.value)} placeholder={t('名称、地址或用户名', 'Name, address or username')}/></label>{superAdmin && <label>{t('组织', 'Organization')}<select value={company} onChange={event => setCompany(event.target.value as Company | '')}><option value="">{t('全部组织', 'All organizations')}</option>{COMPANY_OPTIONS.map(item => <option key={item}>{item}</option>)}</select></label>}<span role="status">{loading ? t('正在读取…', 'Loading…') : t(`${filtered.length} 台服务器`, `${filtered.length} ${filtered.length === 1 ? 'server' : 'servers'}`)}</span></div>
@@ -125,6 +145,14 @@ export function ServersWorkspace(props: Props) {
           {!loading && !filtered.length && <div className="empty-state"><Server size={28}/><h2>{search ? t('没有匹配的服务器', 'No matching servers') : t('暂无可访问的服务器', 'No servers available')}</h2><p>{admin ? t('添加服务器后，为需要使用的成员授权。', 'Add a server and grant access to its members.') : t('请管理员将服务器授权给你。', 'Ask your administrator to grant server access.')}</p></div>}
           <p className="server-help">{t('页面可见时约每 30 秒自动更新，返回页面时也会检查。管理员可设置共享 SSH 密码，获授权成员使用 RackTop 2.7.0 或更新版本即可连接；未设置密码时，由成员配置本机认证。私钥仍由成员在本机管理。', 'Resources refresh about every 30 seconds while this page is visible and when you return. Administrators can share SSH passwords with authorized members using RackTop 2.7.0 or later. Without a shared password, members configure local authentication. Private keys remain on each member’s computer.')}</p>
     </WorkModuleFrame>
+    {failureLogOpen && superAdmin && <Dialog title={t('服务器连接失败日志', 'Server connection failure log')} subtitle={t('最近 30 天，每台服务器每小时最多一条聚合记录。', 'Last 30 days, aggregated to at most one record per server per hour.')} onClose={() => setFailureLogOpen(false)} t={t}>
+      <div className="dialog-body server-failure-log">
+        {failureLogLoading && <p role="status">{t('正在读取日志…', 'Loading log…')}</p>}
+        {Boolean(failureLogError) && <div className="error" role="alert">{String(errorText(failureLogError, t))}</div>}
+        {!failureLogLoading && !failureLogError && !failures.length && <div className="empty-state"><AlertTriangle size={26}/><h2>{t('暂无连接失败记录', 'No connection failures recorded')}</h2><p>{t('超级管理员客户端上报的服务器连接失败会按小时聚合显示。', 'Connection failures reported by super administrator clients appear here in hourly buckets.')}</p></div>}
+        {!failureLogLoading && !failureLogError && failures.length > 0 && <div className="server-failure-log-list">{failures.map(failure => <article className="server-failure-entry" key={`${failure.serverId}-${failure.hourAt}`}><div><strong>{failure.serverName}</strong><span>{failure.company} · {reasonText(failure.reason)}</span></div><dl><div><dt>{t('小时', 'Hour')}</dt><dd><time dateTime={failure.hourAt}>{formatTime(failure.hourAt, preferences.locale)}</time></dd></div><div><dt>{t('首次失败', 'First failure')}</dt><dd><time dateTime={failure.firstFailedAt}>{formatTime(failure.firstFailedAt, preferences.locale)}</time></dd></div><div><dt>{t('最近失败', 'Last failure')}</dt><dd><time dateTime={failure.lastFailedAt}>{formatTime(failure.lastFailedAt, preferences.locale)}</time></dd></div><div><dt>{t('次数', 'Count')}</dt><dd>{failure.failureCount}</dd></div></dl></article>)}</div>}
+      </div>
+    </Dialog>}
     {importing && superAdmin && <SshImportDialog company={company || session.user?.company || COMPANY_OPTIONS[0]} t={t} onClose={() => setImporting(false)} onFailure={failed} onSaved={(importCompany, added, skipped) => {
       setImporting(false); setNotice(t(`已导入 ${added} 台服务器${skipped ? `，跳过 ${skipped} 个重复连接` : ''}。获授权成员会自动收到更新。`, `Imported ${added} servers${skipped ? `; skipped ${skipped} duplicate connections` : ''}. Authorized members receive updates automatically.`))
       if (company === importCompany) void load(); else setCompany(importCompany)

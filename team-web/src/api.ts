@@ -1,4 +1,4 @@
-import type { BookingDraft, Company, Equipment, EquipmentDraft, EquipmentHistory, EquipmentStats, ManagedServer, ManagedServerDraft, Member, Reservation, Resource, ResourceDraft, Session } from './types'
+import type { BookingDraft, Company, Equipment, EquipmentDraft, EquipmentHistory, EquipmentStats, ManagedServer, ManagedServerDraft, Member, Reservation, Resource, ResourceDraft, ServerConnectivityFailure, Session } from './types'
 
 export class ApiError extends Error {
   constructor(message: string, public status: number, public code: string, public conflicts: Reservation[] = []) { super(message); this.name = 'ApiError' }
@@ -122,6 +122,7 @@ export const api = {
   updateServer: (id: string, input: { version: number } & Partial<Omit<ManagedServerDraft, 'company' | 'memberIds'>>) => request<{ server: ManagedServer }>(`/servers/${encodeURIComponent(id)}?schema=2`, 'PATCH', input),
   serverMembers: (company: Company) => request<{ members: { id: string; name: string; username: string }[] }>(`/servers/members?${new URLSearchParams({ company })}`),
   grantServer: (id: string, version: number, memberIds: string[]) => request<{ server: ManagedServer }>(`/servers/${encodeURIComponent(id)}/grants?schema=2`, 'PUT', { version, memberIds }),
+  serverConnectivityFailures: () => request<{ failures: ServerConnectivityFailure[] }>('/admin/server-connectivity-log'),
   resources: () => request<{ resources: Resource[] }>('/resources'),
   reservations: (options: { from?: string; to?: string; mine?: boolean } = {}) => {
     const query = new URLSearchParams()

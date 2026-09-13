@@ -115,6 +115,8 @@ struct Stored {
     usage_sync: BTreeMap<String, Binding>,
     #[serde(skip)]
     usage_samples: BTreeMap<String, UsageSample>,
+    #[serde(skip)]
+    connectivity_failure_buckets: BTreeMap<String, i64>,
 }
 impl Default for Stored {
     fn default() -> Self {
@@ -133,6 +135,7 @@ impl Default for Stored {
             scope_pending: false,
             usage_sync: BTreeMap::new(),
             usage_samples: BTreeMap::new(),
+            connectivity_failure_buckets: BTreeMap::new(),
         }
     }
 }
@@ -156,6 +159,7 @@ impl Stored {
         self.generation = self.generation.wrapping_add(1);
         self.usage_sync.clear();
         self.usage_samples.clear();
+        self.connectivity_failure_buckets.clear();
     }
     fn cached_usage(&self, server: &Server, timestamp: i64) -> Option<&Value> {
         let managed = server.managed.as_ref().filter(|managed| managed.available)?;
@@ -775,6 +779,41 @@ impl TeamManager {
             Ok(())
         });
     }
+    pub(crate) async fn report_connectivity_failure(&self, server: &Server, error: &str) {
+        let Some(managed) = server.managed.as_ref().filter(|managed| managed.available) else { return; };
+        let Ok(state) = self.read() else { return; };
+        let Some(user) = state.user.as_ref() else { return; };
+        if user.get("role").and_then(Value::as_str) != Some("admin")
+            || user.get("isSuperAdmin") != Some(&Value::Bool(true))
+            || !state.matches_session(&state)
+            || state.account_id.as_deref() != Some(&managed.account_id)
+            || state.user.as_ref().is_none_or(|current| user_scope(current) != "*") { return; }
+        let token = state.token.clone();
+        let bucket = now_ms().div_euclid(3_600_000);
+        let server_key = managed.remote_id.clone();
+        let should_send = self.update(false, |value| {
+            if !value.matches_session(&state) || value.account_id.as_deref() != Some(&managed.account_id)
+                || value.connectivity_failure_buckets.get(&server_key).is_some_and(|previous| *previous == bucket) {
+                return Ok(false);
+            }
+            value.connectivity_failure_buckets.retain(|_, previous| *previous >= bucket.saturating_sub(2));
+            value.connectivity_failure_buckets.insert(server_key.clone(), bucket);
+            Ok(true)
+        }).unwrap_or(false);
+        if !should_send { return; }
+        let path = format!("/api/servers/{}/connectivity-failures", managed.remote_id);
+        let reason = connectivity_failure_reason(error);
+        let result = self.request_with_scope(reqwest::Method::POST, &path, token.as_deref(),
+            Some(json!({"serverVersion": managed.version, "reason": reason})), Some(&state)).await;
+        if result.is_err() {
+            let _ = self.update(false, |value| {
+                if value.matches_session(&state) && value.connectivity_failure_buckets.get(&server_key).is_some_and(|previous| *previous == bucket) {
+                    value.connectivity_failure_buckets.remove(&server_key);
+                }
+                Ok(())
+            });
+        }
+    }
     async fn sync(&self, servers: Vec<Server>, snapshots: Vec<Snapshot>) -> Result<Value, String> {
         let database = self.app.get().map(|app| app.state::<Database>());
         self.sync_with_database(servers, snapshots, database.as_deref()).await
@@ -1167,6 +1206,25 @@ fn user_has_company_access(user: &Value) -> bool {
             None => true, // Older account services did not have a company field.
             Some(company) => company.as_str().is_some_and(is_team_company),
         }
+}
+
+fn connectivity_failure_reason(error: &str) -> &'static str {
+    let lower = error.to_ascii_lowercase();
+    if lower.contains("credential") || error.contains("密码") || error.contains("凭据") {
+        "credentials"
+    } else if lower.contains("timeout") || lower.contains("timed out") || error.contains("超时") || error.contains("不可达") {
+        "timeout"
+    } else if lower.contains("host key") || lower.contains("fingerprint") || error.contains("主机指纹") {
+        "host_key"
+    } else if lower.contains("permission denied") || lower.contains("authentication") || error.contains("认证失败") {
+        "authentication"
+    } else if lower.contains("unable to start") || error.contains("无法启动系统 ssh") {
+        "ssh_start"
+    } else if lower.contains("remote") || error.contains("采集") || error.contains("命令执行") {
+        "remote_command"
+    } else {
+        "unknown"
+    }
 }
 
 fn usage_sample_is_fresh(body: &Value, now: i64) -> bool {

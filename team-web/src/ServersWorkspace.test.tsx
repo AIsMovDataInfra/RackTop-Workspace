@@ -22,6 +22,7 @@ async function fill(label: string, value: string) {
 beforeEach(()=>{
   container=document.createElement('div');document.body.append(container);root=createRoot(container);expired.mockClear()
   vi.spyOn(api,'servers').mockResolvedValue({schemaVersion:2,revision:'fixture',servers:[server]})
+  vi.spyOn(api,'serverConnectivityFailures').mockResolvedValue({failures:[]})
   vi.spyOn(api,'serverMembers').mockResolvedValue({members:[{id:'member-1',name:'已授权成员',username:'member-1'},{id:'member-2',name:'另一成员',username:'member-2'}]})
 })
 afterEach(()=>{act(()=>root.unmount());container.remove();vi.useRealTimers();vi.restoreAllMocks()})
@@ -36,6 +37,16 @@ it('shows only member actions and clears metadata when the session expires',asyn
   await click('刷新')
   expect(expired).toHaveBeenCalledOnce()
   expect(container.textContent).not.toContain('server.example.test')
+})
+it('lets only a super administrator open the hourly connection failure log', async () => {
+  vi.mocked(api.serverConnectivityFailures).mockResolvedValue({ failures: [{ serverId: server.id, serverName: server.name, company: server.company, hourAt: '2026-09-11T10:00:00Z', firstFailedAt: '2026-09-11T10:04:00Z', lastFailedAt: '2026-09-11T10:42:00Z', failureCount: 3, reason: 'timeout' }] })
+  await mount()
+  await click('连接失败日志')
+  expect(api.serverConnectivityFailures).toHaveBeenCalledOnce()
+  expect(container.querySelector('[role=dialog]')?.textContent).toContain('测试服务器')
+  expect(container.querySelector('[role=dialog]')?.textContent).toContain('3')
+  await mount({ id:'member-1', name:'成员', role:'member', company:'西浦', companies:['西浦'], isSuperAdmin:false })
+  expect(container.textContent).not.toContain('连接失败日志')
 })
 it('offers SSH import to super administrators and closes its preview when their role changes', async () => {
   await mount(); await click('添加服务器'); await click('从 SSH 配置文件导入')
