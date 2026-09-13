@@ -1,15 +1,15 @@
 {
-  "version": "2.8.2",
-  "notes": "- 修复切换账号后搜索和总览仍混入旧账号组织连接的问题。\n- 修复切换账号后保留旧选中连接或旧采样画面的问题。\n- 修复刷新全部时失效连接的无权限提示干扰正常连接反馈的问题。",
-  "pub_date": "2026-09-13T02:19:59Z",
+  "version": "2.8.3",
+  "notes": "- 修复成员客户端的实时 GPU 占用未同步到云端的问题。\n- 修复多个客户端的空闲报告覆盖有效占用的问题。\n- 新增默认「现在使用」与独立的「预约未来时段」入口。\n- 优化每块 GPU 的当前占用、匿名用户与预约排期展示。\n- 修复填写表单后立即预约开始时间过期的问题。\n- 修复后台采样过慢及历史快照误作实时状态的问题。\n- 修复排期读取失败时占用不更新及已结束预约未释放的问题。\n- 修复时间选择器在英文界面和窄屏中的溢出。",
+  "pub_date": "2026-09-13T03:28:25Z",
   "platforms": {
     "darwin-aarch64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTVThDMjZnT3Yrc3VDU0kxYXp2Y3ZWM01vTmZUVXZYSDlvR0puRzgwTjNCSUhtTkdvZjNFOUliMndPSFdTc0FVOFErVUJUeHN1SHpKVEhmTHdCaWV2K0pKcngzQi9IUGdrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg5MjY0NDgxCWZpbGU6UmFja1RvcF8yLjguMl9tYWNvcy1hcm02NC11bnNpZ25lZC5hcHAudGFyLmd6Cmt4bndKZTVBZEFuSysxV3doNDNjSndycFZqN0hjdEp0ZVdOSEhpWjlicDM4UnRqUXNweG83blFYRGNZai8vM0JOQk4xQU9GMXh2SzhUcGMxM0Q4ZkRBPT0K",
-      "url": "https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.8.2/RackTop_2.8.2_macos-arm64-unsigned.app.tar.gz"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTVThDMjZnT3Yrc3YyOTBaU1lmWG5FR0JkMEdqUUY2VUlYVkZlZTZqQk5zcnVPUWJLVGkwWStqRjVsamJTSkdncTdiTmE1SEc0MU5wd2JhUkZoSFBZbHVTaHJ0Z0lKc3dVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg5MjY4ODQzCWZpbGU6UmFja1RvcF8yLjguM19tYWNvcy1hcm02NC11bnNpZ25lZC5hcHAudGFyLmd6CndCM0xpMlpTenFTaG0vM241c2xxaHpxaVk2UkoySENvaUE1U3hjaUpmQURPa0JzcWN0VUhVNzFnZTh6VURmTmNDbjVBVDFlUmlBYXA4aHJRWUxRWkNBPT0K",
+      "url": "https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.8.3/RackTop_2.8.3_macos-arm64-unsigned.app.tar.gz"
     },
     "darwin-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTVThDMjZnT3Yrc2tEK3BGTkdTekRjOW5pS3ozejNhSThVeWNtc3ROSmlhZk5XVmdtS0g0Slh5b2JkdXFOTVpnQlRUV1lRR2pIVUdjYlFiSndMK0JqcWxUbDBEUFpsbmd3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg5MjY1ODc4CWZpbGU6UmFja1RvcF8yLjguMl9tYWNvcy14NjQtdW5zaWduZWQuYXBwLnRhci5negpXZnl4Z24xRDVVN2x5MlFxNGdjZHdnUWYzbWozenVhZzFhQUxYR3p0eENNQW50dzNHL0FQaTdlcXRmbnpMdlNsaDlIWVNXK04rVjlLNVNsU21PRm9Cdz09Cg==",
-      "url": "https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.8.2/RackTop_2.8.2_macos-x64-unsigned.app.tar.gz"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTVThDMjZnT3Yrc3QxQkdzMVFkYXJNQVdGRHpXTGlZQ0F1czRiTlpTNVFpaXIwQU16c2hXM3d1S1MxdmQ5TExzYmY5cVdaNHBsK3FRRDBvdlhKQ0ZPUTY0VkxhNjVVU3djPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg5MjY5NTQ0CWZpbGU6UmFja1RvcF8yLjguM19tYWNvcy14NjQtdW5zaWduZWQuYXBwLnRhci5negpabmhaRnBGQ2dzWUtLdGo1WlZZYUtrZFhuSlMvR2MxSGM2VEtSLzQwSWVWbnRmVXZkS2c3K0VHdlBpeEpyRXRxVWxUb0NMcVN6SDlOcjFvZTl2NUdCUT09Cg==",
+      "url": "https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.8.3/RackTop_2.8.3_macos-x64-unsigned.app.tar.gz"
     }
   }
 }
