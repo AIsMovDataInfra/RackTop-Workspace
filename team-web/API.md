@@ -1,6 +1,6 @@
-# AIsMov RackTop 团队工作台 API（2.8.0）
+# AIsMov RackTop 团队工作台 API（2.8.3）
 
-**版本范围：本文对应已发布的 2.8.0。团队网页已上线，Linux 与两种 Mac 的测试版安装包可从下载页获取。新增 GPU 占用摘要需要管理员升级到 2.8.0 并持续采集；旧桌面不会产生该摘要，安装包发布不代表现有管理员电脑已经升级。历史验收不代表本轮结果。**
+**版本范围：本文对应 2.8.3 固定源码 `cc2933b1b48181bdd345ab6b8b5f3d05ec053946`。团队服务已于 2026-09-13 10:59:30（UTC+8）上线，网页 CI 与数据保留／HTTPS 验收通过；正式桌面包、更新清单和公开镜像已发布，并已由普通成员 2.8.3 客户端向生产提交通过完整授权校验的 GPU 占用。**
 
 接口实现位于 `team-web/server/`，使用 Node.js 24+、单服务进程和本地 SQLite。正式默认模式为 `account`（用户名＋密码），另保留本机 `demo` 与可选 `feishu`。已部署的公网入口是 `https://136.0.110.161`，路径均以根级 `/api` 开始。
 
@@ -50,7 +50,7 @@
 
 ## 数据结构
 
-- `User`：account 模式返回 `{id,username,name,role:'admin'|'member',isSuperAdmin:boolean,company:Company|null,version:number,avatar:Avatar}`；demo／feishu 仍可省略账号专有字段。`Company` 只能为 `A公司`、`B公司`、`C公司`、`西浦`。普通账号的 null 表示尚未分配；超级管理员固定返回 null，表示跨公司管理且无需公司，历史数据库值不会进入身份投影或权限判断。`role:'admin'` 是资源管理员身份，只有 `isSuperAdmin:true` 才能管理成员。`Avatar` 为 `user|cat|dog|rocket|robot|flower|star|engineer|explorer|rabbit|bird|fish|turtle|squirrel|bug|satellite|planet|moon|sun|computer|circuit|headphones|sprout|gem`，旧记录默认user，原7个ID保持兼容。新增nullable `avatar_choice`用于扩展选择，不重建账号表或改写旧头像；公开User仍只有 `avatar` 字段，优先返回新选择。没有邮箱字段；客户端不能自报 `role`、`isSuperAdmin` 或 `ownerId`。
+- `User`：account 模式返回 `{id,username,name,role:'admin'|'member',isSuperAdmin:boolean,company:Company|null,companies:Company[],version:number,avatar:Avatar}`；demo／feishu 仍可省略账号专有字段。`Company` 只能为 `A公司`、`B公司`、`C公司`、`西浦`。`companies` 为已分配组织列表，`company` 为当前选择；普通账号的 null 表示尚未分配；超级管理员固定返回 null，表示跨公司管理且无需公司，历史数据库值不会进入身份投影或权限判断。`role:'admin'` 是资源管理员身份，只有 `isSuperAdmin:true` 才能管理成员。`Avatar` 为 `user|cat|dog|rocket|robot|flower|star|engineer|explorer|rabbit|bird|fish|turtle|squirrel|bug|satellite|planet|moon|sun|computer|circuit|headphones|sprout|gem`，旧记录默认user，原7个ID保持兼容。新增nullable `avatar_choice`用于扩展选择，不重建账号表或改写旧头像；公开User仍只有 `avatar` 字段，优先返回新选择。没有邮箱字段；客户端不能自报 `role`、`isSuperAdmin` 或 `ownerId`。
 - `Member`：仅超级管理员成员接口返回 `{...User,createdAt,recoveryRequestedAt}`；后两项为 UTC ISO8601，尚无找回申请时 `recoveryRequestedAt=null`。只含账号业务信息，不返回密码、密码哈希、会话／设备令牌或内部管理审计记录。
 - `Gpu`：`{id,uuid,index,model,memoryTotalMb}`。`id` 是服务端稳定 ID，`uuid` 是规范化为小写的真实 NVIDIA 完整硬件 UUID，`index` 是当前显示编号；预约不要用编号代替稳定身份。
 - `Resource`：`{id,company,companyVersion,cluster,name,gpuModel,gpuCount,notes,enabled,gpus,inventoryVersion,inventoryState,lastSeenAt,observedAt,status,pendingGpus,usage}`。`company` 为 Company 或旧未分配记录的空串，`companyVersion` 为正整数。清单状态为 `manual|synced|conflict`，在线状态为 `online|offline|unknown`；超过 90 秒的采集显示 unknown。手工资源 `gpus=[]`，CPU 资源 `gpuCount=0`。待确认清单的 GPU 没有已确认的稳定 ID。
@@ -91,8 +91,8 @@ account 模式提供的 `/api/admin/members` 接口仅接受超级管理员身�
 | 请求 | 输入／返回 |
 | --- | --- |
 | `GET /api/admin/members` | `200 {members:Member[]}`，返回全部未删除账号，按创建时间、ID 排序，包含超级管理员。 |
-| `POST /api/admin/members` | `{name,password,company,username?}` → `201 {member:Member}`；创建 `role:'member',isSuperAdmin:false` 员工，company 必选。 |
-| `PATCH /api/admin/members/:id` | `{version,company}` → `200 {member:Member}`；只修改普通员工公司，不能清空或修改用户名、姓名、角色。公司相同则不递增版本；超级管理员返回 `403 SUPERADMIN_COMPANY_NOT_REQUIRED`。 |
+| `POST /api/admin/members` | `{name,password,companies,username?}` → `201 {member:Member}`；创建 `role:'member',isSuperAdmin:false` 员工；companies 为不重复的已知组织数组，可为空。兼容旧 company 单值，两者不能同时传入。 |
+| `PATCH /api/admin/members/:id` | `{version,companies}` → `200 {member:Member}`；修改普通员工组织归属，空数组表示待分配，不能修改用户名、姓名、角色；兼容旧 company 单值，两者不能并用。归属相同则不递增版本；超级管理员返回 `403 SUPERADMIN_COMPANY_NOT_REQUIRED`。 |
 | `POST /api/admin/members/:id/reset-password` | `{version,newPassword}` → `200 {member:Member}`；设置新密码，清除找回申请、递增版本并撤销该员工所有网页登录与设备令牌。 |
 | `DELETE /api/admin/members/:id` | `{version}` → `200 {ok:true}`；撤销登录、删除登录凭据并将账号标记为已删除，保留历史业务记录。 |
 
@@ -106,7 +106,7 @@ account 模式提供的 `/api/admin/members` 接口仅接受超级管理员身�
 
 静态页面和资源文件仍可获取，用于显示登录／注册界面；`GET /api/session` 提供当前身份或匿名 CSRF 会话，`GET /api/health` 返回 `{ok:true}`。注册、登录等认证入口按上一节各自校验 Origin、CSRF、凭据与认领码。匿名能取得网页壳不代表能取得业务数据。
 
-account 模式的普通成员和资源管理员只可读取本公司设备和照片；带硬件清单的预约资源还必须与同公司启用的服务器资源绑定，普通成员另需相应 SSH 授权。直接请求其他公司或无权访问的资源详情返回 404。手工资源保留组织权限规则；未关联服务器目录的旧硬件资源不进入有效预约看板，公司未知的旧设备仍只对超管可见。普通成员可创建自己的预约、维护本公司实物设备；资源创建、修改和同步仅限本公司管理员或超管，预约修改/取消/提前结束仍限本人或本公司管理员。只有超管能跨公司管理及读取成员名册。设备负责人或使用人姓名不是授权依据。
+account 模式的普通成员和资源管理员只可读取本公司设备和照片；带硬件清单的预约资源还必须与同公司启用的服务器资源绑定，普通成员另需相应 SSH 授权。直接请求其他公司或无权访问的资源详情返回 404。手工资源保留组织权限规则；未关联服务器目录的旧硬件资源不进入有效预约看板，公司未知的旧设备仍只对超管可见。普通成员可创建自己的预约、维护本公司实物设备；资源创建、修改和个人硬件清单同步仅限本公司管理员或超管；已有绑定的占用摘要另允许当前获授权成员设备上报，预约修改/取消/提前结束仍限本人或本公司管理员。只有超管能跨公司管理及读取成员名册。设备负责人或使用人姓名不是授权依据。
 
 周报 API 已移除，历史记录保留；办公设备申请读接口仍仅超管可用，见下方工作台接口。未分配成员仍可查询 session、退出、选择头像、申请找回及凭当前密码改密，网页等待页每 30 秒或恢复焦点检查分配状态并保留原深链接。客户端遇到 `COMPANY_REQUIRED` 或 `SUPERADMIN_REQUIRED` 时应立即隐藏受限数据并重新查询 session；401 回到登录。身份公司变更由实时会话查询生效，不把旧公司的业务资料继续留在页面中。
 
@@ -190,13 +190,13 @@ account 模式的普通成员和资源管理员只可读取本公司设备和照
 
 ## 资源与桌面同步
 
-### 2.8.1 目录与当前预约校验
+### 有效目录与当前预约校验
 
 账号模式中，有 GPU 硬件清单的资源必须由 `managed_resource_bindings` 关联到同公司启用的服务器目录。普通成员须拥有其中至少一个入口的当前 SSH 授权；不同 SSH 入口指向同一完整 GPU UUID 集合时，共用资源及占用，不按登录人复制。读取详情、新建及修改预约都会重新检查；`mine=true` 和本人预约详情保留旧预约，撤权后仍能取消或提前结束。默认排期列表只返回有效目录可见的资源。
 
 更改服务器 target 或 jump 的实际连接身份后，同事务解除该入口的旧绑定并清除其旧占用摘要；保留资源及预约历史。名称、密码、授权修改不解除硬件绑定。首次关联须由管理员提供最近 90 秒内完整、有效的 GPU UUID 清单，旧未分配资源由超级管理员确认归属；不得根据显示名称推断身份。
 
-开始时间不晚于服务器当前时间的 GPU 预约，除排期冲突外，还检查全部目标 GPU 的可信空闲观测；所选卡忙碌返回 `409 GPU_BUSY`，缺少有效观测、达到 90 秒、清单不完整或未知返回 `409 GPU_USAGE_UNKNOWN`。CPU 仍按原整机排期规则处理，不推断 CPU 空闲。已有正在进行的预约保留原卡使用权：续期仍检查排期冲突，增加 GPU 则额外检查新增卡；未来预约改为立即开始须检查全部目标卡。未来时段不根据当前占用预测可用性，预约也不会自动停止进程。
+显式 `startMode:"now"` 或兼容旧调用中开始时间不晚于服务端当前时间后 60 秒的 GPU 预约，除排期冲突外，还检查全部目标 GPU 的可信空闲观测；忙碌返回 `409 GPU_BUSY`，缺少有效观测、达到 90 秒、清单不完整或未知返回 `409 GPU_USAGE_UNKNOWN`。CPU 仍按整机排期规则人工协调，不推断空闲。原预约确已开始且未结束时，原覆盖卡无需再次验证自身占用，续期仍检查排期冲突，新增 GPU 需查新卡；未来预约移到现在须检查全部目标卡。显式未来时段不会以当前占用预测可用性，也不会自动停止进程。
 
 
 | 请求 | 输入／权限 |
@@ -234,9 +234,9 @@ account 资源创建时普通管理员公司由会话确定，不能指定别家
 
 离线上报保留硬件，只更新连接信息；过期上报不能回滚清单，收到数据的时间不代替采集时间。卡数变化、换卡或缺卡返回 `409 INVENTORY_CHANGED`，同时持久保存 `pendingGpus` 与 `inventoryState=conflict`，原硬件和预约不删除。管理员通过 `PATCH` 的 `acceptInventoryVersion` 确认**当前版本**；只要还有 `confirmed` 且结束时间在未来的预约就拒绝，需先协调、取消或提前结束。已有未来预约的手工资源也不能直接绑定新硬件，因为无法推断历史 GPU 编号对应的真实卡。
 
-### 组织服务器 GPU 占用摘要（2.8.0 源码）
+### 组织服务器 GPU 占用摘要（2.8.3）
 
-`POST /api/servers/:id/telemetry` 仅 account 模式的管理员设备 Bearer 会话可调用，须正确 Origin 和显式 `X-RackTop-Company`；网页 Cookie 会话返回 `403 DEVICE_REQUIRED`。服务端重新核对当前组织、服务器管理员权限、启用状态和目录版本，普通成员设备不能上报。此路径不接受 `schema` 或其他查询参数，沿用 64 KiB JSON 上限。
+`POST /api/servers/:id/telemetry` 仅 account 模式有效设备 Bearer 会话可调用，须正确 Origin 和显式 `X-RackTop-Company`；网页 Cookie 返回 `403 DEVICE_REQUIRED`。管理员可上报其管理范围内的启用服务器；普通成员须处于当前组织、仍有该组织归属及该服务器 SSH 授权。服务端重新核对会话、组织、授权、启用状态和 `serverVersion`，不信任客户端自报身份。接口不接受 `schema` 或其他查询参数，沿用 64 KiB JSON 上限。
 
 请求体为：
 
@@ -249,26 +249,37 @@ account 资源创建时普通管理员公司由会话确定，不能指定别家
 - `gpus` 最多 64 张，复用完整 NVIDIA GPU UUID 和硬件清单校验。`utilization` 为 null 或 0–100，`memoryUsedMb` 为 null 或 0 至该卡总显存。`users` 每卡最多 128 项，每项最多 64 字符且不得含控制字符；去重并剔除不可识别用户名占位值，有用户名时 `hasProcesses` 必须为 true。
 - 桌面通过本机已有 SSH 连接采集获授权的组织服务器，约每 30 秒上报。关闭本地历史记录后仍使用内存摘要同步，不为此额外持久化完整 Snapshot。请求不携带 SSH 密码、私钥、完整进程命令行或环境变量；Linux 系统用户名是新摘要明确包含的业务数据，不能替换成预约人。
 
-成功为 `200 {resource: Resource|null}`。首次登记要求最近 90 秒内在线、完整且非空的 GPU 清单；条件不足时可返回 null，不会从空清单自动创建 CPU。完整相同硬件可绑定已有同公司资源并保留其原集群名称；新建组织 GPU 资源默认集群名称为 `GPU集群`。跨公司或不完整拓扑混用会拒绝；绑定后的硬件变更保留旧清单与预约，进入 `409 INVENTORY_CHANGED` 待核验流程。
+成功为 `200 {resource: Resource|null}`。首次绑定或创建资源只限管理员，要求最近 90 秒内在线、完整且非空的 GPU 清单；不足时可返回 null，不会从空清单创建 CPU。完整相同硬件可绑定已有同公司资源，保留原集群名；新建默认集群 `GPU集群`。旧空公司资源仅超管可认领。成员必须使用已存在的服务器绑定，且清单处于 synced、GPU UUID 集合完全一致；无绑定返回 `409 TELEMETRY_BINDING_REQUIRED`，拓扑不符返回 `409 TOPOLOGY_CONFLICT`，不能新建、认领、改写清单／名称／公司。管理员硬件变更仍保留旧清单与预约，进入 `409 INVENTORY_CHANGED` 待核验。
 
-每卡出现进程、有效系统用户名、非零利用率或非零已用显存中的任一占用证据时为 busy；只有完整一致的硬件清单、进程查询与指标均有效，且所有这些指标明确为零／空时才为 free。其他情况为 unknown；已停用、目录版本失效、过期或清单冲突的观测不能证明空闲。资源整体有任一卡 busy 即为 busy，全部卡 free 才为 free，否则 unknown。采样以观测与接收时间较早者计算，网页达到 90 秒时清空旧 GPU 明细及用户并显示未知；旧服务不返回 usage 时也按未知处理。有占用但无可用用户名时，界面显示“匿名用户”。
+设备来源由服务端从已认证设备会话派生，不接受请求体中的 sourceId 或 reporterId，也不回传来源标识。按设备来源保存至 `resource_usage_sources`；旧 `resource_usage` 行保留，但没有设备身份，不能用于证明当前状态。读取及预约事务都会重新检查来源设备会话仍有效、账号未删除、组织归属／当前组织、服务器版本、启用状态、绑定与 SSH 授权；失效来源不能继续贡献占用。成员权限不能通过伪造来源、重放其他设备或旧目录版本获得。
 
-GPU/CPU 分类只依据 `gpuCount>0` 或 `gpuCount=0`，保留原集群名；CPU 服务器由管理员登记实际节点，仅支持整机预约；本接口不提供全 CPU 实时监控。busy 在界面显示“被占用”，不禁止未来时段预约，预约冲突仍按请求时段检查，不自动启动或停止任务。此接口与客户端上报能力已随 2.8.0 交付，需要管理员运行 2.8.0 桌面持续采集；旧 2.7.3 下载包没有该上报能力。
+每卡出现进程、有效系统用户名、非零利用率或非零已用显存中的任一占用证据时为 busy；只有完整一致清单、进程查询及指标均有效且明确为零／空时才为 free，否则 unknown。任一有效来源仍新鲜的 busy 优先于其他来源的 free；一份 unknown 不抹掉其他有效来源。没有可靠证据或清单冲突时 unknown；任一卡 busy 则资源 busy，全部 free 才资源 free。观测与接收时间取较早者，达到 90 秒失效，过期用户名与指标清空；缺少 usage 的旧响应也按未知。占用但无可识别系统用户名时显示“匿名用户”，不得用预约人代替。
+
+客户端必须持续运行并经本机网络 SSH 采集，约每 30 秒上报；关闭历史记录仍使用当前会话内存摘要，重启／切号后等待新采样，不回放历史。退出、改密、撤权、组织切换会使对应来源在服务端检查时失效；客户端关闭或失联则至多等到 90 秒超时。其他有效来源仍可继续贡献观测。这是获授权客户端提交的观测，服务端校验身份、范围、拓扑和新鲜度，并非独立硬件证明。
+
+GPU/CPU 分类只依据 `gpuCount>0` 或 `gpuCount=0`，保留原集群名；CPU 由管理员手工登记实际节点，人工协调后仅支持整机预约，本接口不提供通用 CPU 实时监控。busy 在界面显示“被占用”，未来时段仍可排期，当前标签不隐藏；预约不自动启动或停止任务。成员上报需要 2.8.3 客户端；生产只读验收已确认普通成员设备的有效来源可以持续更新已绑定资源。
 
 ## 预约接口与冲突
 
 | 请求 | 输入／返回 |
 | --- | --- |
 | `GET /api/reservations?from=ISO&to=ISO&mine=true` | `{reservations:Reservation[]}`；mine=true 仅当前账号。 |
-| `POST /api/reservations` | `{resourceId,scope,gpuIndices?,gpuIds?,inventoryVersion?,requestId?,startAt,endAt,purpose}` → `201 {reservation}`。 |
+| `POST /api/reservations` | `{resourceId,scope,gpuIndices?,gpuIds?,inventoryVersion?,requestId?,startMode?,startAt?,endAt,purpose}` → `201 {reservation}`。 |
 | `GET /api/reservations/:id` | `{reservation}`；当前公司有权限的成员可查看完整记录，超管跨公司。 |
-| `PATCH /api/reservations/:id` | 本人或管理员；`{version,startAt?,endAt?,purpose?,scope?,gpuIndices?,gpuIds?,inventoryVersion?}` → `{reservation}`，资源 ID 不可更换。 |
+| `PATCH /api/reservations/:id` | 本人或管理员；`{version,startMode?,startAt?,endAt?,purpose?,scope?,gpuIndices?,gpuIds?,inventoryVersion?}` → `{reservation}`，资源 ID 不可更换。 |
 | `POST /api/reservations/:id/cancel` | 本人或管理员；`{version}` → `{reservation}`。 |
 | `POST /api/reservations/:id/finish` | 本人或管理员的进行中预约；`{version}` → `{reservation}`。 |
 
 手工资源用 `gpuIndices`，整机传 `[]`。同步资源必须传最新 `inventoryVersion` 和 `gpuIds`；同步整机预约也传 `gpuIds:[]`。指定 GPU 使用稳定 ID，不依赖数字编号。修改或续约同步资源时也要提交最新清单版本，应从当前 `Resource.inventoryVersion` 读取，不能始终沿用预约创建时的版本；GPU 编号重排后预约保留稳定身份，但资源清单版本可能已增加。
 
-可选 `requestId` 只在创建使用。同一账号、同一 requestId、完全相同的输入重试会返回原预约；改变输入返回 `IDEMPOTENCY_CONFLICT`。更换姓名不会创建新身份；当前版本不提供改名接口。
+开始意图（新客户端应显式提交）：
+
+- `startMode:"now"`：创建时可以省略 `startAt`；即使提供也忽略，以服务端接受请求时的当前时间开始，仍需合法 `endAt` 与完整预约字段。弹窗停留或客户端时钟不能形成未来豁免。
+- `startMode:"scheduled"`：必须提供 `startAt`，且至少晚于服务端当前时间 60 秒，否则 `422 SCHEDULE_TOO_SOON`；结束时间必须晚于开始时间和当前时间。
+- 兼容缺少 `startMode` 的旧客户端：仍需 `startAt`；起点不晚于服务端当前时间后 60 秒时执行当前 GPU 占用检查，更晚的起点保留旧未来排期行为。不要将缺省字段作为新客户端的未来模式。
+- PATCH 未来预约可显式 now 移到现在，须检查全部目标卡；已开始预约不能改原开始时间，now 也保留原起点。普通续期、用途修改无需额外 startMode。CPU 使用相同开始意图，仍不以 GPU 摘要判断 CPU 占用。
+
+可选 `requestId` 只在创建使用。同一账号、同一 requestId、完全相同的输入重试会返回原预约；now 模式的服务端当前时间不进入输入哈希，未知提交结果应使用同一 requestId 和同一草稿重试，不重新生成开始时间。改变输入返回 `IDEMPOTENCY_CONFLICT`。更换姓名不会创建新身份；当前版本不提供改名接口。
 
 确认冲突条件是同资源且 `existing.start < new.end && existing.end > new.start`，同时任一预约为整机，或 GPU 身份集合相交。同步资源比较稳定 GPU ID；手工资源比较编号。`BEGIN IMMEDIATE` 保护检查与写入，跨连接、跨进程并发同样生效。
 
@@ -331,7 +342,7 @@ account 模式配置包含 `publicUrl,host,dbPath,now?,nodeEnv?,adminUsername?,b
 
 访客首先看到登录／注册界面，身份及公司资格有效后才加载资源、排期和设备；深链地址保留，不会把业务数据写进静态登录壳。`/#setup=<一次性码>` 与普通资源深链用途不同：前者只为一次性资源管理员注册提供认领码，读取后移除 fragment，不能用它调用业务 API，也不作为持续登录令牌。
 
-桌面读取中央资源和排期也需要有效设备登录；超级管理员或已分配公司的资源管理员调用 `device-login` 后才可 `resources/sync`，已分配公司的普通成员设备令牌可以读取团队业务，但不能同步或修改资源目录。设备登录在操作系统钥匙串中保存，网页 Cookie 不传给桌面。预约确认仅建立排期记录，任何账号、设备令牌或预约 ID 都不授予 SSH 登录、终端、文件访问或 GPU 操作系统隔离权限。
+桌面读取中央资源和排期也需要有效设备登录；超级管理员或已分配公司的资源管理员调用 `device-login` 后才可 `resources/sync`。已分配公司的普通成员设备令牌可读取当前授权范围内的业务，并向已有绑定的获授权服务器提交 telemetry，但不能新建、修改或同步个人资源目录。设备登录在操作系统钥匙串中保存，网页 Cookie 不传给桌面。预约确认仅建立排期记录，任何账号、设备令牌或预约 ID 都不授予 SSH 登录、终端、文件访问或 GPU 操作系统隔离权限。
 
 ## 运维与通知
 

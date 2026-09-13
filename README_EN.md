@@ -6,7 +6,7 @@ Server monitoring, remote terminals, and team collaboration in one workspace.
 
 ## Install
 
-**Current version: 2.8.2 Pre-release.** For Ubuntu 20.04 / 22.04, run the unified installer below. On Mac, choose the DMG for your chip on the download page. No source build or development tools are required.
+**Current version: 2.8.3 Pre-release.** For Ubuntu 20.04 / 22.04, run the unified installer below. On Mac, choose the DMG for your chip on the download page. No source build or development tools are required.
 
 SSH connections and file transfers continue directly over your own network. Version 2.7.3 reduces accidental password exposure; an authorized member can still deliberately retrieve the password.
 
@@ -18,21 +18,23 @@ Run as your regular user; do not prefix the whole command with `sudo`. If `curl`
 
 | Computer | Cloud download | GitHub mirror |
 | --- | --- | --- |
-| Ubuntu 20.04, Intel / AMD 64-bit | [Flatpak offline kit](https://136.0.110.161/downloads/RackTop_2.8.2_linux-amd64-flatpak-offline.tar.gz) | [Download](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.8.2/RackTop_2.8.2_linux-amd64-flatpak-offline.tar.gz) |
-| Ubuntu 22.04, Intel / AMD 64-bit | [DEB package](https://136.0.110.161/downloads/RackTop_2.8.2_linux-amd64.deb) | [Download](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.8.2/RackTop_2.8.2_linux-amd64.deb) |
-| Mac with an M-series chip | [Apple Silicon DMG](https://136.0.110.161/downloads/RackTop_2.8.2_macos-arm64-unsigned.dmg) | [Download](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.8.2/RackTop_2.8.2_macos-arm64-unsigned.dmg) |
-| Mac with an Intel processor | [Intel DMG](https://136.0.110.161/downloads/RackTop_2.8.2_macos-x64-unsigned.dmg) | [Download](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.8.2/RackTop_2.8.2_macos-x64-unsigned.dmg) |
+| Ubuntu 20.04, Intel / AMD 64-bit | [Flatpak offline kit](https://136.0.110.161/downloads/RackTop_2.8.3_linux-amd64-flatpak-offline.tar.gz) | [Download](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.8.3/RackTop_2.8.3_linux-amd64-flatpak-offline.tar.gz) |
+| Ubuntu 22.04, Intel / AMD 64-bit | [DEB package](https://136.0.110.161/downloads/RackTop_2.8.3_linux-amd64.deb) | [Download](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.8.3/RackTop_2.8.3_linux-amd64.deb) |
+| Mac with an M-series chip | [Apple Silicon DMG](https://136.0.110.161/downloads/RackTop_2.8.3_macos-arm64-unsigned.dmg) | [Download](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.8.3/RackTop_2.8.3_macos-arm64-unsigned.dmg) |
+| Mac with an Intel processor | [Intel DMG](https://136.0.110.161/downloads/RackTop_2.8.3_macos-x64-unsigned.dmg) | [Download](https://github.com/AIsMovDataInfra/RackTop-Workspace/releases/download/v2.8.3/RackTop_2.8.3_macos-x64-unsigned.dmg) |
+
+Mac packages are ad-hoc signed and are not Apple-notarized; follow the [Mac first-open guide](docs/MACOS.md) (Chinese).
 
 Flatpak 2.2.2 needs one upgrade through this installer before in-app updates become available. Existing Flatpak installations keep their user or system scope. See the [installation, data retention, and upgrade guide](docs/DOWNLOADS.md) (Chinese).
 
 ## Get started
 
-**Desktop 2.8.2 fixes mixed organization connections after account switches; the team website remains on 2.8.1.** Team connections are scoped to the current account and organization; superadmins can view their own account’s connections across organizations. Personal connections and previous account data are retained. GPU usage summaries require an administrator running desktop 2.8.0 or later with active collection; without fresh observations, usage is unknown. See [the changes](docs/Version_overview.md) (Chinese).
+**2.8.3 separates “Use now” from “Book a future slot” and lets authorized members report GPU usage from desktop.** Team connections remain scoped to the current account and organization; superadmins can view their own account’s connections across organizations. Personal connections and previous account data are retained. After an administrator completes the initial hardware binding, an administrator or authorized member running desktop 2.8.3 with active collection can send summaries about every 30 seconds. Opening the website alone does not collect usage; observations become unknown after 90 seconds without an update. See [the changes](docs/Version_overview.md) (Chinese).
 
 - **Manage servers:** Open the desktop app, add an SSH connection, inspect GPU / CPU activity, use terminals, synchronize projects, and manage jobs.
 - **Work with your team:** Sign in to the online workspace, select your current organization, register assets and print QR labels in **Asset management**, submit **Office equipment requests**, and reserve compute resources.
-- **Team SSH:** Admins maintain server resources, enter existing SSH passwords, and grant access. Members sign in on desktop 2.8.2, select an organization, and connect with the assigned credentials. Local passwords, private keys, and SSH Agent remain available when no shared password is provided. [Instructions](docs/WORKSPACE.md#统一管理-ssh-服务器) (Chinese).
-- **Resource board:** Browse GPU / CPU groups and view current usage separately from reservations for your selected time. A busy resource can still be booked for an available future slot. Administrators can register actual CPU servers for whole-machine reservations.
+- **Team SSH:** Admins maintain server resources, enter existing SSH passwords, and grant access. Members sign in on desktop 2.8.3, select an organization, and connect with the assigned credentials. Local passwords, private keys, and SSH Agent remain available when no shared password is provided. [Instructions](docs/WORKSPACE.md#统一管理-ssh-服务器) (Chinese).
+- **Resource board:** “Use now” is the default: selected GPUs need fresh idle observations and no booking conflict. Busy, unknown, or stale GPUs can still be scheduled explicitly at least one minute ahead. Each GPU’s current usage remains separate from its bookings; “unreserved” does not mean idle. Missing system usernames appear as “Anonymous user”; reservation owners are not inferred as users. Bookings do not stop jobs. Administrators register actual CPU servers for manually coordinated whole-machine use.
 - **Find instructions:** [Linux](docs/LINUX.md) · [Mac](docs/MACOS.md) · [Asset management](docs/EQUIPMENT.md) · [Resource sharing](docs/SHARING.md).
 
 Quit the old app before upgrading. Upgrades using the same installation format retain existing data. DEB and Flatpak use different data directories; back up before changing formats.
