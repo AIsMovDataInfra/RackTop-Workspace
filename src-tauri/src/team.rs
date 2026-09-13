@@ -11,7 +11,7 @@ use std::{
     sync::{Arc, Mutex, OnceLock},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
-use tauri::{Manager, State};
+use tauri::{Emitter, Manager, State};
 
 pub const TEAM_URL: &str = "https://136.0.110.161";
 
@@ -50,6 +50,21 @@ fn now_ms() -> i64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as i64
+}
+
+// A local display scope, never a credential or an authorization for SSH work.
+// Current unavailable entries remain visible so their authentication can be fixed.
+struct ServerListScope {
+    account_id: String,
+    company: Option<String>,
+}
+
+fn servers_in_scope(mut servers: Vec<Server>, scope: Option<&ServerListScope>) -> Vec<Server> {
+    servers.retain(|server| server.managed.as_ref().is_none_or(|managed| {
+        scope.is_some_and(|scope| managed.account_id == scope.account_id
+            && scope.company.as_ref().is_none_or(|company| managed.company == *company))
+    }));
+    servers
 }
 
 #[derive(Clone, Serialize, Deserialize, Default)]
@@ -176,6 +191,21 @@ impl Stored {
     fn matches_session(&self, expected: &Stored) -> bool {
         !self.login_pending && !self.scope_pending && self.token.is_some()
             && self.generation == expected.generation && self.token == expected.token
+    }
+    fn server_list_scope(&self) -> Option<ServerListScope> {
+        if !self.matches_session(self) { return None; }
+        let user = self.user.as_ref()?;
+        let account_id = self.account_id.as_ref().filter(|id| !id.is_empty())?;
+        if user.get("id").and_then(Value::as_str) != Some(account_id.as_str()) { return None; }
+        let role = user.get("role").and_then(Value::as_str)?;
+        if !matches!(role, "admin" | "member") { return None; }
+        let company = if user.get("isSuperAdmin") == Some(&Value::Bool(true)) {
+            if role != "admin" { return None; }
+            None
+        } else {
+            Some(user.get("company").and_then(Value::as_str).filter(|company| is_team_company(company))?.to_owned())
+        };
+        Some(ServerListScope { account_id: account_id.clone(), company })
     }
     fn finish_login(
         &mut self,
@@ -367,7 +397,11 @@ impl TeamManager {
         })
     }
     fn read(&self) -> Result<Stored, String> {
+        self.read_with_scope_notification(|| self.notify_server_scope_changed())
+    }
+    fn read_with_scope_notification(&self, notify: impl FnOnce()) -> Result<Stored, String> {
         let mut guard = self.value.lock().map_err(|_| "团队设置暂时不可用")?;
+        let mut scope_loaded = false;
         if guard.is_none() {
             let mut value: Stored = match self.entry.get_password() {
                 Ok(s) if s.len() <= 128 * 1024 => {
@@ -378,9 +412,16 @@ impl TeamManager {
                 Err(_) => return Err("请先解锁系统钥匙串，再连接团队账号".into()),
             };
             value.migrate_account();
+            scope_loaded = value.server_list_scope().is_some();
             *guard = Some(value);
         }
-        Ok(guard.as_ref().unwrap().clone())
+        let value = guard.as_ref().unwrap().clone();
+        drop(guard);
+        // A failed first keyring read leaves the cache empty. After unlocking,
+        // notify once even if a directory refresh has no metadata changes.
+        // The cache is already installed, so the UI's re-read cannot emit again.
+        if scope_loaded { notify(); }
+        Ok(value)
     }
     fn persist(&self, value: &Stored) -> Result<(), String> {
         #[cfg(any(test, feature = "integration-probe"))]
@@ -408,6 +449,8 @@ impl TeamManager {
         let generation = value.generation;
         *guard = Some(value);
         if changed { self.changes.send_replace(generation); }
+        drop(guard);
+        if changed { self.notify_server_scope_changed(); }
         Ok(result)
     }
     // Clearing the memory session is unconditional, even if a newly locked keyring prevents persistence.
@@ -423,6 +466,9 @@ impl TeamManager {
             return Ok((None, None));
         }
         let token = value.clear_login();
+        // Even already-expired directory rows disappear on logout. Their
+        // invalidation may produce no affected IDs, but the UI must re-read.
+        self.notify_server_scope_changed();
         self.invalidate_directory("已退出团队账号，请重新登录")?;
         self.changes.send_replace(value.generation);
         let error = self.persist(value).err();
@@ -430,6 +476,17 @@ impl TeamManager {
     }
     pub fn status(&self) -> Result<Value, String> {
         Ok(self.read()?.public_status())
+    }
+    pub fn visible_servers(&self, servers: Vec<Server>) -> Vec<Server> {
+        // A failed initial keyring read is not cached by read(). Unlocking and
+        // re-reading therefore restores the current scope without a network call.
+        let scope = self.read().ok().and_then(|state| state.server_list_scope());
+        servers_in_scope(servers, scope.as_ref())
+    }
+    fn notify_server_scope_changed(&self) {
+        if let Some(app) = self.app.get() {
+            let _ = app.emit("managed-servers-changed", json!({"affectedIds":[],"scopeChanged":true}));
+        }
     }
     async fn refresh_status(&self) -> Result<Value, String> {
         let state = self.read()?;
@@ -1376,6 +1433,137 @@ mod tests {
             nvidia_message: Some("private-driver-diagnostic".into()),
         };
         (server, snapshot)
+    }
+
+    fn display_server(id: &str, account: &str, company: &str, available: bool) -> Server {
+        let mut server = fixture().0;
+        server.id = id.into();
+        server.managed = Some(crate::models::ManagedServer {
+            account_id: account.into(), company: company.into(), remote_id: format!("remote-{id}"),
+            available, reason: (!available).then(|| "请配置本机认证或联网重试".into()), version: 1,
+            has_password: false, has_jump_password: false, credential_revision: 0, epoch: 1,
+        });
+        server
+    }
+
+    #[test]
+    fn team_server_list_scope_filters_accounts_and_companies_but_keeps_unavailable_current_entries() {
+        let mut state = signed_in();
+        state.user.as_mut().unwrap()["role"] = json!("member");
+        state.user.as_mut().unwrap()["company"] = json!("A公司");
+        let personal = fixture().0;
+        let unavailable = display_server("current-needs-auth", "member-1", "A公司", false);
+        let rows = vec![personal, display_server("current", "member-1", "A公司", true), unavailable.clone(),
+            display_server("other-company", "member-1", "西浦", true), display_server("old-account", "previous-member", "A公司", false)];
+        let original = serde_json::to_value(&rows).unwrap();
+        let visible = servers_in_scope(rows.clone(), state.server_list_scope().as_ref());
+        assert_eq!(visible.iter().map(|server| server.id.as_str()).collect::<Vec<_>>(), vec!["connection-a", "current", "current-needs-auth"]);
+        assert_eq!(serde_json::to_value(&visible[2]).unwrap(), serde_json::to_value(unavailable).unwrap());
+        assert_eq!(serde_json::to_value(rows).unwrap(), original, "projection must not modify saved history or authorization metadata");
+        assert!(!serde_json::to_string(&visible).unwrap().contains("test-session-token"));
+    }
+
+    #[test]
+    fn team_server_list_scope_superadmin_crosses_companies_only_for_its_current_account() {
+        let mut state = signed_in();
+        state.user.as_mut().unwrap()["isSuperAdmin"] = json!(true);
+        state.user.as_mut().unwrap()["company"] = Value::Null;
+        let rows = vec![fixture().0, display_server("company-a", "member-1", "A公司", false),
+            display_server("company-b", "member-1", "B公司", true), display_server("old-superadmin", "previous-account", "A公司", true)];
+        let visible = servers_in_scope(rows, state.server_list_scope().as_ref());
+        assert_eq!(visible.iter().map(|server| server.id.as_str()).collect::<Vec<_>>(), vec!["connection-a", "company-a", "company-b"]);
+    }
+
+    #[test]
+    fn team_server_list_scope_hides_managed_entries_during_login_switch_and_logout_then_recovers() {
+        let mut state = signed_in();
+        state.user.as_mut().unwrap()["company"] = json!("A公司");
+        let rows = vec![fixture().0, display_server("company-a", "member-1", "A公司", true), display_server("company-b", "member-1", "B公司", false)];
+        let ids = |value: &Stored| servers_in_scope(rows.clone(), value.server_list_scope().as_ref()).into_iter().map(|server| server.id).collect::<Vec<_>>();
+        assert_eq!(ids(&state), vec!["connection-a", "company-a"]);
+        state.begin_login();
+        assert_eq!(ids(&state), vec!["connection-a"]);
+        state.login_pending = false; state.scope_pending = true;
+        assert_eq!(ids(&state), vec!["connection-a"]);
+        state.scope_pending = false; state.user.as_mut().unwrap()["company"] = json!("B公司");
+        assert_eq!(ids(&state), vec!["connection-a", "company-b"]);
+        state.clear_login();
+        assert_eq!(ids(&state), vec!["connection-a"]);
+        let mut account = user("member-1"); account["company"] = json!("A公司");
+        let generation = state.begin_login();
+        state.finish_login(generation, "synthetic-renewed-token".into(), account, None).unwrap();
+        assert_eq!(ids(&state), vec!["connection-a", "company-a"]);
+    }
+
+    #[test]
+    fn team_server_list_scope_missing_or_inconsistent_local_identity_fails_closed_without_hiding_personal_servers() {
+        let rows = vec![fixture().0, display_server("current", "member-1", "A公司", false)];
+        assert_eq!(servers_in_scope(rows.clone(), None).len(), 1, "unavailable keyring projection retains personal connections");
+        for invalid in ["unassigned", "wrong-account", "missing-user", "missing-token", "legacy-company", "invalid-role", "forged-superadmin"] {
+            let mut state = signed_in(); state.user.as_mut().unwrap()["company"] = json!("A公司");
+            match invalid {
+                "unassigned" => state.user.as_mut().unwrap()["company"] = Value::Null,
+                "wrong-account" => state.account_id = Some("another-account".into()),
+                "missing-user" => state.user = None,
+                "missing-token" => state.token = None,
+                "legacy-company" => { state.user.as_mut().unwrap().as_object_mut().unwrap().remove("company"); },
+                "invalid-role" => state.user.as_mut().unwrap()["role"] = json!("guest"),
+                _ => { state.user.as_mut().unwrap()["role"] = json!("member"); state.user.as_mut().unwrap()["isSuperAdmin"] = json!(true); },
+            }
+            assert!(state.server_list_scope().is_none(), "{invalid}");
+            assert_eq!(servers_in_scope(rows.clone(), state.server_list_scope().as_ref()).len(), 1, "{invalid}");
+        }
+        let directory = tempfile::tempdir().unwrap();
+        let manager = TeamManager::new(directory.path()).unwrap();
+        let mut state = signed_in(); state.user.as_mut().unwrap()["company"] = json!("A公司");
+        *manager.value.lock().unwrap() = Some(state);
+        assert_eq!(manager.visible_servers(rows).len(), 2, "a later valid local snapshot restores display without networking");
+    }
+
+    #[test]
+    fn team_server_list_scope_notifies_once_after_a_locked_keyring_recovers() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut manager = TeamManager::new(directory.path()).unwrap();
+        manager.entry = keyring::Entry::new_with_credential(Box::new(keyring::mock::MockCredential::default()));
+        let mut state = signed_in(); state.user.as_mut().unwrap()["company"] = json!("A公司");
+        let serialized = serde_json::to_string(&state).unwrap();
+        let mut persisted: Stored = serde_json::from_str(&serialized).unwrap();
+        persisted.migrate_account();
+        manager.entry.set_password(&serialized).unwrap();
+        let mock: &keyring::mock::MockCredential = manager.entry.get_credential().downcast_ref().unwrap();
+        mock.set_error(keyring::Error::Invalid("synthetic-keyring".into(), "locked".into()));
+        let notifications = std::cell::Cell::new(0);
+        assert!(manager.read_with_scope_notification(|| notifications.set(notifications.get() + 1)).is_err());
+        assert!(manager.value.lock().unwrap().is_none());
+        assert_eq!(notifications.get(), 0);
+
+        let loaded = manager.read_with_scope_notification(|| {
+            notifications.set(notifications.get() + 1);
+            assert!(manager.value.try_lock().is_ok(), "notify only after releasing the state lock");
+            let reread = manager.read_with_scope_notification(|| panic!("cached UI re-read must not notify again")).unwrap();
+            assert!(reread.server_list_scope().is_some());
+        }).unwrap();
+        assert_eq!(loaded.generation, persisted.generation, "display recovery must not change the loaded authorization generation");
+        assert_eq!(notifications.get(), 1);
+        let rows = vec![fixture().0, display_server("current", "member-1", "A公司", false)];
+        assert_eq!(manager.visible_servers(rows).len(), 2);
+        manager.read_with_scope_notification(|| notifications.set(notifications.get() + 1)).unwrap();
+        assert_eq!(notifications.get(), 1);
+    }
+
+    #[test]
+    fn team_server_list_scope_empty_or_invalid_keyring_identity_does_not_emit_a_scope_change() {
+        let mut invalid = signed_in(); invalid.account_id = Some("different-account".into());
+        for state in [None, Some(Stored::default()), Some(invalid)] {
+            let directory = tempfile::tempdir().unwrap();
+            let mut manager = TeamManager::new(directory.path()).unwrap();
+            manager.entry = keyring::Entry::new_with_credential(Box::new(keyring::mock::MockCredential::default()));
+            if let Some(state) = state { manager.entry.set_password(&serde_json::to_string(&state).unwrap()).unwrap(); }
+            for _ in 0..2 {
+                let value = manager.read_with_scope_notification(|| panic!("no display scope was restored")).unwrap();
+                assert!(value.server_list_scope().is_none());
+            }
+        }
     }
 
     #[test]

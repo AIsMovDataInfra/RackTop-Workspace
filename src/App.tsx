@@ -284,6 +284,8 @@ function evaluateAlerts(server: Server | undefined, snapshot: Snapshot, previous
 
 function App() {
   const [servers, setServers] = useState<Server[]>([])
+  const serversRef = useRef<Server[]>([])
+  serversRef.current = servers
   const [snapshots, setSnapshots] = useState<Record<string, Snapshot>>({})
   const [history, setHistory] = useState<Record<string, HistoryPoint[]>>({})
   const [idleHistory, setIdleHistory] = useState<Record<string, HistoryPoint[]>>({})
@@ -382,6 +384,8 @@ function App() {
   const managedGenerations = useRef(new Map<string, number>())
   const managedAvailability = useRef(new Map<string, boolean>())
   const managedDirectoryRevision = useRef(0)
+  const managedScopeRevision = useRef(0)
+  const managedListenerReady = useRef<Promise<void> | null>(null)
   const sharedGpuWatchesRef = useRef<SharedGpuWatchMap>(new Map())
   const expectedProcessExitsRef = useRef(new Set<string>())
   const ignoredMineProcessWarningsRef = useRef<Set<string>>((() => {
@@ -427,7 +431,14 @@ function App() {
 
   const selectedServer = servers.find((server) => server.id === selectedServerId)
   const selectedSnapshot = selectedServerId ? snapshots[selectedServerId] : undefined
-  const remoteHistoryServerKey = servers.filter((server) => server.remoteHistoryEnabled).map((server) => server.id).sort().join('\n')
+  const remoteHistoryServerKey = servers.filter((server) => server.remoteHistoryEnabled && server.managed?.available !== false).map((server) => server.id).sort().join('\n')
+
+  useEffect(() => {
+    if (servers.some(server => server.id === selectedServerId) || (!servers.length && selectedServerId === null)) return
+    setSelectedServerId(servers[0]?.id ?? null)
+    setSelectedGpuUuid(null)
+    setSelectedTab('overview')
+  }, [servers, selectedServerId])
 
   useEffect(() => { remoteHistoryServersRef.current = servers }, [servers])
   useEffect(() => { remoteSyncStatusRef.current = remoteSyncStatus }, [remoteSyncStatus])
@@ -538,7 +549,7 @@ function App() {
           const points = await api.getHistory(serverId, from)
           if (!deletedServerIds.current.has(serverId) && stillCurrent()) setHistory((current) => ({ ...current, [serverId]: points }))
         } catch (historyError) {
-          if (!quiet) setToast(`历史数据读取失败：${String(historyError)}`)
+          if (!quiet && stillCurrent()) setToast(`历史数据读取失败：${String(historyError)}`)
         }
       }
     } catch (error) {
@@ -568,10 +579,10 @@ function App() {
           const hostKey = await api.scanHostKey(serverId)
           if (stillCurrent()) setPendingHostKey(hostKey)
         } catch (scanError) {
-          if (!quiet) setToast(String(scanError))
+          if (!quiet && stillCurrent()) setToast(String(scanError))
         }
       }
-      if (!quiet) setToast(message)
+      if (!quiet && stillCurrent()) setToast(message)
     } finally {
       inFlightServers.current.delete(serverId)
       setBusy((current) => {
@@ -594,28 +605,39 @@ function App() {
     setToast(ignored ? '已忽略此服务器的 GPU 异常提醒，可在采集与连接日志中恢复' : '已恢复 GPU 异常提醒')
   }, [])
 
-  const refreshAll = useCallback(async (quiet = false, onSettled?: () => void) => {
-    await Promise.allSettled(servers.map(async (server) => {
+  const refreshAll = useCallback(async (quiet = false, onSettled?: () => void, targets?: Server[]) => {
+    const eligible = targets ?? servers.filter(server => (managedAvailability.current.get(server.id) ?? server.managed?.available) !== false)
+    await Promise.allSettled(eligible.map(async (server) => {
       try { await refreshServer(server.id, quiet) } finally { onSettled?.() }
     }))
   }, [servers, refreshServer])
 
   const runManualRefreshAll = useCallback(async () => {
     if (manualRefreshingAll) return
-    if (manualRefreshFeedbackTimerRef.current !== null) window.clearTimeout(manualRefreshFeedbackTimerRef.current)
-    setManualRefreshingAll(true)
-    setManualRefreshProgress({ completed: 0, total: servers.length })
-    try {
-      await refreshAll(false, () => setManualRefreshProgress((current) => current ? { ...current, completed: current.completed + 1 } : current))
-      setManualRefreshRevision((value) => value + 1)
-    } finally {
-      setManualRefreshingAll(false)
-      manualRefreshFeedbackTimerRef.current = window.setTimeout(() => {
-        setManualRefreshProgress(null)
-        manualRefreshFeedbackTimerRef.current = null
-      }, 900)
+    const targets = servers.filter(server => (managedAvailability.current.get(server.id) ?? server.managed?.available) !== false)
+    if (!targets.length) {
+      setToast('当前没有可重新连接的服务器，请检查团队登录或本机 SSH 认证。')
+      return
     }
-  }, [manualRefreshingAll, refreshAll, servers.length])
+    if (manualRefreshFeedbackTimerRef.current !== null) window.clearTimeout(manualRefreshFeedbackTimerRef.current)
+    const directoryRevision = managedScopeRevision.current
+    setManualRefreshingAll(true)
+    setManualRefreshProgress({ completed: 0, total: targets.length })
+    try {
+      await refreshAll(false, () => {
+        if (directoryRevision === managedScopeRevision.current) setManualRefreshProgress((current) => current ? { ...current, completed: current.completed + 1 } : current)
+      }, targets)
+      if (directoryRevision === managedScopeRevision.current) setManualRefreshRevision((value) => value + 1)
+    } finally {
+      if (directoryRevision === managedScopeRevision.current) {
+        setManualRefreshingAll(false)
+        manualRefreshFeedbackTimerRef.current = window.setTimeout(() => {
+          setManualRefreshProgress(null)
+          manualRefreshFeedbackTimerRef.current = null
+        }, 900)
+      }
+    }
+  }, [manualRefreshingAll, refreshAll, servers])
 
   useEffect(() => () => {
     if (manualRefreshFeedbackTimerRef.current !== null) window.clearTimeout(manualRefreshFeedbackTimerRef.current)
@@ -633,9 +655,70 @@ function App() {
   }, [refreshServer])
 
   useEffect(() => {
+    if (!api.isDesktop) return
     let active = true
-    const directoryRevision = managedDirectoryRevision.current
-    void Promise.all([api.listServers(), api.listLatestSnapshots(), api.getSettings(), api.listIdleReservations(), api.listProjects(), api.listServerNotificationSettings()]).then(async ([loadedServers, loadedSnapshots, loadedSettings, loadedReservations, loadedProjects, loadedNotificationSettings]) => {
+    const unlisten = listen<{ affectedIds: string[]; scopeChanged?: boolean }>('managed-servers-changed', async ({ payload }) => {
+      if (!active) return
+      const changed = new Set(payload.affectedIds)
+      const scopeChanged = payload.scopeChanged === true
+      if (scopeChanged) managedScopeRevision.current += 1
+      const revision = ++managedDirectoryRevision.current
+      // Only an explicit identity change invalidates every prior managed connection.
+      // Suspend all prior managed work before the new scoped list arrives.
+      if (scopeChanged) for (const server of serversRef.current) if (server.managed) changed.add(server.id)
+      const invalidate = (ids: Set<string>) => {
+        for (const id of ids) {
+          managedGenerations.current.set(id, (managedGenerations.current.get(id) ?? 0) + 1)
+          managedAvailability.current.set(id, false)
+          delete nextRetryAt.current[id]
+          delete failureCounts.current[id]
+        }
+        const retain = <T,>(values: Record<string, T>) => Object.fromEntries(Object.entries(values).filter(([id]) => !ids.has(id)))
+        snapshotsRef.current = retain(snapshotsRef.current)
+        setSnapshots(snapshotsRef.current)
+        setHistory(retain)
+        setIdleHistory(retain)
+        setMineProcessWarnings(current => current.filter(warning => !ids.has(warning.serverId)))
+        setQuickTerminal(current => current && ids.has(current.server.id) ? null : current)
+        setPendingHostKey(current => current && ids.has(current.serverId) ? null : current)
+        setProcessPendingTermination(current => current && ids.has(current.serverId) ? null : current)
+        if (editingServerIdRef.current && ids.has(editingServerIdRef.current)) {
+          setShowServerForm(false)
+          setEditingServer(null)
+          setToast('团队服务器资源已变化，正在读取最新连接与认证状态。')
+        }
+      }
+      invalidate(changed)
+      if (scopeChanged) {
+        if (manualRefreshFeedbackTimerRef.current !== null) window.clearTimeout(manualRefreshFeedbackTimerRef.current)
+        manualRefreshFeedbackTimerRef.current = null
+        setManualRefreshingAll(false)
+        setManualRefreshProgress(null)
+      }
+      setServers(current => scopeChanged ? current.filter(server => !server.managed) : current.map(server => changed.has(server.id) && server.managed ? { ...server, status: 'offline', managed: { ...server.managed, available: false } } : server))
+      try {
+        const latest = await api.listServers()
+        if (!active || revision !== managedDirectoryRevision.current) return
+        const nextServers = [...serversRef.current.filter(server => !server.managed), ...latest.filter(server => server.managed)]
+          .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
+        const nextManaged = new Map(latest.filter(server => server.managed).map(server => [server.id, server]))
+        invalidate(new Set(serversRef.current.filter(server => server.managed && !changed.has(server.id) && !nextManaged.get(server.id)?.managed?.available).map(server => server.id)))
+        for (const server of latest) if (server.managed) managedAvailability.current.set(server.id, server.managed.available)
+        serversRef.current = nextServers
+        setServers(nextServers)
+      } catch (reason) { if (active) setToast('服务器资源已变化，读取本机状态失败：' + String(reason)) }
+    })
+    managedListenerReady.current = unlisten.then(() => {})
+    return () => { active = false; void unlisten.then(dispose => dispose(), () => {}) }
+  }, [])
+
+  useEffect(() => {
+    let active = true
+    void (async () => {
+      await managedListenerReady.current
+      if (!active) return
+      const directoryRevision = managedDirectoryRevision.current
+      let [loadedServers, loadedSnapshots, loadedSettings, loadedReservations, loadedProjects, loadedNotificationSettings] = await Promise.all([api.listServers(), api.listLatestSnapshots(), api.getSettings(), api.listIdleReservations(), api.listProjects(), api.listServerNotificationSettings()])
       let readRevision = directoryRevision
       while (active && readRevision !== managedDirectoryRevision.current) {
         readRevision = managedDirectoryRevision.current
@@ -645,7 +728,7 @@ function App() {
       for (const server of loadedServers) if (server.managed) managedAvailability.current.set(server.id, server.managed.available)
       const restoredSnapshots = Object.fromEntries(loadedSnapshots.filter(snapshot => {
         const server = loadedServers.find(item => item.id === snapshot.serverId)
-        return !server?.managed || (server.managed.available && directoryRevision === managedDirectoryRevision.current)
+        return !!server && (!server.managed || (server.managed.available && directoryRevision === managedDirectoryRevision.current))
       }).map((snapshot) => [snapshot.serverId, snapshot]))
       snapshotsRef.current = restoredSnapshots
       setSnapshots(restoredSnapshots)
@@ -658,8 +741,7 @@ function App() {
       notificationSettingsRef.current = restoredNotifications
       savedNotificationSettingsRef.current = restoredNotifications
       setServerNotificationSettings(restoredNotifications)
-      setSelectedServerId((current) => current ?? loadedServers[0]?.id ?? null)
-    }).catch(reason => { if (active) setToast(`读取本机资料失败：${String(reason)}`) })
+    })().catch(reason => { if (active) setToast(`读取本机资料失败：${String(reason)}`) })
     return () => { active = false }
   }, [])
 
@@ -853,7 +935,7 @@ function App() {
     let successTimer: number | null = null
     const syncAllRemoteHistory = async (initial: boolean) => remoteSyncCoordinator.current.run(async () => {
       if (cancelled) return
-      const allEnabledServers = remoteHistoryServersRef.current.filter((server) => server.remoteHistoryEnabled)
+      const allEnabledServers = remoteHistoryServersRef.current.filter((server) => server.remoteHistoryEnabled && (managedAvailability.current.get(server.id) ?? server.managed?.available) !== false)
       const nowSeconds = Math.floor(Date.now() / 1000)
       const freshServerCount = initial ? allEnabledServers.filter((server) => isRemoteSyncFresh(server, nowSeconds)).length : 0
       const enabledServers = allEnabledServers.filter((server) => !shouldDeferConnection(nextRetryAt.current[server.id], Date.now()) && (!initial || !isRemoteSyncFresh(server, nowSeconds)) && !remoteSyncInFlight.current.has(server.id))
@@ -874,20 +956,25 @@ function App() {
       }
       await Promise.all(enabledServers.map(async (server) => {
         if (remoteSyncInFlight.current.has(server.id)) return
+        const generation = managedGenerations.current.get(server.id) ?? 0
+        const stillCurrent = () => generation === (managedGenerations.current.get(server.id) ?? 0) && (managedAvailability.current.get(server.id) ?? server.managed?.available) !== false
         remoteSyncInFlight.current.add(server.id)
         try {
-          if (shouldDeferConnection(nextRetryAt.current[server.id], Date.now())) return
+          if (!stillCurrent() || shouldDeferConnection(nextRetryAt.current[server.id], Date.now())) return
           await api.configureRemoteHistory(server.id)
-          if (shouldDeferConnection(nextRetryAt.current[server.id], Date.now())) return
+          if (!stillCurrent() || shouldDeferConnection(nextRetryAt.current[server.id], Date.now())) return
           const result = await api.syncRemoteHistory(server.id)
+          if (!stillCurrent()) return
           remoteSyncRecoveryQueued.current.delete(server.id)
           importedCount += result.importedCount
           if (!cancelled && result.latestTimestamp) {
             setServers((current) => current.map((item) => item.id === server.id && item.remoteHistoryLastSyncAt !== result.latestTimestamp ? { ...item, remoteHistoryLastSyncAt: result.latestTimestamp } : item))
           }
         } catch {
-          nextRetryAt.current[server.id] = Date.now() + CONNECTION_RETRY_DELAY_MS
-          failedServerIds.push(server.id)
+          if (stillCurrent()) {
+            nextRetryAt.current[server.id] = Date.now() + CONNECTION_RETRY_DELAY_MS
+            failedServerIds.push(server.id)
+          }
         } finally {
           completed += 1
           remoteSyncInFlight.current.delete(server.id)
@@ -944,39 +1031,7 @@ function App() {
     }
   }, [runManualRefreshAll])
 
-  useEffect(() => {
-    if (!api.isDesktop) return
-    let active = true
-    const unlisten = listen<{ affectedIds: string[] }>('managed-servers-changed', async ({ payload }) => {
-      if (!active) return
-      const changed = new Set(payload.affectedIds)
-      const revision = ++managedDirectoryRevision.current
-      for (const id of changed) {
-        managedGenerations.current.set(id, (managedGenerations.current.get(id) ?? 0) + 1)
-        managedAvailability.current.set(id, false)
-        delete nextRetryAt.current[id]
-        delete failureCounts.current[id]
-      }
-      snapshotsRef.current = Object.fromEntries(Object.entries(snapshotsRef.current).filter(([id]) => !changed.has(id)))
-      setSnapshots(snapshotsRef.current)
-      setServers(current => current.map(server => changed.has(server.id) && server.managed ? { ...server, status: 'offline', managed: { ...server.managed, available: false } } : server))
-      setQuickTerminal(current => current && changed.has(current.server.id) ? null : current)
-      if (editingServerIdRef.current && changed.has(editingServerIdRef.current)) {
-        setShowServerForm(false)
-        setEditingServer(null)
-        setToast('团队服务器资源已变化，正在读取最新连接与认证状态。')
-      }
-      try {
-        const latest = await api.listServers()
-        if (!active || revision !== managedDirectoryRevision.current) return
-        for (const server of latest) if (server.managed) managedAvailability.current.set(server.id, server.managed.available)
-        setServers(current => [...current.filter(server => !server.managed), ...latest.filter(server => server.managed)]
-          .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0)))
-        setSelectedServerId(current => current ?? latest[0]?.id ?? null)
-      } catch (reason) { if (active) setToast('服务器资源已变化，读取本机状态失败：' + String(reason)) }
-    })
-    return () => { active = false; void unlisten.then(dispose => dispose()) }
-  }, [])
+
 
   useEffect(() => {
     const unlisten = api.onNotificationAction((extra) => {
@@ -1061,17 +1116,18 @@ function App() {
     }
     let cancelled = false
     const loadIdleHistory = async () => {
+      const revision = managedDirectoryRevision.current
       const entries = await Promise.all(servers.map(async (server) => {
         const latestTimestamp = snapshotsRef.current[server.id]?.timestamp ?? Math.floor(Date.now() / 1000)
         const from = latestTimestamp - requiredIdleHistoryMinutes * 60 - 120
         return [server.id, await api.getHistory(server.id, from)] as const
       }))
-      if (!cancelled) {
+      if (!cancelled && revision === managedDirectoryRevision.current) {
         setIdleHistory(Object.fromEntries(entries))
         setIdleHistoryLoadedMinutes(requiredIdleHistoryMinutes)
       }
     }
-    void loadIdleHistory().catch((error) => setToast(`空闲历史读取失败：${String(error)}`))
+    void loadIdleHistory().catch((error) => { if (!cancelled) setToast(`空闲历史读取失败：${String(error)}`) })
     const interval = window.setInterval(() => void loadIdleHistory().catch(() => {}), 15_000)
     return () => { cancelled = true; window.clearInterval(interval) }
   }, [idleHistoryServerKey, requiredIdleHistoryMinutes])
@@ -1297,27 +1353,31 @@ function App() {
     setEditingServer(null)
     setToast(saved.managed && !saved.managed.available ? saved.managed.reason || '本机认证已保存，等待团队授权' : '服务器已保存，正在连接…')
     if (saved.managed && !saved.managed.available) return
+    const savedGeneration = managedGenerations.current.get(saved.id) ?? 0
+    const stillCurrent = () => !saved.managed || (savedGeneration === (managedGenerations.current.get(saved.id) ?? 0) && managedAvailability.current.get(saved.id) !== false)
     void (async () => {
       let sync: RemoteHistorySyncResult | null = null
       if (saved.remoteHistoryEnabled) {
         let configurationError: unknown = null
         for (const delay of [0, 900, 1800]) {
           if (delay) await new Promise((resolve) => window.setTimeout(resolve, delay))
+          if (!stillCurrent()) return
           try {
             await api.configureRemoteHistory(saved.id)
+            if (!stillCurrent()) return
             configurationError = null
             break
-          } catch (reason) { configurationError = reason }
+          } catch (reason) { if (!stillCurrent()) return; configurationError = reason }
         }
         if (configurationError) setToast(`服务器已保存；远端历史将在连接稳定后重试：${String(configurationError)}`)
         else {
           try { sync = await api.syncRemoteHistory(saved.id) }
-          catch (reason) { setToast(`服务器已保存，远端历史首次同步失败：${String(reason)}`) }
+          catch (reason) { if (stillCurrent()) setToast(`服务器已保存，远端历史首次同步失败：${String(reason)}`) }
         }
       } else if (previous?.remoteHistoryEnabled) {
-        try { await api.configureRemoteHistory(saved.id) } catch (reason) { setToast(`服务器已保存；停止远端历史失败：${String(reason)}`) }
+        try { await api.configureRemoteHistory(saved.id) } catch (reason) { if (stillCurrent()) setToast(`服务器已保存；停止远端历史失败：${String(reason)}`) }
       }
-      if (sync?.latestTimestamp) setServers((current) => current.map((item) => item.id === saved.id ? { ...item, remoteHistoryLastSyncAt: sync?.latestTimestamp ?? item.remoteHistoryLastSyncAt } : item))
+      if (stillCurrent() && sync?.latestTimestamp) setServers((current) => current.map((item) => item.id === saved.id ? { ...item, remoteHistoryLastSyncAt: sync?.latestTimestamp ?? item.remoteHistoryLastSyncAt } : item))
     })()
     await refreshServer(saved.id)
   }

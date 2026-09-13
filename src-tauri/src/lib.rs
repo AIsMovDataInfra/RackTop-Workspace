@@ -205,8 +205,8 @@ fn get_interaction_log_summary(database: State<'_, Database>, logs: State<'_, In
 }
 
 #[tauri::command]
-fn list_servers(database: State<'_, Database>) -> Result<Vec<Server>, String> {
-    database.list_servers()
+fn list_servers(database: State<'_, Database>, team: State<'_, TeamState>) -> Result<Vec<Server>, String> {
+    Ok(team.0.visible_servers(database.list_servers()?))
 }
 
 #[tauri::command]
